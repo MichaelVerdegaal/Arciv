@@ -1,7 +1,7 @@
 [project]
 name = "clotho"
 version = "0.1.0"
-description = "Add your description here"
+description = "Your personal knowledge graph with HelixDB and Obsidian notes"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
