@@ -8,6 +8,7 @@ dependencies = [
     "arrow>=1.4.0",
     "helix-py>=0.2.31",
     "loguru>=0.7.3",
+    "spacy>=3.8.9",
 ]
 
 [dependency-groups]
