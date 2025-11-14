@@ -1,6 +1,8 @@
 # Personal Knowledge Graph
 
-A graph-based system for querying daily work notes using HelixDB, Python, and GraphRAG techniques.
+Clotho is your personal knowledge graph framework that helps you organize, retrieve, and leverage insights from your Obsidian markdown notes using natural language queries.
+
+In ancient greek mythology, Clotho is one of the three Fates responsible for spinning the thread of life. And what is a knowledge graph, if not a web of interconnected threads of knowledge?
 
 ## What It Does
 

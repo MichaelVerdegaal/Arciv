@@ -24,7 +24,7 @@ Build a queryable memory system from daily work notes that surfaces relevant con
 
 **Tasks**:
 - Set up HelixDB locally with initial schema (DailyNote, Project, TechnicalObstacle, Resource, Technology, Person)
-- Build markdown parser handling Obsidian syntax (frontmatter, [[wiki-links]], #tags, sections)
+- Build markdown parser handling Obsidian syntax
 - Implement basic entity extraction with spaCy (person, project, technology)
 - Ingest first 50 notes and validate with simple queries
 
