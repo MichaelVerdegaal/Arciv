@@ -35,17 +35,50 @@ uv run ruff check .
 
 ## Helix CLI commands
 ```bash
-# Check queries and schema
+# Show help information
+helix --help, -h
+
+# Display the CLI version
+helix --version, -V
+
+# Add a new instance to an existing Helix project.
+helix add 
+
+# Validate project configuration and query syntax.
 helix check
 
-# get helix status
-helix status
+# Compile project queries into executable format
+helix compile
 
-# Push helix image
+# Build and prepare an instance for deployment. 
+# 1. Validates configuration and queries. 
+# 2. Compiles queries. 
+# 3. Generates Docker configuration files. 
+# 4. Prepares the instance workspace
+helix build
+
+# Deploy or update a running instance.
+# 1. Builds the instance if needed.
+# 2. Creates/updates Docker container for local instances.
+# 3. Pushes to cloud provider for remote instances.
+# 4. Starts the instance.
 helix push
 
-# Deploy locally
-helix start <instance-name>
+# Start a stopped instance without rebuilding.
+helix start
+
+# Stop a running instance.
+helix stop
+
+# Show the status of all instances in the project.
+helix status
+
+# Remove unused containers, images, and workspace files.
+helix prune
+
+# Permanently delete an instance and all its data.
+helix delete
+```
 
 ### Key Dependencies
 
