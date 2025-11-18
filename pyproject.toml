@@ -6,8 +6,13 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "arrow>=1.4.0",
+    "chonkie[hub,st]>=1.4.2",
+    "cosmograph>=0.5.3",
     "helix-py>=0.2.31",
+    "hf-xet>=1.2.0",
     "loguru>=0.7.3",
+    "semnet>=0.1.6",
+    "sentence-transformers>=5.1.2",
     "spacy>=3.8.9",
 ]
 
