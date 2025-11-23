@@ -4,6 +4,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from helix.instance import Instance
 from helix.client import Client
+from loguru import logger
 
 
 def get_note_files() -> list[Path]:

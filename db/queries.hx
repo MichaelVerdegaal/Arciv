@@ -1,7 +1,8 @@
-QUERY CreateNote(filename: String, created_at: Date, updated_at: Date) =>
-    note <- AddN<Note>({
+QUERY CreateDocument(filename: String, file_created_at: Date, file_modified_at: Date, content: String) =>
+    document <- AddN<Document>({
         filename: filename,
-        created_at: created_at,
-        updated_at: updated_at
+        file_created_at: file_created_at,
+        file_modified_at: file_modified_at,
+        content: content
     })
-    RETURN note
+    RETURN document
