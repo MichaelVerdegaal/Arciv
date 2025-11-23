@@ -1,62 +1,85 @@
-"""Document processing and chunking for Obsidian notes.
-
-This module provides utilities for:
-- Preprocessing Obsidian markdown notes (removing frontmatter, metadata)
-- Chunking notes using Chonkie's Pipeline API
-- Generating structured chunks suitable for graph construction
-"""
-
+from pathlib import Path
+from datetime import datetime, timezone
 import re
 from collections.abc import Sequence
-from pathlib import Path
 from typing import Any
-
 from chonkie import Pipeline
 from transformers import PreTrainedTokenizerFast
+from warnings import deprecated
 
-from clotho.config import NOTE_PATH
 
-
-def get_note_files() -> list[Path]:
+def get_note_files(note_dir: Path) -> list[Path]:
     """Get all markdown files in the NOTE_PATH directory.
-    
+
     Returns:
         List of paths to markdown files found recursively
     """
-    return list(NOTE_PATH.glob("**/*.md"))
+    return list(note_dir.glob("**/*.md"))
 
 
 def preprocess_note_content(content: str) -> str:
-    """Remove YAML frontmatter and content before first H1 header.
-    
-    Obsidian notes often have YAML frontmatter and metadata at the top.
-    We only want the actual content starting from the first H1 header.
-    
+    """Remove metadata headers and content before first H1 header.
+
+    Handles both traditional YAML frontmatter (---...---) and
+    timestamp/status patterns found in Obsidian daily notes.
+
     Args:
         content: Raw note content with potential frontmatter
-        
+
     Returns:
         Cleaned content starting from first H1 header
-        
-    Example:
-        >>> content = "---\\ndate: 2024-03-15\\n---\\n\\nSome text\\n# Heading\\nContent"
-        >>> preprocess_note_content(content)
-        '# Heading\\nContent'
     """
-    # Remove YAML frontmatter (--- at start, anything until next ---)
+    # Remove traditional YAML frontmatter (--- at start, anything until next ---)
     content = re.sub(r"^---\s*\n.*?\n---\s*\n", "", content, flags=re.DOTALL)
-    
+
+    # Remove timestamp pattern (e.g., "20251121 1011") and Status line
+    # This handles lines like "20241101 1111" followed by "Status: #daily"
+    content = re.sub(
+        r"^\d{8}\s+\d{4}\s*\n\s*Status:\s*#\w+\s*\n", "", content, flags=re.MULTILINE
+    )
+
     # Find first H1 header (# Heading)
     h1_match = re.search(r"^#\s+.+$", content, flags=re.MULTILINE)
-    
+
     if h1_match:
-        # Return content starting from first H1
-        return content[h1_match.start() :]
-    
-    # If no H1 found, return content without frontmatter
+        # Return content starting from first H1, stripped of leading/trailing whitespace
+        return content[h1_match.start() :].strip()
+
+    # If no H1 found, return cleaned content
     return content.strip()
 
 
+def get_note_info(note: Path) -> dict[str, str]:
+    """Returns a dictionary with file metadata for the given note.
+
+    The creation and modification dates are returned as RFC3339 strings.
+
+    Args:
+        - note: Path to the note file
+
+    Returns:
+        - Dictionary with keys: filename, creation_date, modification_date
+    """
+    filename = note.name
+    creation_date = note.stat().st_ctime
+    modification_date = note.stat().st_mtime
+    creation_date_iso = datetime.fromtimestamp(
+        creation_date, tz=timezone.utc
+    ).isoformat()
+    modification_date_iso = datetime.fromtimestamp(
+        modification_date, tz=timezone.utc
+    ).isoformat()
+
+    metadata: dict[str, str] = {
+        "filename": filename,
+        "content": note.read_text(encoding="utf-8"),
+        "creation_date": creation_date_iso,
+        "modification_date": modification_date_iso,
+    }
+    return metadata
+
+
+@deprecated("Going to remove this in favor of Helix's built-in chunking.")
 def chunk_notes(
     note_files: Sequence[Path],
     tokenizer: PreTrainedTokenizerFast,
@@ -66,19 +89,19 @@ def chunk_notes(
     overlap_context_size: int = 32,
 ) -> list[dict[str, Any]]:
     """Chunk markdown files using sophisticated Chonkie Pipeline.
-    
+
     Uses a multi-stage chunking strategy:
     1. Recursive chunking respecting markdown structure (headers, lists, etc.)
     2. Semantic chunking to split by topic coherence
     3. Overlap refinement to preserve context across chunks
-    
+
     Args:
         note_files: List of paths to markdown files
         tokenizer: HuggingFace tokenizer instance for token counting
         initial_chunk_size: Initial chunk size for recursive chunker (respects markdown)
         semantic_chunk_size: Target size for semantic similarity-based splitting
         overlap_context_size: Number of tokens to overlap between chunks
-        
+
     Returns:
         List of dicts with keys:
         - text: Chunk text content
@@ -87,7 +110,7 @@ def chunk_notes(
         - start_index: Start position in preprocessed text
         - end_index: End position in preprocessed text
         - chunk_id: Unique identifier (filename_chunkindex)
-        
+
     Example:
         >>> from transformers import AutoTokenizer
         >>> tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-Embedding-0.6B")
@@ -112,32 +135,34 @@ def chunk_notes(
             context_size=overlap_context_size,
         )
     )
-    
+
     all_chunks: list[dict[str, Any]] = []
-    
+
     for note_file in note_files:
         with open(note_file, encoding="utf-8") as f:
             raw_content = f.read()
-        
+
         # Preprocess to remove frontmatter and metadata
         cleaned_content = preprocess_note_content(raw_content)
-        
+
         if not cleaned_content.strip():
             # Skip empty notes
             continue
-        
+
         # Process with pipeline (single text returns Document, not list)
         doc = pipeline.run(texts=cleaned_content)
-        
+
         # Convert to our chunk format
         for idx, chunk in enumerate(doc.chunks):  # type: ignore[union-attr]
-            all_chunks.append({
-                "text": chunk.text,
-                "source_file": str(note_file),
-                "token_count": chunk.token_count,
-                "start_index": chunk.start_index,
-                "end_index": chunk.end_index,
-                "chunk_id": f"{note_file.stem}_{idx}",
-            })
-    
+            all_chunks.append(
+                {
+                    "text": chunk.text,
+                    "source_file": str(note_file),
+                    "token_count": chunk.token_count,
+                    "start_index": chunk.start_index,
+                    "end_index": chunk.end_index,
+                    "chunk_id": f"{note_file.stem}_{idx}",
+                }
+            )
+
     return all_chunks
