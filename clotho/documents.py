@@ -17,7 +17,7 @@ def get_note_files(note_dir: Path) -> list[Path]:
     return list(note_dir.glob("**/*.md"))
 
 
-def preprocess_note_content(content: str) -> str:
+def process_note_content(content: str) -> str:
     """Remove metadata headers and content before first H1 header.
 
     Handles both traditional YAML frontmatter (---...---) and
@@ -49,7 +49,35 @@ def preprocess_note_content(content: str) -> str:
     return content.strip()
 
 
-def get_note_info(note: Path) -> dict[str, str]:
+def file_created_date(path: Path) -> datetime:
+    """Get the file creation date as a datetime object.
+
+    Args:
+        path: Path to the file
+
+    Returns:
+        Datetime object representing the file creation date
+    """
+    created_date = datetime.fromtimestamp(path.stat().st_ctime, tz=timezone.utc)
+    created_date_iso = created_date.isoformat()
+    return created_date_iso
+
+
+def file_modified_date(path: Path) -> datetime:
+    """Get the file modification date as a datetime object.
+
+    Args:
+        path: Path to the file
+
+    Returns:
+        Datetime object representing the file modification date
+    """
+    modified_date = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    modified_date_iso = modified_date.isoformat()
+    return modified_date_iso
+
+
+def get_note_info(note: Path) -> dict[str, str | datetime]:
     """Returns a dictionary with file metadata for the given note.
 
     The creation and modification dates are returned as RFC3339 strings.
@@ -61,20 +89,16 @@ def get_note_info(note: Path) -> dict[str, str]:
         - Dictionary with keys: filename, creation_date, modification_date
     """
     filename = note.name
-    creation_date = note.stat().st_ctime
-    modification_date = note.stat().st_mtime
-    creation_date_iso = datetime.fromtimestamp(
-        creation_date, tz=timezone.utc
-    ).isoformat()
-    modification_date_iso = datetime.fromtimestamp(
-        modification_date, tz=timezone.utc
-    ).isoformat()
+    creation_date = file_created_date(note)
+    modification_date = file_modified_date(note)
+    note_content = note.read_text(encoding="utf-8")
+    note_content_processed = process_note_content(note_content)
 
-    metadata: dict[str, str] = {
+    metadata = {
         "filename": filename,
-        "content": note.read_text(encoding="utf-8"),
-        "creation_date": creation_date_iso,
-        "modification_date": modification_date_iso,
+        "content": note_content_processed,
+        "creation_date": creation_date,
+        "modification_date": modification_date,
     }
     return metadata
 
@@ -143,7 +167,7 @@ def chunk_notes(
             raw_content = f.read()
 
         # Preprocess to remove frontmatter and metadata
-        cleaned_content = preprocess_note_content(raw_content)
+        cleaned_content = process_note_content(raw_content)
 
         if not cleaned_content.strip():
             # Skip empty notes
