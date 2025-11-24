@@ -1,20 +1,21 @@
 from clotho.config import NOTE_PATH
 from loguru import logger
 from clotho.documents import get_note_info, get_note_files
+from helix import Client
+
+
+CATEGORY = "DAILY"
 
 
 if __name__ == "__main__":
-    # Create and configure temporary HelixDB instance
-    # helix_instance = Instance("dev", 6969, verbose=True)
+    # Connect to Helix DB instance
+    try:
+        db = Client(local=True, verbose=True)
+    except Exception as e:
+        logger.exception(f"Error connecting to HelixDB instance: {e}")
 
-    # try:
-    #     logger.info(f"Instance status: {helix_instance.status()}")
-
-    #     # Connect to instance
-    #     db = Client(local=True, verbose=True)
-
-    # except Exception as e:
-    #     logger.exception(f"Error connecting to HelixDB instance: {e}")
+    # create category if it doesn't exist
+    db.query("create_category", {"name": CATEGORY})
 
     # Load notes
     notes = get_note_files(NOTE_PATH)
@@ -24,12 +25,15 @@ if __name__ == "__main__":
     notes_processed = [get_note_info(note) for note in notes]
     logger.info(f"Retrieved metadata for {len(notes_processed)} notes...")
 
-    for metadata in notes_processed[:5]:  # Inspect first 5 notes
-        logger.info(
-            f"note: {metadata['filename']}, created_at={metadata['creation_date']}, updated_at={metadata['modification_date']}",
+    for note in notes_processed:  # Add notes to Helix
+        logger.info(f"Adding note: {note['filename']}")
+        document_node = db.query(
+            "create_document",
+            {
+                "category": CATEGORY,
+                "filename": note['filename'],
+                "file_created_at": note['creation_date'],
+                "file_modified_at": note['modification_date'],
+                "content": note['content']
+            }
         )
-
-        new_content_test = f"---\nfilename: {metadata['filename']}\ncreated_at: {metadata['creation_date']}\nupdated_at: {metadata['modification_date']}\n---\n\n{metadata['content']}\n\n\n"
-        # dump this into a text file for inspection (first 5 files only), append mode
-        with open("test.txt", "a", encoding="utf-8") as f:
-            f.write(new_content_test)
