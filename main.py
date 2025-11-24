@@ -15,7 +15,8 @@ if __name__ == "__main__":
         logger.exception(f"Error connecting to HelixDB instance: {e}")
 
     # create category if it doesn't exist
-    db.query("createCategory", {"name": CATEGORY})
+    category_node = db.query("createCategory", {"name": CATEGORY})
+    category_id = category_node["id"]
 
     # Load notes
     notes = get_note_files(NOTE_PATH)
@@ -37,3 +38,14 @@ if __name__ == "__main__":
                 "content": note['content']
             }
         )
+        
+        # Link document to category
+        document_id = document_node["id"]
+        db.query(
+            "linkDocumentToCategory",
+            {
+                "document_id": document_id,
+                "category_id": category_id
+            }
+        )
+        logger.info(f"Linked document {note['filename']} to category {CATEGORY}")
