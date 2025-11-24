@@ -15,7 +15,7 @@ if __name__ == "__main__":
         logger.exception(f"Error connecting to HelixDB instance: {e}")
 
     # create category if it doesn't exist
-    db.query("create_category", {"name": CATEGORY})
+    db.query("createCategory", {"name": CATEGORY})
 
     # Load notes
     notes = get_note_files(NOTE_PATH)
@@ -28,7 +28,7 @@ if __name__ == "__main__":
     for note in notes_processed:  # Add notes to Helix
         logger.info(f"Adding note: {note['filename']}")
         document_node = db.query(
-            "create_document",
+            "createDocument",
             {
                 "category": CATEGORY,
                 "filename": note['filename'],

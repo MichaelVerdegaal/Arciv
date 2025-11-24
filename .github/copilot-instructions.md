@@ -110,14 +110,20 @@ E::MENTIONED_IN {
 ```
 
 ### Queries (queries.hx)
+**Naming conventions:**
+- **create** or **link** - Creating/linking nodes and edges
+- **get** - Searching/retrieving nodes and edges
+- **update** - Updating nodes and edges
+- **delete** - Deleting nodes and edges
+
 ```rust
-QUERY add_note(date: Date, title: String, vector: [F64]) =>
+QUERY createNote(date: Date, title: String, vector: [F64]) =>
     note <- AddN<DailyNote>({date: date, title: title})
     embedding <- AddV<NoteEmbedding>(vector)
     edge <- AddE<HAS_EMBEDDING>::From(note)::To(embedding)
     RETURN note
 
-QUERY search_similar_notes(query_vector: [F64], k: I64) =>
+QUERY getSimilarNotes(query_vector: [F64], k: I64) =>
     embeddings <- SearchV<NoteEmbedding>(query_vector, k)
     notes <- embeddings::In<HAS_EMBEDDING>
     RETURN notes
