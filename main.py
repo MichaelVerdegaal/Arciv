@@ -16,7 +16,7 @@ if __name__ == "__main__":
 
     # create category if it doesn't exist
     category_node = db.query("createCategory", {"name": CATEGORY})
-    category_id = category_node["id"]
+    category_id = category_node[0]["category"]["id"]
 
     # Load notes
     notes = get_note_files(NOTE_PATH)
@@ -38,9 +38,9 @@ if __name__ == "__main__":
                 "content": note['content']
             }
         )
-        
+        document_id = document_node[0]["document"]["id"]
+
         # Link document to category
-        document_id = document_node["id"]
         db.query(
             "linkDocumentToCategory",
             {
