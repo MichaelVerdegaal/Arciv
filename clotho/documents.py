@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 from datetime import datetime, timezone
 import re
@@ -6,6 +7,16 @@ from typing import Any
 from chonkie import Pipeline
 from transformers import PreTrainedTokenizerFast
 from warnings import deprecated
+
+
+@dataclass
+class NoteInfo:
+    """Metadata and content for a single note file."""
+
+    filename: str
+    content: str
+    creation_date: str
+    modification_date: str
 
 
 def get_note_files(note_dir: Path) -> list[Path]:
@@ -49,44 +60,44 @@ def process_note_content(content: str) -> str:
     return content.strip()
 
 
-def file_created_date(path: Path) -> datetime:
-    """Get the file creation date as a datetime object.
+def file_created_date(path: Path) -> str:
+    """Get the file creation date as an ISO format string.
 
     Args:
         path: Path to the file
 
     Returns:
-        Datetime object representing the file creation date
+        ISO format string representing the file creation date
     """
     created_date = datetime.fromtimestamp(path.stat().st_ctime, tz=timezone.utc)
     created_date_iso = created_date.isoformat()
     return created_date_iso
 
 
-def file_modified_date(path: Path) -> datetime:
-    """Get the file modification date as a datetime object.
+def file_modified_date(path: Path) -> str:
+    """Get the file modification date as an ISO format string.
 
     Args:
         path: Path to the file
 
     Returns:
-        Datetime object representing the file modification date
+        ISO format string representing the file modification date
     """
     modified_date = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
     modified_date_iso = modified_date.isoformat()
     return modified_date_iso
 
 
-def get_note_info(note: Path) -> dict[str, str | datetime]:
-    """Returns a dictionary with file metadata for the given note.
+def get_note_info(note: Path) -> NoteInfo:
+    """Returns metadata and content for the given note.
 
     The creation and modification dates are returned as RFC3339 strings.
 
     Args:
-        - note: Path to the note file
+        note: Path to the note file
 
     Returns:
-        - Dictionary with keys: filename, creation_date, modification_date
+        NoteInfo dataclass with filename, content, and dates
     """
     filename = note.name
     creation_date = file_created_date(note)
@@ -94,13 +105,12 @@ def get_note_info(note: Path) -> dict[str, str | datetime]:
     note_content = note.read_text(encoding="utf-8")
     note_content_processed = process_note_content(note_content)
 
-    metadata = {
-        "filename": filename,
-        "content": note_content_processed,
-        "creation_date": creation_date,
-        "modification_date": modification_date,
-    }
-    return metadata
+    return NoteInfo(
+        filename=filename,
+        content=note_content_processed,
+        creation_date=creation_date,
+        modification_date=modification_date,
+    )
 
 
 @deprecated("Going to remove this in favor of Helix's built-in chunking.")
