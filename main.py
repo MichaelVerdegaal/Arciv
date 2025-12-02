@@ -1,5 +1,4 @@
-from clotho.config import NOTE_PATH
-from loguru import logger
+from clotho.config import NOTE_PATH, logger
 from clotho.documents import get_note_info, get_note_files, NoteInfo
 from clotho.scripts.insert_notes import insert_notes
 from helix import Client
