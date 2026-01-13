@@ -12,10 +12,10 @@ from clotho.notes import (
 )
 from clotho.scrape import batch_fetch_html, html_to_markdown, normalize_url
 from clotho.topic import TopicExtractor
-from config import CLEANED_DOCS_DIR, CONVERTED_DOCS_DIR, NOTE_PATH
+from config import CLEANED_DOCS_DIR, CONVERTED_DOCS_DIR, NOTES_PATH
 
 # Directory for generated URL notes (sibling to the notes folder)
-EXTRACTED_URLS_DIR = NOTE_PATH.parent / "extracted-urls"
+EXTRACTED_URLS_DIR = NOTES_PATH.parent / "extracted-urls"
 NOTE_PATH = Path("C:/Users/Michael.Verdegaal/Documents/DevVault/Test note.md")
 
 
@@ -23,7 +23,7 @@ def process_single_note() -> None:
     """Process a single Obsidian note: extract links, fetch content, and create URL notes."""
 
     # Load the note
-    note = Note.from_path(NOTE_PATH)
+    note = Note._validate_path()
     logger.info(f"Processing note: {note.filename}")
     logger.debug(f"Note info: {note}")
 
@@ -105,14 +105,14 @@ def process_single_note() -> None:
 
     # Update source note with backlinks to all processed URL notes
     if url_note_filenames:
-        update_source_note_with_backlinks(NOTE_PATH, url_note_filenames)
+        update_source_note_with_backlinks(NOTES_PATH, url_note_filenames)
         logger.info(
             f"Updated source note {note.filename} with {len(url_note_filenames)} backlinks"
         )
 
     # Add sections with file paths for scraped, converted, and cleaned files
     if scraped_paths or converted_paths or cleaned_paths:
-        with open(NOTE_PATH, "a", encoding="utf-8") as f:
+        with open(NOTES_PATH, "a", encoding="utf-8") as f:
             f.write("\n\n---\n\n")
 
             if scraped_paths:

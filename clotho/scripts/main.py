@@ -10,22 +10,22 @@ from clotho.notes import (
 )
 from clotho.scrape import batch_fetch_html, html_to_markdown, normalize_url
 from clotho.topic import TopicExtractor
-from config import CLEANED_DOCS_DIR, CONVERTED_DOCS_DIR, NOTE_PATH
+from config import CLEANED_DOCS_DIR, CONVERTED_DOCS_DIR, NOTES_PATH
 
 CATEGORY = "DAILY"
 NOTE_SELECTION = ["2025-12-09", "2025-12-22"]
 
 # Directory for generated URL notes (sibling to the notes folder)
-EXTRACTED_URLS_DIR = NOTE_PATH.parent / "extracted-urls"
+EXTRACTED_URLS_DIR = NOTES_PATH.parent / "extracted-urls"
 
 
 if __name__ == "__main__":
     # Load notes
-    note_files = Note.get_note_files(NOTE_PATH)
+    note_files = Note.get_note_files(NOTES_PATH)
     logger.info(f"Retrieved {len(note_files)} notes...")
 
     # Get metadata for each note
-    notes_processed: list[Note] = [Note.from_path(note) for note in note_files]
+    notes_processed: list[Note] = [Note._validate_path() for note in note_files]
     logger.info(f"Retrieved metadata for {len(notes_processed)} notes...")
 
     # Filter to notes in selection
@@ -99,7 +99,7 @@ if __name__ == "__main__":
 
         # Update source note with backlinks to all processed URL notes
         if url_note_filenames:
-            source_note_path = NOTE_PATH / f"{note_selection.filename}.md"
+            source_note_path = NOTES_PATH / f"{note_selection.filename}.md"
             update_source_note_with_backlinks(source_note_path, url_note_filenames)
             logger.info(
                 f"Updated source note {note_selection.filename} with {len(url_note_filenames)} backlinks"
