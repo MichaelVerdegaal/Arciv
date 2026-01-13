@@ -1,4 +1,3 @@
-from clotho.notes.note import Note
 from clotho.notes.obsidian_note import ObsidanNote
 
 from config import NOTES_PATH
@@ -13,9 +12,8 @@ note_files: list[Path] = ObsidanNote.get_note_files(NOTES_PATH)
 logger.info(f"Found {len(note_files)} notes in NOTES_PATH")
 
 # Get test note
-test_note: Note = Note(TEST_NOTE_PATH)
+test_note: ObsidanNote = ObsidanNote(TEST_NOTE_PATH)
 logger.info(f"Loaded: {test_note}")
 
-
-
+logger.debug(test_note.text)
 
