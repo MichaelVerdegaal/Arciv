@@ -3,6 +3,19 @@ from pathlib import Path
 
 from loguru import logger
 
+# Directory constants
+ROOT_DIR = Path(__file__).parent
+DATA_DIR = ROOT_DIR / "data"
+SCRAPED_DOCS_DIR = DATA_DIR / "scraped"
+CONVERTED_DOCS_DIR = DATA_DIR / "converted"
+CLEANED_DOCS_DIR = DATA_DIR / "cleaned"
+NOTE_PATH = Path(
+)  # TODO: will remove hardcoding later
+
+# File constants
+STOPWORDS_FILE = DATA_DIR / "stopwords_en.txt"
+
+
 # Configure loguru: remove default handler, add stdout with diagnostics
 logger.remove()
 logger.add(
@@ -12,6 +25,3 @@ logger.add(
     backtrace=True,
     diagnose=True,
 )
-
-# TODO: will remove hardcoding later
-NOTE_PATH = Path("C:/Users/Michael/Documents/WorkVault/Daily notes")

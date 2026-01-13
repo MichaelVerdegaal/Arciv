@@ -10,3 +10,4 @@ How to set up the Clotho project locally.
    1. `uv venv`
    2. `source .venv/bin/activate` `Bash`
    3. `uv sync`
+   4. `playwright install` (to install browser engines for Playwright)

@@ -5,13 +5,13 @@ from collections.abc import Sequence
 from helix import Client
 from loguru import logger
 
-from clotho.documents import NoteInfo
+from clotho.notes import Note
 
 
 def insert_notes(
     db: Client,
     category_name: str,
-    notes: Sequence[NoteInfo],
+    notes: Sequence[Note],
 ) -> None:
     """Insert notes into HelixDB and link them to a category.
 
