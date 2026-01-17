@@ -18,9 +18,11 @@ logger.info(f"Loaded: {test_note}")
 
 logger.debug(test_note.text)
 
+found_header: tuple = test_note.find_headers(level=2, first=True)
+logger.debug(f"{test_note.text[found_header[0] : found_header[1]]}")
 
-# Extract links from test note
-extracted_links = test_note.extract_links()
-logger.info(f"Extracted {len(extracted_links)} links from test note:")
-for link in extracted_links:
-    logger.info(f" - {link}")
+# # Extract links from test note
+# extracted_links = test_note.extract_links()
+# logger.info(f"Extracted {len(extracted_links)} links from test note:")
+# for link in extracted_links:
+#     logger.info(f" - {link}")

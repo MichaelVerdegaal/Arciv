@@ -25,7 +25,7 @@ class Note:
     def __repr__(self) -> str:
         return f"Note({self.filename}{self.extension})"
 
-    def _read_content(self) -> str:
+    def _read_content(self) -> None:
         """Reads text content and strips YAML frontmatter.
 
         Returns:
@@ -37,8 +37,8 @@ class Note:
             raise IOError(f"Note path {self.note_path} does not seem valid: {e}")
 
         # Remove traditional YAML frontmatter (--- at start, anything until next ---)
-        FRONTMATTER_PATTERN_RE = r"^---\s*\n.*?\n---\s*\n"
-        content = re.sub(FRONTMATTER_PATTERN_RE, "", note_text, flags=re.DOTALL)
+        frontmatter_pattern_re = r"^---\s*\n.*?\n---\s*\n"
+        content = re.sub(frontmatter_pattern_re, "", note_text, flags=re.DOTALL)
         self.text = content.strip()
 
     @staticmethod
