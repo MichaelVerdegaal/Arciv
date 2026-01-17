@@ -1,9 +1,9 @@
-from pathlib import Path
-from .note import Note
 import re
+from pathlib import Path
+
+from .note import Note
 
 # Regex patterns
-LINK_PATTERN_RE = r"https?://[^\s<>\[\]\"]+"
 TIMESTAMP_PATTERN_RE = r"^\d{8}\s+\d{4}\s*\n\s*Status:\s*#\w+\s*\n"
 MARKDOWN_H1_PATTERN_RE = r"^#\s+.+$"
 
@@ -52,36 +52,28 @@ class ObsidanNote(Note):
     #     # If no H1 found, return cleaned content
     #     return content.strip()
 
-
     def extract_links(
         self, skip_prefixes: tuple[str, ...] = DEFAULT_SKIP_PREFIXES
     ) -> list[str]:
         """Extract all URLs (http/https) from the note content.
 
         Args:
-            skip_prefixes: Tuple of URL prefixes to filter out.
-                Defaults to DEFAULT_SKIP_PREFIXES (localhost and Power BI/Fabric URLs).
+            skip_prefixes: URL prefixes to filter out.
 
         Returns:
-            List of extracted URLs with filtered prefixes removed
+            List of extracted URLs
         """
-        matches = re.findall(LINK_PATTERN_RE, self.text)
+        link_pattern_re = r"https?://[^\s<>\[\]\"]+"
+        extracted_urls = []
 
-        # Clean up trailing punctuation and markdown artifacts
-        cleaned = []
-        for url in matches:
+        for url in re.findall(link_pattern_re, self.text):
             # Strip trailing punctuation
             url = url.rstrip(".,;:!?'")
-
             # Handle trailing ) from markdown [text](url) syntax
-            # Only strip if unbalanced
             while url.endswith(")") and url.count(")") > url.count("("):
                 url = url[:-1]
 
-            # Filter out URLs matching skip prefixes
-            if url.startswith(skip_prefixes):
-                continue
+            if not url.startswith(skip_prefixes):
+                extracted_urls.append(url)
 
-            cleaned.append(url)
-
-        return cleaned
+        return extracted_urls

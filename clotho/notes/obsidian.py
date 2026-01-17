@@ -36,16 +36,6 @@ def sanitize_tag(keyword: str) -> str:
 
     Returns:
         A valid Obsidian tag string (without the # prefix).
-
-    Examples:
-        >>> sanitize_tag("machine learning")
-        'machine_learning'
-        >>> sanitize_tag("Neural-Network (Training)")
-        'neural-network_training'
-        >>> sanitize_tag("C++")
-        'c'
-        >>> sanitize_tag("LLM's capabilities")
-        'llms_capabilities'
     """
     # Lowercase first
     tag = keyword.lower()

@@ -52,7 +52,7 @@ def process_single_note() -> None:
 
     # Track generated URL note filenames for backlinks
     url_note_filenames: list[str] = []
-    
+
     # Track file paths for different processing stages
     scraped_paths: list[Path] = []
     converted_paths: list[Path] = []

@@ -10,7 +10,7 @@ SCRAPED_DOCS_DIR = DATA_DIR / "scraped"
 CONVERTED_DOCS_DIR = DATA_DIR / "converted"
 CLEANED_DOCS_DIR = DATA_DIR / "cleaned"
 NOTES_PATH = Path(
-    "C:/Users/Michael.Verdegaal/Documents/WorkVault/Daily notes"
+    "C:/Users/Michael/Documents/DevVault/Daily notes"
 )  # TODO: will remove hardcoding later
 
 # File constants
