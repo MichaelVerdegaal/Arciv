@@ -2,27 +2,24 @@ from pathlib import Path
 
 from loguru import logger
 
-from clotho.notes.obsidian_note import ObsidanNote
+from clotho.notes import ObsidianNote
+from clotho.scrape2 import split_url
 from config import NOTES_PATH
 
 TEST_NOTE_PATH = "C:/Users/Michael/Documents/DevVault/Test note.md"
 
 
 # Get all note files in directory
-note_files: list[Path] = ObsidanNote.get_note_files(NOTES_PATH)
+note_files: list[Path] = ObsidianNote.get_note_files(NOTES_PATH)
 logger.info(f"Found {len(note_files)} notes in NOTES_PATH")
 
 # Get test note
-test_note: ObsidanNote = ObsidanNote(TEST_NOTE_PATH)
+test_note: ObsidianNote = ObsidianNote(TEST_NOTE_PATH)
 logger.info(f"Loaded: {test_note}")
 
-logger.debug(test_note.text)
-
-found_header: tuple = test_note.find_headers(level=2, first=True)
-logger.debug(f"{test_note.text[found_header[0] : found_header[1]]}")
-
-# # Extract links from test note
-# extracted_links = test_note.extract_links()
-# logger.info(f"Extracted {len(extracted_links)} links from test note:")
-# for link in extracted_links:
-#     logger.info(f" - {link}")
+# Extract links from test note
+extracted_links = test_note.extract_links()
+logger.info(f"Extracted {len(extracted_links)} links from test note:")
+for link in extracted_links:
+    domain, path = split_url(link)
+    logger.info(f" - {domain}")

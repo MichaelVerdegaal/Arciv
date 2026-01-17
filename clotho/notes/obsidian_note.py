@@ -3,10 +3,6 @@ from pathlib import Path
 
 from .note import Note
 
-# Regex patterns
-TIMESTAMP_PATTERN_RE = r"^\d{8}\s+\d{4}\s*\n\s*Status:\s*#\w+\s*\n"
-MARKDOWN_H1_PATTERN_RE = r"^#\s+.+$"
-
 # Url prefixes to skip
 DEFAULT_SKIP_PREFIXES = (
     "http://localhost",
@@ -18,7 +14,7 @@ DEFAULT_SKIP_PREFIXES = (
 )
 
 
-class ObsidanNote(Note):
+class ObsidianNote(Note):
     def __init__(self, note_path: str | Path):
         super().__init__(note_path)
 
