@@ -6,11 +6,11 @@ import aiofiles
 from loguru import logger
 from playwright.async_api import async_playwright
 
-from clotho.scrape.convert import convert_html_file
-from clotho.scrape.url_processor import process_url, split_url
 from config import CONVERTED_DOCS_DIR, SCRAPED_DOCS_DIR
 
 from .clean_markdown import clean_markdown
+from .convert import convert_html_file
+from .url_processor import process_url, split_url
 
 TIMEOUT_MS = 10000  # 10 seconds
 
