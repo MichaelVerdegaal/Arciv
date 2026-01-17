@@ -64,7 +64,16 @@ class Scraper:
                     await file.write(html)
                 return file_path, url
             except Exception as e:
-                logger.error(f"Failed to fetch HTML for {url}: {e}")
+                # Extract clean error message from Playwright exceptions
+                error_msg = str(e).split("\n")[0]  # First line only
+                if "net::ERR_NAME_NOT_RESOLVED" in error_msg:
+                    logger.error(f"DNS resolution failed for {url} (site may be down)")
+                elif "net::ERR_CONNECTION_REFUSED" in error_msg:
+                    logger.error(f"Connection refused for {url}")
+                elif "Timeout" in error_msg:
+                    logger.error(f"Timeout fetching {url}")
+                else:
+                    logger.error(f"Failed to fetch {url}: {error_msg}")
                 return None, url
             finally:
                 await page.close()

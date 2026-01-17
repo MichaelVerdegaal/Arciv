@@ -95,8 +95,7 @@ def process_url(url: str) -> str | None:
         return None
 
     # Skip IP addresses (local network, etc.)
-    domain, path = split_url(url)
-    logger.debug(f"{domain=}, {path=}")
+    domain, _ = split_url(url)
     if _IP_DOMAIN_RE.match(domain):
         return None
 
