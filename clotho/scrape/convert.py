@@ -28,8 +28,8 @@ def html_to_markdown(
         Extracted Markdown content, or None if extraction failed.
     """
     if prune_xpath is None:
-        # Remove <pre> blocks by default to avoid code dumps
-        prune_xpath = ["//pre"]
+        # Remove <pre> and <code> blocks to avoid extraction artifacts
+        prune_xpath = ["//pre", "//code"]
 
     return extract(
         html_content,
