@@ -3,16 +3,6 @@ from pathlib import Path
 
 from .note import Note
 
-# Url prefixes to skip
-DEFAULT_SKIP_PREFIXES = (
-    "http://localhost",
-    "https://localhost",
-    "http://127.0.0.1",
-    "https://127.0.0.1",
-    "https://app.fabric.microsoft.com/",
-    "https://app.powerbi.com/",
-)
-
 
 class ObsidianNote(Note):
     def __init__(self, note_path: str | Path):
@@ -59,28 +49,19 @@ class ObsidianNote(Note):
             for m in re.finditer(header_re, self.text, flags=re.MULTILINE)
         ]
 
-    def extract_links(
-        self, skip_prefixes: tuple[str, ...] = DEFAULT_SKIP_PREFIXES
-    ) -> list[str]:
-        """Extract all URLs (http/https) from the note content.
-
-        Args:
-            skip_prefixes: URL prefixes to filter out.
+    def extract_links(self) -> list[str]:
+        """Extract all URLs from the note content.
 
         Returns:
             List of extracted URLs
         """
         link_pattern_re = r"https?://[^\s<>\[\]\"]+"
-        extracted_urls = []
+        cleaned = []
 
         for url in re.findall(link_pattern_re, self.text):
-            # Strip trailing punctuation
             url = url.rstrip(".,;:!?'")
-            # Handle trailing ) from markdown [text](url) syntax
             while url.endswith(")") and url.count(")") > url.count("("):
                 url = url[:-1]
+            cleaned.append(url)
 
-            if not url.startswith(skip_prefixes):
-                extracted_urls.append(url)
-
-        return extracted_urls
+        return cleaned

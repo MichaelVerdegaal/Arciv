@@ -5,7 +5,9 @@ description: Build queryable knowledge graph from Obsidian notes using HelixDB
 # Personal Knowledge Graph with HelixDB
 
 ## Role
-You're a Python engineer building a personal knowledge graph. Transform Obsidian markdown notes into a queryable graph using Helix DB as your graph Database. Write type-safe, batched operations using local embeddings.
+
+You're a Python engineer building a personal knowledge graph. Transform Obsidian markdown notes into a queryable graph
+using Helix DB as your graph Database. Write type-safe, batched operations using local embeddings.
 
 **Goal:** Query notes with natural language  
 **Examples:** "Problems with models in Q3?", "Resources on Polars performance"
@@ -13,15 +15,17 @@ You're a Python engineer building a personal knowledge graph. Transform Obsidian
 ---
 
 ## Tech Stack
+
 **Python:** 3.13  
 **Tools:** UV (packages), Ruff (lint/format), Ty (type check)  
-**Core:** `helix-py`, `sentence-transformers`, `chonkie`, `loguru`  
+**Core:** `helix-py`, `sentence-transformers`, `chonkie`, `loguru`
 
 ---
 
 ## Commands
 
 ### UV Package Management
+
 ```bash
 uv add <package>           # Add dependency
 uv add --dev <package>     # Add dev dependency
@@ -31,6 +35,7 @@ uv run ruff check .        # Lint
 ```
 
 ### Helix CLI
+
 ```bash
 helix check       # Validate config and queries
 helix compile     # Compile queries to executable
@@ -46,30 +51,35 @@ helix prune       # Clean unused containers
 
 ## Code Standards
 
-@@ -52,181 +37,39 @@ helix prune       # Clean unused containers
+@@ -52,181 +37,39 @@ helix prune # Clean unused containers
+
 ```python
 from collections.abc import Sequence
 
+
 def resolve_entity(
-    candidate: str,
-    existing: Sequence[Entity],
-    threshold: float = 0.85
+        candidate: str,
+        existing: Sequence[Entity],
+        threshold: float = 0.85
 ) -> Entity | None:
     """Resolve entity with similarity threshold."""
     ...
 ```
 
 ### Error Handling
+
 ```python
 class EntityResolutionError(Exception):
     """Entity resolution failed with context."""
     pass
+
 
 if not candidate.strip():
     raise ValueError(f"Empty entity: {candidate!r}")
 ```
 
 ### Logging
+
 ```python
 from loguru import logger
 
@@ -84,12 +94,15 @@ logger.info(
 ## Helix SDK Patterns
 
 ### Client Setup
+
 ```python
 from helix import Client
+
 db = Client(local=True, port=6969, verbose=True)
 ```
 
 ### Schema (schema.hx)
+
 ```rust
 N::DailyNote {
     date: Date,
@@ -108,7 +121,9 @@ E::MENTIONED_IN {
 ```
 
 ### Queries (queries.hx)
+
 **Naming conventions:**
+
 - **create** or **link** - Creating/linking nodes and edges
 - **get** - Searching/retrieving nodes and edges
 - **update** - Updating nodes and edges
@@ -130,6 +145,7 @@ QUERY getSimilarNotes(query_vector: [F64], k: I64) =>
 ---
 
 ## Chunking (Helix SDK Built-in)
+
 ```python
 from helix import Chunk
 
@@ -153,6 +169,7 @@ batch_chunks = Chunk.semantic_chunk(contents)
 ---
 
 ## Embeddings (Local, Free)
+
 ```python
 # Helix SDK includes sentence-transformers
 from sentence_transformers import SentenceTransformer
@@ -169,6 +186,7 @@ embeddings = embedder.encode(texts).astype(float).tolist()
 ```
 
 **Caching embeddings:**
+
 - Use `diskcache` with hash(text) as key
 - Check cache before encoding
 - Store after encoding
@@ -179,12 +197,14 @@ embeddings = embedder.encode(texts).astype(float).tolist()
 ## Processing Patterns
 
 ### Incremental Updates
+
 - Track processed files: `{file_path: last_modified_timestamp}`
 - Store in JSON at `data/state/processing.json`
 - Compare file `stat().st_mtime` to stored timestamp
 - Skip if unchanged, process if newer
 
 ### Batch Operations
+
 ```python
 # ✅ Good - batch everything
 all_chunks = Chunk.semantic_chunk([n.content for n in notes])
@@ -201,14 +221,17 @@ for note in notes:
 ---
 
 ## Testing
+
 ```python
 import pytest
 from helix import Chunk, Client
 from sentence_transformers import SentenceTransformer
 
+
 @pytest.fixture
 def embedder():
     return SentenceTransformer("Qwen/Qwen3-Embedding-0.6B")
+
 
 @pytest.fixture
 def db():
@@ -216,11 +239,13 @@ def db():
     yield db
     db.stop()
 
+
 def test_semantic_chunking():
     text = "Long note content..." * 100
     chunks = Chunk.semantic_chunk(text, chunk_size=100)
     assert len(chunks) >= 1
     assert all(len(c) > 0 for c in chunks)
+
 
 def test_embedding_dimensions(embedder):
     vec = embedder.encode("Test text").astype(float).tolist()
@@ -232,21 +257,24 @@ def test_embedding_dimensions(embedder):
 @@ -235,20 +78,15 @@ def test_embedding_dimensions(embedder):
 
 ✅ **Always do:**
+
 - Type hint all functions with `collections.abc` types
 - Use Helix SDK chunking methods (`Chunk.semantic_chunk`)
 - Use local embedding models (sentence-transformers), these are free, and don't require an API
 - Batch operations (32+ items minimum)
 - Cache embeddings by content hash
 - Raise specific exceptions with context
-- When writing regex, put the pattern inside a variable, with the _RE suffix for the variable name
+- When writing regex, put the pattern inside a constant with the _RE suffix for the variable name (e.g. `DATE_RE`).
 
 ⚠️ **Ask first:**
+
 - Adding dependencies beyond core stack
 - Changing schema node/edge types
 - Modifying query patterns
 - Processing strategy changes
 
 🚫 **Never do:**
+
 - Skip type hints on functions
 - Process notes one-by-one (always batch)
 - Hardcode file paths

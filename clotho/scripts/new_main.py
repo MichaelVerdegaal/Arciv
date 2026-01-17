@@ -3,7 +3,7 @@ from pathlib import Path
 from loguru import logger
 
 from clotho.notes import ObsidianNote
-from clotho.scrape2 import split_url
+from clotho.scrape2 import Scraper
 from config import NOTES_PATH
 
 TEST_NOTE_PATH = "C:/Users/Michael/Documents/DevVault/Test note.md"
@@ -20,6 +20,9 @@ logger.info(f"Loaded: {test_note}")
 # Extract links from test note
 extracted_links = test_note.extract_links()
 logger.info(f"Extracted {len(extracted_links)} links from test note:")
+
+
+# Scrape links
+scraper: Scraper = Scraper()
 for link in extracted_links:
-    domain, path = split_url(link)
-    logger.info(f" - {domain}")
+    scraper.scrape(link)
