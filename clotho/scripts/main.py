@@ -10,7 +10,7 @@ from clotho.notes import (
 )
 from clotho.scrape import batch_fetch_html, html_to_markdown, normalize_url
 from clotho.topic import TopicExtractor
-from config import CLEANED_DOCS_DIR, CONVERTED_DOCS_DIR, NOTES_PATH
+from config import CONVERTED_DOCS_DIR, NOTES_PATH, SCRAPED_PAGES_DIR
 
 CATEGORY = "DAILY"
 NOTE_SELECTION = ["2025-12-09", "2025-12-22"]
@@ -82,7 +82,7 @@ if __name__ == "__main__":
                 logger.info(f"\t`{kw.text}`: {kw.score:.4f}")
 
             # Save cleaned markdown for debugging
-            cleaned_save_path: Path = CLEANED_DOCS_DIR / md_filename
+            cleaned_save_path: Path = SCRAPED_PAGES_DIR / md_filename
             cleaned_save_path.write_text(
                 topic_extractor.preprocess(md_page), encoding="utf-8"
             )

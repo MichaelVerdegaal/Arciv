@@ -24,5 +24,6 @@ logger.info(f"Extracted {len(extracted_links)} links from test note:")
 
 # Scrape links
 scraper: Scraper = Scraper()
-for link in extracted_links:
-    scraper.scrape(link)
+for link in extracted_links[:1]:
+    text = scraper.scrape(link)
+    logger.info(f"Scraped content from {link}:\n{text}...\n")
