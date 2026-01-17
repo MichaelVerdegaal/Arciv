@@ -6,10 +6,12 @@ import aiofiles
 from loguru import logger
 from playwright.async_api import async_playwright
 
-from config import SCRAPED_DOCS_DIR
-from clotho.scrape2.url_processor import process_url
-from .url_util import split_url
+from clotho.scrape.convert import convert_html_file
+from clotho.scrape.url_processor import process_url
+from config import CONVERTED_DOCS_DIR, SCRAPED_DOCS_DIR
 
+from .clean_markdown import clean_markdown
+from .url_util import split_url
 
 TIMEOUT_MS = 10000  # 10 seconds
 
@@ -78,15 +80,20 @@ class Scraper:
             finally:
                 await page.close()
 
-    def scrape(self, url: str, overwrite: bool = False) -> tuple[Path | None, str]:
+    def scrape(
+        self, url: str, overwrite: bool = False, convert: bool = True, clean: bool = True
+    ) -> tuple[Path | None, str]:
         """Scrape a web page and save its HTML to a file.
 
         Args:
             url: The URL of the page to scrape
             overwrite: Whether to overwrite existing saved file
+            convert: Whether to convert the HTML to Markdown
+            clean: Whether to clean the Markdown (only applies if convert=True)
 
         Returns:
-            A tuple of (file_path, url) where file_path is the path to the saved HTML file or None if failed
+            A tuple of (file_path, url) where file_path is the path to the saved
+            HTML file (or Markdown file if convert=True), or None if failed
         """
         processed_url = process_url(url)
 
@@ -95,4 +102,21 @@ class Scraper:
             return None, url
 
         logger.info(f"Scraping {processed_url[:80]}...")
-        return asyncio.run(self._fetch_html(processed_url, overwrite))
+        html_path, url = asyncio.run(self._fetch_html(processed_url, overwrite))
+
+        if html_path is None:
+            return None, url
+
+        if convert:
+            md_path = convert_html_file(html_path, CONVERTED_DOCS_DIR)
+            if md_path is None:
+                return html_path, url
+
+            if clean:
+                md_content = md_path.read_text(encoding="utf-8")
+                cleaned_content = clean_markdown(md_content)
+                md_path.write_text(cleaned_content, encoding="utf-8")
+
+            return md_path, url
+
+        return html_path, url

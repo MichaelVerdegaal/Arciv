@@ -4,9 +4,7 @@ import re
 from collections.abc import Callable
 from urllib.parse import urlparse, urlunparse
 
-from loguru import logger
-
-from clotho.scrape2.url_util import split_url
+from clotho.scrape.url_util import split_url
 
 # URLs starting with these prefixes are skipped entirely
 SKIP_PREFIXES = (

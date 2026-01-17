@@ -8,7 +8,6 @@ from trafilatura import extract
 
 def html_to_markdown(
     html_content: str,
-    *,
     include_tables: bool = True,
     include_links: bool = False,
     deduplicate: bool = False,
@@ -29,6 +28,7 @@ def html_to_markdown(
         Extracted Markdown content, or None if extraction failed.
     """
     if prune_xpath is None:
+        # Remove <pre> blocks by default to avoid code dumps
         prune_xpath = ["//pre"]
 
     return extract(

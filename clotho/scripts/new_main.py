@@ -3,7 +3,7 @@ from pathlib import Path
 from loguru import logger
 
 from clotho.notes import ObsidianNote
-from clotho.scrape2 import Scraper
+from clotho.scrape import Scraper
 from config import NOTES_PATH
 
 TEST_NOTE_PATH = "C:/Users/Michael/Documents/DevVault/Test note.md"
