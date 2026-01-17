@@ -7,11 +7,10 @@ from loguru import logger
 from playwright.async_api import async_playwright
 
 from clotho.scrape.convert import convert_html_file
-from clotho.scrape.url_processor import process_url
+from clotho.scrape.url_processor import process_url, split_url
 from config import CONVERTED_DOCS_DIR, SCRAPED_DOCS_DIR
 
 from .clean_markdown import clean_markdown
-from .url_util import split_url
 
 TIMEOUT_MS = 10000  # 10 seconds
 
@@ -81,7 +80,11 @@ class Scraper:
                 await page.close()
 
     def scrape(
-        self, url: str, overwrite: bool = False, convert: bool = True, clean: bool = True
+        self,
+        url: str,
+        overwrite: bool = False,
+        convert: bool = True,
+        clean: bool = True,
     ) -> tuple[Path | None, str]:
         """Scrape a web page and save its HTML to a file.
 
