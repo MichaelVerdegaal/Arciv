@@ -1,45 +1,54 @@
-"""Keyword extraction strategy implementations.
+"""Extraction strategy implementations.
 
-This module defines the ExtractionStrategy protocol and concrete implementations
-for various keyword extraction algorithms.
+This module defines the ExtractionStrategy base class and concrete implementations
+for various extraction algorithms (keywords, topics, etc.).
 """
 
+from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Protocol
 
 from yake import KeywordExtractor as YakeExtractor
 
 from config import STOPWORDS_FILE
 
 
-class ExtractionStrategy(Protocol):
-    """Protocol for keyword/topic extraction strategies.
+class ExtractionStrategy(ABC):
+    """Base class for extraction strategies.
+
+    Subclasses should initialize any expensive resources (models, etc.)
+    in __init__ and reuse them across extract() calls.
 
     Implementations must return scores normalized to 0-1 range,
     where higher values indicate greater relevance.
+
+    Attributes:
+        n: Number of items to extract.
     """
 
-    def extract(self, text: str, n: int) -> list[tuple[str, float]]:
-        """Extract top n keywords with normalized relevance scores.
+    n: int
+
+    @abstractmethod
+    def extract(self, text: str) -> list[tuple[str, float]]:
+        """Extract top n items with normalized relevance scores.
 
         Args:
-            text: The text to extract keywords from.
-            n: Number of keywords to extract.
+            text: The text to extract from.
 
         Returns:
-            List of (keyword, score) tuples sorted by relevance (highest first).
+            List of (item, score) tuples sorted by relevance (highest first).
             Scores are normalized to the 0-1 range.
         """
         ...
 
 
-class YakeStrategy:
+class YakeStrategy(ExtractionStrategy):
     """YAKE-based keyword extraction.
 
     YAKE (Yet Another Keyword Extractor) is an unsupervised approach for
     automatic keyword extraction using text statistical features.
 
     Attributes:
+        n: Number of keywords to extract.
         max_ngram: Maximum n-gram size for keywords.
         dedup_func: Deduplication function ("levs", "jaro", "seqm").
         dedup_threshold: Threshold for considering keywords as duplicates.
@@ -47,11 +56,12 @@ class YakeStrategy:
         stopwords: Set of stopwords to exclude.
     """
 
+    _cached_stopwords: set[str] | None = None
     DEFAULT_STOPWORDS_PATH: Path = STOPWORDS_FILE
 
     def __init__(
         self,
-        *,
+        n: int = 10,
         max_ngram: int = 3,
         dedup_func: str = "levs",
         dedup_threshold: float = 0.7,
@@ -61,12 +71,14 @@ class YakeStrategy:
         """Initialize the YAKE strategy.
 
         Args:
+            n: Number of keywords to extract.
             max_ngram: Maximum n-gram size for keywords.
             dedup_func: Deduplication function ("levs", "jaro", "seqm").
             dedup_threshold: Threshold for considering keywords as duplicates.
             window_size: Co-occurrence window size.
             stopwords: Custom stopword set. If None, loads from default file.
         """
+        self.n = n
         self.max_ngram = max_ngram
         self.dedup_func = dedup_func
         self.dedup_threshold = dedup_threshold
@@ -75,26 +87,25 @@ class YakeStrategy:
 
     @classmethod
     def _load_default_stopwords(cls) -> set[str]:
-        """Load stopwords from the default file as a set."""
-        if cls.DEFAULT_STOPWORDS_PATH.exists():
-            return set(
+        """Load stopwords from the default file as a set (cached)."""
+        if cls._cached_stopwords is None:
+            cls._cached_stopwords = set(
                 cls.DEFAULT_STOPWORDS_PATH.read_text(encoding="utf-8").splitlines()
             )
-        return set()
+        return cls._cached_stopwords
 
-    def extract(self, text: str, n: int) -> list[tuple[str, float]]:
+    def extract(self, text: str) -> list[tuple[str, float]]:
         """Extract keywords using YAKE algorithm.
 
         Args:
             text: The text to extract keywords from.
-            n: Number of keywords to extract.
 
         Returns:
             List of (keyword, score) tuples with normalized scores.
         """
         extractor = YakeExtractor(
             n=self.max_ngram,
-            top=n,
+            top=self.n,
             dedupLim=self.dedup_threshold,
             dedupFunc=self.dedup_func,
             windowsSize=self.window_size,

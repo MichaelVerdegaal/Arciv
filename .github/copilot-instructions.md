@@ -64,3 +64,4 @@ helix prune       # Clean unused containers
 - Skip type hints on functions
 - Hardcode file paths
 - Use lazy imports inside of functions
+- Add args (*args, **kwargs) to functions without a specific need

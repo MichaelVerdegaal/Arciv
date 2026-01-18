@@ -1,6 +1,6 @@
-"""Keyword extraction with pluggable strategies.
+"""Extraction with pluggable strategies.
 
-This module provides a KeywordExtractor class that uses the Strategy pattern
+This module provides an Extractor class that uses the Strategy pattern
 to allow swapping extraction algorithms at runtime.
 """
 
@@ -10,23 +10,23 @@ from .strategies import ExtractionStrategy
 class Extractor:
     """Extracts keywords or topics using configurable strategies.
 
-    This class implements the Strategy pattern, allowing different keyword
-    extraction algorithms to be used interchangeably. A default strategy
-    can be set at initialization, but can be overridden per extraction call.
+    This class implements the Strategy pattern, allowing different extraction
+    algorithms to be used interchangeably. A default strategy can be set at
+    initialization, but can be overridden per extraction call.
 
     Example:
         >>> from clotho.extract import Extractor, YakeStrategy
-        >>> extractor = Extractor(default_strategy=YakeStrategy(max_ngram=2))
-        >>> keywords = extractor.extract(text, n=15)
+        >>> extractor = Extractor(default_strategy=YakeStrategy(n=15, max_ngram=2))
+        >>> keywords = extractor.extract(text)
         >>> # Override at call time
-        >>> keywords = extractor.extract(text, n=15, strategy=YakeStrategy(max_ngram=3))
+        >>> keywords = extractor.extract(text, strategy=YakeStrategy(n=10))
 
     Attributes:
         default_strategy: The default extraction strategy to use.
     """
 
     def __init__(self, default_strategy: ExtractionStrategy | None = None) -> None:
-        """Initialize the keyword extractor.
+        """Initialize the extractor.
 
         Args:
             default_strategy: The default strategy to use for extraction.
@@ -37,20 +37,17 @@ class Extractor:
     def extract(
         self,
         text: str,
-        n: int = 10,
-        *,
         strategy: ExtractionStrategy | None = None,
     ) -> list[tuple[str, float]]:
-        """Extract keywords using the specified or default strategy.
+        """Extract using the specified or default strategy.
 
         Args:
-            text: The text to extract keywords from.
-            n: Number of keywords to extract.
+            text: The text to extract from.
             strategy: Override strategy for this extraction. If None, uses
                 the default_strategy.
 
         Returns:
-            List of (keyword, score) tuples sorted by relevance (highest first).
+            List of (item, score) tuples sorted by relevance (highest first).
             Scores are normalized to the 0-1 range.
 
         Raises:
@@ -59,4 +56,4 @@ class Extractor:
         active_strategy = strategy or self.default_strategy
         if active_strategy is None:
             raise ValueError("No extraction strategy provided")
-        return active_strategy.extract(text, n)
+        return active_strategy.extract(text)
