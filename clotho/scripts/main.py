@@ -6,6 +6,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from clotho.extract import Extractor, YakeStrategy
 from clotho.notes import MarkdownNote
 from clotho.scrape import Scraper
 from config import NOTES_PATH
@@ -32,5 +33,13 @@ for link in extracted_links:
     note_ob: MarkdownNote = scraper.scrape(link, refetch=False, reclean=False)
     notes.append(note_ob)
 
-first_note = notes[0]
-logger.info(f"First scraped note: {first_note}")
+
+# Extract
+yake_strategy: YakeStrategy = YakeStrategy()
+extractor: Extractor = Extractor(default_strategy=yake_strategy)
+
+for note in notes:
+    keywords = extractor.extract(note.text)
+    logger.info(f"\nExtracted keywords for note: {note}")
+    for kw, score in keywords:
+        logger.info(f"\t{kw}, {score:.4f}")
