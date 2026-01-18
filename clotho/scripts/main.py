@@ -3,13 +3,13 @@ from pathlib import Path
 
 from loguru import logger
 
+from clotho.extract import Extractor
 from clotho.notes import (
     Note,
     create_url_note,
     update_source_note_with_backlinks,
 )
 from clotho.scrape import batch_fetch_html, html_to_markdown, normalize_url
-from clotho.topic import TopicExtractor
 from config import CONVERTED_DOCS_DIR, NOTES_PATH, SCRAPED_PAGES_DIR
 
 CATEGORY = "DAILY"
@@ -47,8 +47,8 @@ if __name__ == "__main__":
         # Fetch HTML for each link
         saved_pages: dict[str, Path] = asyncio.run(batch_fetch_html(normalized_links))
 
-        # Init topic extractor
-        topic_extractor = TopicExtractor(top_n=20, max_ngram=3)
+        # Init extract extractor
+        topic_extractor = Extractor(top_n=20, max_ngram=3)
         logger.debug(
             f"Loaded topic extractor with {len(topic_extractor.stopwords)} stopwords"
         )
