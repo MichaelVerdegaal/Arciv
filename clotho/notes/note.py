@@ -23,7 +23,7 @@ class Note:
         self._read_content()
 
     def __repr__(self) -> str:
-        return f"Note({self.filename}{self.extension})"
+        return f"{self.__class__.__name__}({self.filename}{self.extension})"
 
     def _read_content(self) -> None:
         """Reads text content and strips YAML frontmatter.

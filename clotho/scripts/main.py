@@ -27,8 +27,10 @@ logger.info(f"Extracted {len(extracted_links)} links from test note:")
 
 # Scrape links
 scraper: Scraper = Scraper()
-LINK_MANUAL = "https://medium.com/data-science/topic-modeling-with-bert-779f7db187e6"
-# text = scraper.scrape(LINK_MANUAL, refetch=False, reclean=True)
+notes: list[MarkdownNote] = []
 for link in extracted_links:
-    note_ob: MarkdownNote = scraper.scrape(link, refetch=False, reclean=True)
-    ...
+    note_ob: MarkdownNote = scraper.scrape(link, refetch=False, reclean=False)
+    notes.append(note_ob)
+
+first_note = notes[0]
+logger.info(f"First scraped note: {first_note}")

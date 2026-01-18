@@ -95,7 +95,7 @@ class Scraper:
         processed_url = process_url(url)
 
         if processed_url is None:
-            logger.debug(f"Skipping URL: {url}")
+            logger.warning(f"Can't process URL: {url}")
             return None
 
         # Generate file paths with domain subdirectories
@@ -109,12 +109,10 @@ class Scraper:
 
         # Return cached markdown if available and not forcing refresh
         if md_path.exists() and not reclean and not refetch:
-            logger.debug(f"Using cached: {md_path.name}")
             return MarkdownNote(md_path)
 
         # Fetch HTML if needed
         if html_path.exists() and not refetch:
-            logger.debug(f"Using cached HTML: {html_path.name}")
             html_content = html_path.read_text(encoding="utf-8")
         else:
             logger.info(f"Scraping {processed_url[:80]}...")
