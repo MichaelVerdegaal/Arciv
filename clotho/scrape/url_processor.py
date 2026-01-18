@@ -65,6 +65,15 @@ def _rewrite_raw_github(url: str) -> str:
     return f"https://github.com/{match.group(1)}"
 
 
+def _rewrite_medium(url: str) -> str:
+    """Rewrite Medium URLs to use Freedium mirror.
+
+    E.g. https://medium.com/data-science/topic-modeling-with-bert-779f7db187e6
+         -> https://freedium-mirror.cfd/https://medium.com/data-science/topic-modeling-with-bert-779f7db187e6
+    """
+    return f"https://freedium-mirror.cfd/{url}"
+
+
 def split_url(url: str) -> tuple[str, str]:
     """Split the domain and the path from a URL.
 
@@ -84,6 +93,7 @@ def split_url(url: str) -> tuple[str, str]:
 DOMAIN_REWRITERS: dict[str, Callable[[str], str]] = {
     "github.com": _rewrite_github,
     "raw.githubusercontent.com": _rewrite_raw_github,
+    "medium.com": _rewrite_medium,
 }
 
 

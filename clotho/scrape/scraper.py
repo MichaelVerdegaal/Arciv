@@ -99,8 +99,12 @@ class Scraper:
 
         # Generate file paths with domain subdirectories
         domain, _ = split_url(processed_url)
-        html_path = HTML_DIR / domain / self._hash_filename(processed_url, extension=".html")
-        md_path = MARKDOWN_DIR / domain / self._hash_filename(processed_url, extension=".md")
+        html_path = (
+            HTML_DIR / domain / self._hash_filename(processed_url, extension=".html")
+        )
+        md_path = (
+            MARKDOWN_DIR / domain / self._hash_filename(processed_url, extension=".md")
+        )
 
         # Return cached markdown if available and not forcing refresh
         if md_path.exists() and not reclean and not refetch:
