@@ -5,6 +5,7 @@ import aiofiles
 from loguru import logger
 from playwright.async_api import async_playwright
 
+from clotho.notes import MarkdownNote
 from config import HTML_DIR, MARKDOWN_DIR
 
 from .clean_markdown import clean_markdown
@@ -78,7 +79,7 @@ class Scraper:
         refetch: bool = False,
         reclean: bool = False,
         clean: bool = True,
-    ) -> str | None:
+    ) -> MarkdownNote | None:
         """Scrape a web page, convert to markdown, and optionally clean.
 
         Args:
@@ -89,7 +90,7 @@ class Scraper:
                 a new markdown file.
 
         Returns:
-            Markdown text (cleaned or uncleaned based on clean param), or None if failed
+            MarkdownNote instance from the saved file, or None if failed
         """
         processed_url = process_url(url)
 
@@ -109,7 +110,7 @@ class Scraper:
         # Return cached markdown if available and not forcing refresh
         if md_path.exists() and not reclean and not refetch:
             logger.debug(f"Using cached: {md_path.name}")
-            return md_path.read_text(encoding="utf-8")
+            return MarkdownNote(md_path)
 
         # Fetch HTML if needed
         if html_path.exists() and not refetch:
@@ -137,4 +138,4 @@ class Scraper:
         md_path.parent.mkdir(parents=True, exist_ok=True)
         md_path.write_text(md_content, encoding="utf-8")
 
-        return md_content
+        return MarkdownNote(md_path)

@@ -26,4 +26,5 @@ scraper: Scraper = Scraper()
 LINK_MANUAL = "https://medium.com/data-science/topic-modeling-with-bert-779f7db187e6"
 # text = scraper.scrape(LINK_MANUAL, refetch=False, reclean=True)
 for link in extracted_links:
-    text = scraper.scrape(link, refetch=False, reclean=True)
+    note_ob: MarkdownNote = scraper.scrape(link, refetch=False, reclean=True)
+    ...

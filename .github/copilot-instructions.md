@@ -5,7 +5,8 @@
 Clotho is a personal knowledge organization project. It attempts to provide a seamless
 way to organize a large collection of markdown notes. Techniques possible covered are:
 
-- topic/keyword extraction
+- topic modeling
+- keyword extraction
 - scraping
 - semantic search
 - knowledge graphs
@@ -48,6 +49,8 @@ helix prune       # Clean unused containers
   types (e.g. `List`, `Dict`).
 - Raise specific exceptions with context
 - When writing regex, put the pattern inside a constant with the _RE suffix for the variable name (e.g. `DATE_RE`).
+- When adding imports in a __init__.py file, add it to the `__all__` list as well. 
+- If you're importing a variable or function from another file in the same module, use a relative import.
 
 ⚠️ **Ask first:**
 
@@ -60,4 +63,4 @@ helix prune       # Clean unused containers
 
 - Skip type hints on functions
 - Hardcode file paths
-- Use lazy imports inside functions
+- Use lazy imports inside of functions
