@@ -1,7 +1,7 @@
 from .note import Note
-from .obsidian_note import ObsidianNote
+from .markdown_note import MarkdownNote
 
 __all__ = [
     "Note",
-    "ObsidianNote",
+    "MarkdownNote",
 ]

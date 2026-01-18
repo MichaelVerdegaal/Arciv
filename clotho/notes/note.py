@@ -94,3 +94,20 @@ class Note:
         # TODO: Verify note not empty (filesize > 0.0)
 
         return note_path
+
+    def extract_links(self) -> list[str]:
+        """Extract all URLs from the note content.
+
+        Returns:
+            List of extracted URLs
+        """
+        link_pattern_re = r"https?://[^\s<>\[\]\"]+"
+        cleaned = []
+
+        for url in re.findall(link_pattern_re, self.text):
+            url = url.rstrip(".,;:!?'")
+            while url.endswith(")") and url.count(")") > url.count("("):
+                url = url[:-1]
+            cleaned.append(url)
+
+        return cleaned

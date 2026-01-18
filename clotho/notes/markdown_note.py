@@ -4,7 +4,7 @@ from pathlib import Path
 from .note import Note
 
 
-class ObsidianNote(Note):
+class MarkdownNote(Note):
     def __init__(self, note_path: str | Path):
         super().__init__(note_path)
 
@@ -48,20 +48,3 @@ class ObsidianNote(Note):
             (m.start(), m.end())
             for m in re.finditer(header_re, self.text, flags=re.MULTILINE)
         ]
-
-    def extract_links(self) -> list[str]:
-        """Extract all URLs from the note content.
-
-        Returns:
-            List of extracted URLs
-        """
-        link_pattern_re = r"https?://[^\s<>\[\]\"]+"
-        cleaned = []
-
-        for url in re.findall(link_pattern_re, self.text):
-            url = url.rstrip(".,;:!?'")
-            while url.endswith(")") and url.count(")") > url.count("("):
-                url = url[:-1]
-            cleaned.append(url)
-
-        return cleaned
