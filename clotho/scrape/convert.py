@@ -8,12 +8,11 @@ from trafilatura import extract
 
 def html_to_markdown(
     html_content: str,
-    *,
     include_tables: bool = True,
     include_links: bool = False,
     deduplicate: bool = False,
     favor_precision: bool = True,
-    prune_xpath: list[str] | None = None,
+    strip_code: bool = True,
 ) -> str | None:
     """Convert HTML content to Markdown using trafilatura.
 
@@ -23,13 +22,15 @@ def html_to_markdown(
         include_links: Whether to preserve hyperlinks in output.
         deduplicate: Whether to remove duplicate content.
         favor_precision: Whether to favor precision over recall in extraction.
-        prune_xpath: List of XPath expressions for elements to remove before extraction.
+        strip_code: If true, removes <pre> and <code> elements before extraction.
 
     Returns:
         Extracted Markdown content, or None if extraction failed.
     """
-    if prune_xpath is None:
-        prune_xpath = ["//pre"]
+    prune_xpath = None
+    if strip_code:
+        # Remove <pre> and <code> blocks to avoid extraction artifacts
+        prune_xpath = ["//pre", "//code"]
 
     return extract(
         html_content,

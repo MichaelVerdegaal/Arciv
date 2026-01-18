@@ -1,12 +1,4 @@
-from .convert import convert_html_file, html_to_markdown
-from .normalize import normalize_url
-from .scrape import batch_fetch_html
-from .clean_markdown import MarkdownCleaner
+from .scraper import Scraper
+from .url_processor import process_url, split_url
 
-__all__ = [
-    "batch_fetch_html",
-    "convert_html_file",
-    "html_to_markdown",
-    "normalize_url",
-    "MarkdownCleaner",
-]
+__all__ = ["Scraper", "split_url", "process_url"]
