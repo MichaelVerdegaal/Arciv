@@ -31,6 +31,9 @@ EMPTY_BRACKETS_RE = re.compile(r"\[\s*\]")
 STRAY_PAREN_AFTER_SPACE_RE = re.compile(r"(?<=\s)\)")
 STRAY_PAREN_LINE_START_RE = re.compile(r"^\)", re.MULTILINE)
 
+# Missing space after punctuation before capital letter (e.g., "data:If" -> "data: If")
+MISSING_SPACE_RE = re.compile(r"([.:;!?])([A-Z])")
+
 # Grouped patterns for batch operations
 BOLD_ITALIC_PATTERNS = [
     BOLD_ITALIC_3STAR_RE,
@@ -131,6 +134,14 @@ class MarkdownCleaner:
         self._apply(STRAY_PAREN_AFTER_SPACE_RE, keep_content=False)
         return self._apply(STRAY_PAREN_LINE_START_RE, keep_content=False)
 
+    def fix_missing_spaces(self) -> Self:
+        """Insert space between punctuation and capital letter.
+
+        Fixes concatenated sentences like 'data:If' -> 'data: If'.
+        """
+        self.text = MISSING_SPACE_RE.sub(r"\1 \2", self.text)
+        return self
+
 
 def clean_markdown(text: str) -> str:
     """Clean markdown text by removing formatting artifacts.
@@ -145,6 +156,7 @@ def clean_markdown(text: str) -> str:
         MarkdownCleaner(text)
         .strip_inline_code()
         .strip_bold_italic()
+        .fix_missing_spaces()
         .cleanup_lists()
         .clean_orphan_brackets()
         .text

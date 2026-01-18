@@ -1,10 +1,11 @@
 import asyncio
 import hashlib
 
+import aiofiles
 from loguru import logger
 from playwright.async_api import async_playwright
 
-from config import SCRAPED_PAGES_DIR
+from config import HTML_DIR, MARKDOWN_DIR
 
 from .clean_markdown import clean_markdown
 from .convert import html_to_markdown
@@ -25,20 +26,21 @@ class Scraper:
             extension: File extension (default: .md)
 
         Returns:
-            A string filename based on the URL
+            A string filename based on the URL hash
         """
         domain, _ = split_url(url)
         url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
         return f"{domain}-{url_hash}{extension}"
 
-    async def _fetch_html(self, url: str) -> tuple[str | None, str]:
-        """Fetches the HTML content of a URL using Playwright.
+    async def _fetch_and_save_html(self, url: str, html_path) -> str | None:
+        """Fetches HTML content from URL and saves to file.
 
         Args:
             url: The URL to fetch
+            html_path: Path where the HTML file will be saved
 
         Returns:
-            Tuple of (html_content, url) where html_content is None if failed
+            HTML content string, or None if failed
         """
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
@@ -49,7 +51,12 @@ class Scraper:
                     url, wait_until="domcontentloaded", timeout=self.page_timeout
                 )
                 html = await page.content()
-                return html, url
+
+                html_path.parent.mkdir(parents=True, exist_ok=True)
+                async with aiofiles.open(html_path, mode="w", encoding="utf-8") as f:
+                    await f.write(html)
+
+                return html
             except Exception as e:
                 # Extract clean error message from Playwright exceptions
                 error_msg = str(e).split("\n")[0]  # First line only
@@ -61,22 +68,28 @@ class Scraper:
                     logger.error(f"Timeout fetching {url}")
                 else:
                     logger.error(f"Failed to fetch {url}: {error_msg}")
-                return None, url
+                return None
             finally:
                 await page.close()
 
     def scrape(
-        self, url: str, overwrite: bool = False, save: bool = True
+        self,
+        url: str,
+        refetch: bool = False,
+        reclean: bool = False,
+        clean: bool = True,
     ) -> str | None:
-        """Scrape a web page, convert to markdown, and clean.
+        """Scrape a web page, convert to markdown, and optionally clean.
 
         Args:
             url: The URL of the page to scrape
-            overwrite: Whether to overwrite existing saved file
-            save: Whether to save the cleaned markdown to file
+            refetch: Whether to re-fetch the HTML even if cached
+            reclean: Whether to recreate the markdown even if cached
+            clean: Whether to clean the markdown before saving. Only applies if creating
+                a new markdown file.
 
         Returns:
-            Cleaned markdown text, or None if failed
+            Markdown text (cleaned or uncleaned based on clean param), or None if failed
         """
         processed_url = process_url(url)
 
@@ -84,30 +97,40 @@ class Scraper:
             logger.debug(f"Skipping URL: {url}")
             return None
 
-        # Check if cleaned file already exists
-        filename = self._hash_filename(processed_url, extension=".md")
-        output_path = SCRAPED_PAGES_DIR / filename
+        # Generate file paths with domain subdirectories
+        domain, _ = split_url(processed_url)
+        html_path = HTML_DIR / domain / self._hash_filename(processed_url, extension=".html")
+        md_path = MARKDOWN_DIR / domain / self._hash_filename(processed_url, extension=".md")
 
-        if output_path.exists() and not overwrite:
-            logger.debug(f"Using cached: {filename}")
-            return output_path.read_text(encoding="utf-8")
+        # Return cached markdown if available and not forcing refresh
+        if md_path.exists() and not reclean and not refetch:
+            logger.debug(f"Using cached: {md_path.name}")
+            return md_path.read_text(encoding="utf-8")
 
-        logger.info(f"Scraping {processed_url[:80]}...")
-        html_content, url = asyncio.run(self._fetch_html(processed_url))
-
-        if html_content is None:
-            return None
+        # Fetch HTML if needed
+        if html_path.exists() and not refetch:
+            logger.debug(f"Using cached HTML: {html_path.name}")
+            html_content = html_path.read_text(encoding="utf-8")
+        else:
+            logger.info(f"Scraping {processed_url[:80]}...")
+            html_content = asyncio.run(
+                self._fetch_and_save_html(processed_url, html_path)
+            )
+            if html_content is None:
+                return None
 
         # Convert HTML to markdown
         md_content = html_to_markdown(html_content)
         if md_content is None:
-            logger.warning(f"Failed to extract content from {url}")
+            logger.warning(f"Failed to extract content from {processed_url}")
             return None
 
-        # Clean and optionally save
-        cleaned_content = clean_markdown(md_content)
-        if save:
-            SCRAPED_PAGES_DIR.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(cleaned_content, encoding="utf-8")
+        # Clean if requested
+        if clean:
+            md_content = clean_markdown(md_content)
 
-        return cleaned_content
+        # Save markdown
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.write_text(md_content, encoding="utf-8")
+
+        return md_content

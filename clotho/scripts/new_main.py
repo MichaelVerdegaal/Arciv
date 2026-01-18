@@ -21,9 +21,7 @@ logger.info(f"Loaded: {test_note}")
 extracted_links = test_note.extract_links()
 logger.info(f"Extracted {len(extracted_links)} links from test note:")
 
-
 # Scrape links
 scraper: Scraper = Scraper()
-for link in extracted_links[:1]:
-    text = scraper.scrape(link)
-    logger.info(f"Scraped content from {link}:\n{text}...\n")
+LINK_MANUAL = "https://freedium-mirror.cfd/https://medium.com/data-science/topic-modeling-with-bert-779f7db187e6"
+text = scraper.scrape(LINK_MANUAL, refetch=True)
