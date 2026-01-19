@@ -9,6 +9,7 @@ SKIP_PREFIXES = (
     "https://localhost",
     "https://app.powerbi.com/",
     "https://app.fabric.microsoft.com/",
+    "https://getvirtualbrain.com",
 )
 
 # Matches IP addresses as domain (e.g., "192.168.2.13", "10.0.0.1:8080")
