@@ -30,3 +30,4 @@ for note in note_files:
             scraped_notes.append(scraped_note)
 
 logger.info(f"Scraped {len(scraped_notes)} notes total")
+scraped_notes: list[MarkdownNote] = MarkdownNote.get_note_files(MARKDOWN_DIR)
