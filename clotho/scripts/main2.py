@@ -64,20 +64,15 @@ def create_keynmf_model(
     # Use paraphrase model as recommended in KeyNMF docs
     encoder = SentenceTransformer("paraphrase-MiniLM-L6-v2", device=device)
 
-    # vectorizer = CountVectorizer(
-    #     min_df=3,  # Terms must appear in 3+ docs (was 1)
-    #     max_df=0.90,  # Lower this to catch more boilerplate (was 0.95)
-    #     stop_words="english",
-    #     ngram_range=(1, 2),  # Drop trigrams - they're producing noisy phrases
-    # )
     vectorizer = LemmaCountVectorizer(
-        "en_core_web_sm", stop_words="english", lowercase=True
+        "en_core_web_sm", stop_words="english", lowercase=True, min_df=3
     )
     model = KeyNMF(
         n_components=n_topics,
         encoder=encoder,
         top_n=top_n_words,
         vectorizer=vectorizer,
+        seed_phrase="technology",
     )
 
     return model
@@ -103,7 +98,7 @@ def main() -> None:
         return
 
     # Determine number of topics
-    n_topics = 15
+    n_topics = 10
     logger.info(f"Discovering {n_topics} topics")
 
     # Create and fit model

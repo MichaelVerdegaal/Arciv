@@ -20,7 +20,7 @@ for note in note_files:
     logger.info(f"Processing: {note}")
 
     extracted_links = note.extract_links()
-    logger.info(f"Extracted {len(extracted_links)} links from {note_path.name}")
+    logger.info(f"Extracted {len(extracted_links)} links from {note.note_path.name}")
 
     for link in extracted_links:
         scraped_note: MarkdownNote | None = scraper.scrape(

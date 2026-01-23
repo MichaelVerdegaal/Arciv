@@ -1,16 +1,25 @@
 """HTML to Markdown conversion using trafilatura."""
 
+import re
 from pathlib import Path
 
 from loguru import logger
 from trafilatura import extract
+
+# Next.js __NEXT_DATA__ scripts can contain literal "</script>" inside JSON strings,
+# causing the script to prematurely close and leak JSON into the document body.
+# The lookahead ensures we capture until the real end.
+NEXT_DATA_RE = re.compile(
+    r"<script\s+id=[\"']__NEXT_DATA__[\"'][^>]*>.*?</script>(?=\s*<(?:script|/body|/html))",
+    re.DOTALL | re.IGNORECASE,
+)
 
 
 def html_to_markdown(
     html_content: str,
     include_tables: bool = True,
     include_links: bool = False,
-    deduplicate: bool = False,
+    deduplicate: bool = True,
     favor_precision: bool = True,
     strip_code: bool = True,
 ) -> str | None:
@@ -27,6 +36,9 @@ def html_to_markdown(
     Returns:
         Extracted Markdown content, or None if extraction failed.
     """
+    # Remove malformed __NEXT_DATA__ scripts before DOM parsing
+    html_content = NEXT_DATA_RE.sub("", html_content)
+
     prune_xpath = None
     if strip_code:
         # Remove <pre> and <code> blocks to avoid extraction artifacts
