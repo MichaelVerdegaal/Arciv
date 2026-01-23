@@ -10,7 +10,11 @@ SKIP_PREFIXES = (
     "https://app.powerbi.com/",
     "https://app.fabric.microsoft.com/",
     "https://getvirtualbrain.com",
+    "https://content.powerapps.com/",
 )
+
+# Domains ending with these suffixes are skipped (handles subdomains)
+SKIP_DOMAIN_SUFFIXES = ("sharepoint.com",)
 
 # Matches IP addresses as domain (e.g., "192.168.2.13", "10.0.0.1:8080")
 _IP_DOMAIN_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}(:\d+)?$")
@@ -119,6 +123,10 @@ def process_url(url: str) -> str | None:
     # Skip IP addresses (local network, etc.)
     domain, _ = split_url(url)
     if _IP_DOMAIN_RE.match(domain):
+        return None
+
+    # Skip domains by suffix (handles subdomains)
+    if domain.endswith(SKIP_DOMAIN_SUFFIXES):
         return None
 
     # Apply rewriters

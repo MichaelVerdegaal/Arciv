@@ -95,7 +95,7 @@ class Scraper:
         processed_url = process_url(url)
 
         if processed_url is None:
-            logger.warning(f"Can't process URL: {url}")
+            logger.warning(f"URL skipped: {url}")
             return None
 
         # Generate file paths with domain subdirectories
