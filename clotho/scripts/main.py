@@ -12,25 +12,21 @@ from config import MARKDOWN_DIR, NOTES_PATH
 note_files: list[MarkdownNote] = MarkdownNote.get_note_files(NOTES_PATH)
 logger.info(f"Found {len(note_files)} notes in NOTES_PATH")
 
-# Scrape links from all notes
-scraper: Scraper = Scraper()
-scraped_notes: list[MarkdownNote] = []
-
+# Collect all links from notes
+all_links: list[str] = []
 for note in note_files:
-    logger.info(f"Processing: {note}")
-
     extracted_links = note.extract_links()
-    if len(extracted_links) > 0:
-        logger.info(
-            f"Extracted {len(extracted_links)} links from {note.note_path.name}"
-        )
+    if extracted_links:
+        logger.debug(f"Extracted {len(extracted_links)} links from {note.note_path.name}")
+        all_links.extend(extracted_links)
 
-    for link in extracted_links:
-        scraped_note: MarkdownNote | None = scraper.scrape(
-            link, refetch=False, reclean=False
-        )
-        if scraped_note is not None:
-            scraped_notes.append(scraped_note)
+logger.info(f"Collected {len(all_links)} total links to scrape")
+
+# Scrape all links concurrently
+scraper: Scraper = Scraper()
+scraped_notes: list[MarkdownNote] = scraper.scrape_batch(
+    all_links, refetch=False, reclean=False
+)
 
 logger.info(f"Scraped {len(scraped_notes)} notes total")
-scraped_notes: list[MarkdownNote] = MarkdownNote.get_note_files(MARKDOWN_DIR)
+scraped_notes = MarkdownNote.get_note_files(MARKDOWN_DIR)
