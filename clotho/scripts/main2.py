@@ -5,11 +5,9 @@ using KeyNMF from turftopic. Unlike keyword extraction (per-document),
 topic modeling finds shared themes across the entire corpus.
 """
 
-import spacy
 import torch
 from loguru import logger
 from sentence_transformers import SentenceTransformer
-from sklearn.feature_extraction.text import CountVectorizer
 from turftopic import KeyNMF
 from turftopic.vectorizers.spacy import LemmaCountVectorizer
 

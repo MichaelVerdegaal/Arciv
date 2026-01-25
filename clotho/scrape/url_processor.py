@@ -13,6 +13,27 @@ SKIP_PREFIXES = (
     "https://content.powerapps.com/",
 )
 
+# URL's ending with these suffixes are skipped entirely (like images)
+SKIP_SUFFIXES = (
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".webp",
+    ".bmp",
+    ".tiff",
+    ".ico",
+    ".pdf",  # TODO: this contains readable text, but needs special conversion
+    ".mp4",
+    ".mp3",
+    ".avi",
+    ".mov",
+    ".wmv",
+    ".flv",
+    ".mkv",
+)
+
 # Domains ending with these suffixes are skipped (handles subdomains)
 SKIP_DOMAIN_SUFFIXES = ("sharepoint.com",)
 
@@ -102,35 +123,38 @@ DOMAIN_REWRITERS: dict[str, Callable[[str], str]] = {
 }
 
 
-def process_url(url: str) -> str | None:
+def process_url(url: str) -> tuple[str | None, str]:
     """Process URL for scraping.
 
     Args:
         url: The URL to process
 
     Returns:
-        None if URL should be skipped, otherwise the URL to scrape
-        (possibly rewritten)
+        URL to scrape or None if skipped, and a status message.
     """
     # Only process https URLs
     if not url.startswith("https://"):
-        return None
+        return None, "URL is not HTTPS"
 
     # Skip specific prefixes
     if url.startswith(SKIP_PREFIXES):
-        return None
+        return None, "URL matches prefix to skip"
+
+    # Skip specific suffixes
+    if url.lower().endswith(SKIP_SUFFIXES):
+        return None, "URL matches suffix to skip"
 
     # Skip IP addresses (local network, etc.)
     domain, _ = split_url(url)
     if _IP_DOMAIN_RE.match(domain):
-        return None
+        return None, "URL domain is an IP address"
 
     # Skip domains by suffix (handles subdomains)
     if domain.endswith(SKIP_DOMAIN_SUFFIXES):
-        return None
+        return None, "URL domain matches suffix to skip"
 
     # Apply rewriters
     if domain in DOMAIN_REWRITERS:
-        return DOMAIN_REWRITERS[domain](url)
+        return DOMAIN_REWRITERS[domain](url), "Success (rewritten)"
 
-    return url
+    return url, "Success"
