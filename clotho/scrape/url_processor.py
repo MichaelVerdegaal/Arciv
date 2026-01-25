@@ -5,13 +5,7 @@ from collections.abc import Callable
 from urllib.parse import urlparse, urlunparse
 
 # URLs starting with these prefixes are skipped entirely
-SKIP_PREFIXES = (
-    "https://localhost",
-    "https://app.powerbi.com/",
-    "https://app.fabric.microsoft.com/",
-    "https://getvirtualbrain.com",
-    "https://content.powerapps.com/",
-)
+SKIP_PREFIXES = ("https://localhost",)
 
 # URL's ending with these suffixes are skipped entirely (like images)
 SKIP_SUFFIXES = (
@@ -35,7 +29,13 @@ SKIP_SUFFIXES = (
 )
 
 # Domains ending with these suffixes are skipped (handles subdomains)
-SKIP_DOMAIN_SUFFIXES = ("sharepoint.com",)
+SKIP_DOMAIN_SUFFIXES = (
+    "sharepoint.com",
+    "getvirtualbrain.com",
+    "content.powerapps.com",
+    "app.fabric.microsoft.com",
+    "app.powerbi.com",
+)
 
 # Matches IP addresses as domain (e.g., "192.168.2.13", "10.0.0.1:8080")
 _IP_DOMAIN_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}(:\d+)?$")
