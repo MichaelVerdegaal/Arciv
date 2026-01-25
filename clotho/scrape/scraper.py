@@ -68,35 +68,35 @@ class Scraper:
             clean: Whether to apply markdown cleaning.
 
         Returns:
-            MarkdownNote wrapping the saved file, or None if conversion failed.
+            Tuple of (MarkdownNote or None, failure_reason or empty string).
         """
         md_content = html_to_markdown(html_content)
         if md_content is None:
-            return None, "Failed to extract any content"
+            return None, "extraction failed"
 
         word_count = count_words(md_content)
         if word_count < self.min_words:
-            return None, f"Word count must be >= {self.min_words}, got {word_count}"
+            return None, f"too short ({word_count} < {self.min_words} words)"
 
         if clean:
             md_content = clean_markdown(md_content)
 
         md_path.parent.mkdir(parents=True, exist_ok=True)
         md_path.write_text(md_content, encoding="utf-8")
-        return MarkdownNote(md_path), "Success"
+        return MarkdownNote(md_path), ""
 
-    def _log_fetch_error(self, url: str, error: Exception) -> None:
-        """Log a fetch error with a clean, actionable message."""
+    def _format_fetch_error(self, error: Exception) -> str:
+        """Format a fetch error into a concise reason string."""
         error_msg = str(error).split("\n")[0]
 
         if "net::ERR_NAME_NOT_RESOLVED" in error_msg:
-            logger.error(f"DNS resolution failed for {url}")
+            return "DNS resolution failed"
         elif "net::ERR_CONNECTION_REFUSED" in error_msg:
-            logger.error(f"Connection refused for {url}")
+            return "connection refused"
         elif "Timeout" in error_msg:
-            logger.error(f"Timeout fetching {url}")
+            return "timeout"
         else:
-            logger.error(f"Failed to fetch {url}: {error_msg}")
+            return error_msg
 
     # =========================================================================
     # SYNCHRONOUS - Single page, debuggable
@@ -123,31 +123,33 @@ class Scraper:
         Returns:
             MarkdownNote for the scraped content, or None if scraping failed.
         """
-        processed_url, status = process_url(url)
+        processed_url, skip_reason = process_url(url)
         if processed_url is None:
-            logger.debug(f"URL skipped: {processed_url}: {status}")
+            logger.warning(f"Skipped {url}: {skip_reason}")
             return None
 
         # Filenames
-        domain, _ = split_url(url)
+        domain, _ = split_url(processed_url)
         html_path = HTML_DIR / domain / self._hash_filename(processed_url, ".html")
         md_path = MARKDOWN_DIR / domain / self._hash_filename(processed_url, ".md")
+        md_filename = md_path.name
 
         # Cache hit: markdown exists
         if md_path.exists() and not reclean and not refetch:
+            logger.info(f"Scraped {processed_url} -> {md_filename} (cached)")
             return MarkdownNote(md_path)
 
         # Cache hit: HTML exists, just reconvert
         if html_path.exists() and not refetch:
             html_content = html_path.read_text(encoding="utf-8")
-            note, status = self._convert_and_save(html_content, md_path, clean)
-            if note is None:
-                logger.warning(f"Failed to convert {processed_url}: {status}")
+            note, fail_reason = self._convert_and_save(html_content, md_path, clean)
+            if note:
+                logger.info(f"Scraped {processed_url} -> {md_filename} (reconverted)")
+            else:
+                logger.warning(f"Failed {processed_url}: {fail_reason}")
             return note
 
         # Cache miss: fetch fresh
-        logger.info(f"Scraping {processed_url[:80]}...")
-
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
@@ -162,15 +164,15 @@ class Scraper:
                 html_path.parent.mkdir(parents=True, exist_ok=True)
                 html_path.write_text(html_content, encoding="utf-8")
 
-                converted_note, status = self._convert_and_save(
-                    html_content, md_path, clean
-                )
-                if converted_note:
-                    return converted_note
+                note, fail_reason = self._convert_and_save(html_content, md_path, clean)
+                if note:
+                    logger.info(f"Scraped {processed_url} -> {md_filename}")
                 else:
-                    logger.warning(f"Failed to convert {processed_url}: {status}")
+                    logger.warning(f"Failed {processed_url}: {fail_reason}")
+                return note
+
             except Exception as e:
-                self._log_fetch_error(processed_url, e)
+                logger.warning(f"Failed {processed_url}: {self._format_fetch_error(e)}")
                 return None
             finally:
                 page.close()
@@ -213,34 +215,38 @@ class Scraper:
         to_fetch: list[tuple[str, Path, Path]] = []
 
         for url in urls:
-            processed_url, status = process_url(url)
+            processed_url, skip_reason = process_url(url)
             if processed_url is None:
-                logger.debug(f"URL skipped: {url}: {status}")
+                logger.warning(f"Skipped {url}: {skip_reason}")
                 continue
 
             domain, _ = split_url(processed_url)
             html_path = HTML_DIR / domain / self._hash_filename(processed_url, ".html")
             md_path = MARKDOWN_DIR / domain / self._hash_filename(processed_url, ".md")
+            md_filename = md_path.name
 
             # Cache hit: markdown exists
             if md_path.exists() and not reclean and not refetch:
+                logger.info(f"Scraped {processed_url} -> {md_filename} (cached)")
                 results.append(MarkdownNote(md_path))
                 continue
 
             # Cache hit: HTML exists, just reconvert
             if html_path.exists() and not refetch:
                 html_content = html_path.read_text(encoding="utf-8")
-                note, status = self._convert_and_save(html_content, md_path, clean)
+                note, fail_reason = self._convert_and_save(html_content, md_path, clean)
                 if note:
+                    logger.info(
+                        f"Scraped {processed_url} -> {md_filename} (reconverted)"
+                    )
                     results.append(note)
                 else:
-                    logger.warning(f"Failed to convert {processed_url}: {status}")
+                    logger.warning(f"Failed {processed_url}: {fail_reason}")
                 continue
 
             to_fetch.append((processed_url, html_path, md_path))
 
         if to_fetch:
-            logger.info(f"Fetching {len(to_fetch)} URLs...")
             fetched = await self._fetch_all(to_fetch, clean)
             results.extend(fetched)
 
@@ -260,8 +266,8 @@ class Scraper:
             async def fetch_one(
                 url: str, html_path: Path, md_path: Path
             ) -> MarkdownNote | None:
+                md_filename = md_path.name
                 async with semaphore:
-                    logger.info(f"Scraping {url[:80]}...")
                     page = await browser.new_page()
                     try:
                         await page.goto(
@@ -275,15 +281,17 @@ class Scraper:
                         async with aiofiles.open(html_path, "w", encoding="utf-8") as f:
                             await f.write(html_content)
 
-                        converted_note, status = self._convert_and_save(
+                        note, fail_reason = self._convert_and_save(
                             html_content, md_path, clean
                         )
-                        if converted_note:
-                            return converted_note
-                        logger.warning(f"Failed to convert {url}: {status}")
+                        if note:
+                            logger.info(f"Scraped {url} -> {md_filename}")
+                        else:
+                            logger.warning(f"Failed {url}: {fail_reason}")
+                        return note
 
                     except Exception as e:
-                        self._log_fetch_error(url, e)
+                        logger.warning(f"Failed {url}: {self._format_fetch_error(e)}")
                         return None
                     finally:
                         await page.close()
