@@ -72,7 +72,6 @@ def create_keynmf_model(
         encoder=encoder,
         top_n=top_n_words,
         vectorizer=vectorizer,
-        seed_phrase="technology",
     )
 
     return model
