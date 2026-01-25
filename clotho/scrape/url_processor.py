@@ -134,15 +134,15 @@ def process_url(url: str) -> tuple[str | None, str]:
     """
     # Only process https URLs
     if not url.startswith("https://"):
-        return None, "URL is not HTTPS"
+        return None, "URL does not begin with HTTPS"
 
     # Skip specific prefixes
     if url.startswith(SKIP_PREFIXES):
-        return None, "URL matches prefix to skip"
+        return None, "URL matches skip prefix"
 
     # Skip specific suffixes
     if url.lower().endswith(SKIP_SUFFIXES):
-        return None, "URL matches suffix to skip"
+        return None, "URL matches skip suffix"
 
     # Skip IP addresses (local network, etc.)
     domain, _ = split_url(url)
@@ -151,7 +151,7 @@ def process_url(url: str) -> tuple[str | None, str]:
 
     # Skip domains by suffix (handles subdomains)
     if domain.endswith(SKIP_DOMAIN_SUFFIXES):
-        return None, "URL domain matches suffix to skip"
+        return None, "URL domain matches skip suffix"
 
     # Apply rewriters
     if domain in DOMAIN_REWRITERS:

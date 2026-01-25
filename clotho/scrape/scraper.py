@@ -4,7 +4,7 @@ from pathlib import Path
 
 import aiofiles
 from loguru import logger
-from playwright.async_api import Browser, async_playwright
+from playwright.async_api import async_playwright
 from playwright.sync_api import sync_playwright
 
 from clotho.notes import MarkdownNote
@@ -21,10 +21,10 @@ DEFAULT_MIN_WORDS = 200
 
 class Scraper:
     """Web scraper that fetches pages and converts them to cached Markdown.
-    
+
     Supports both single-page scraping (synchronous, for debugging) and
     batch scraping (async with concurrency control).
-    
+
     Args:
         page_timeout: Playwright page load timeout in milliseconds.
         max_concurrency: Maximum concurrent page fetches for batch operations.
@@ -42,11 +42,11 @@ class Scraper:
 
     def _hash_filename(self, url: str, extension: str = ".md") -> str:
         """Generate a hashed filename from URL.
-        
+
         Args:
             url: The URL to hash.
             extension: File extension including the dot.
-            
+
         Returns:
             Filename in format "{domain}-{hash}{extension}".
         """
@@ -54,63 +54,41 @@ class Scraper:
         url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
         return f"{domain}-{url_hash}{extension}"
 
-    def _get_paths(self, url: str) -> tuple[str, Path, Path] | None:
-        """Process URL and determine cache paths.
-        
-        Args:
-            url: Raw URL to process.
-            
-        Returns:
-            Tuple of (processed_url, html_cache_path, markdown_cache_path),
-            or None if the URL should be skipped.
-        """
-        processed_url, _ = process_url(url)
-        if processed_url is None:
-            return None
-
-        domain, _ = split_url(processed_url)
-        html_path = HTML_DIR / domain / self._hash_filename(processed_url, ".html")
-        md_path = MARKDOWN_DIR / domain / self._hash_filename(processed_url, ".md")
-        return processed_url, html_path, md_path
-
     def _convert_and_save(
         self,
         html_content: str,
         md_path: Path,
         clean: bool,
-    ) -> MarkdownNote | None:
+    ) -> tuple[MarkdownNote | None, str]:
         """Convert HTML to Markdown and save to disk.
-        
+
         Args:
             html_content: Raw HTML string.
             md_path: Destination path for the Markdown file.
             clean: Whether to apply markdown cleaning.
-            
+
         Returns:
             MarkdownNote wrapping the saved file, or None if conversion failed.
         """
         md_content = html_to_markdown(html_content)
         if md_content is None:
-            return None
+            return None, "Failed to extract any content"
 
         word_count = count_words(md_content)
         if word_count < self.min_words:
-            logger.debug(
-                f"Skipping {md_path.name}: {word_count} words < {self.min_words} minimum"
-            )
-            return None
+            return None, f"Word count must be >= {self.min_words}, got {word_count}"
 
         if clean:
             md_content = clean_markdown(md_content)
 
         md_path.parent.mkdir(parents=True, exist_ok=True)
         md_path.write_text(md_content, encoding="utf-8")
-        return MarkdownNote(md_path)
+        return MarkdownNote(md_path), "Success"
 
     def _log_fetch_error(self, url: str, error: Exception) -> None:
         """Log a fetch error with a clean, actionable message."""
         error_msg = str(error).split("\n")[0]
-        
+
         if "net::ERR_NAME_NOT_RESOLVED" in error_msg:
             logger.error(f"DNS resolution failed for {url}")
         elif "net::ERR_CONNECTION_REFUSED" in error_msg:
@@ -132,25 +110,28 @@ class Scraper:
         clean: bool = True,
     ) -> MarkdownNote | None:
         """Scrape a single URL synchronously.
-        
+
         This is the simple, debuggable path. Use for single pages or debugging.
         For multiple URLs, use scrape_batch() instead.
-        
+
         Args:
             url: The URL to scrape.
             refetch: Re-download HTML even if cached.
             reclean: Regenerate Markdown even if cached.
             clean: Apply markdown cleaning to extracted content.
-            
+
         Returns:
             MarkdownNote for the scraped content, or None if scraping failed.
         """
-        paths = self._get_paths(url)
-        if paths is None:
-            logger.debug(f"URL skipped: {url}")
+        processed_url, status = process_url(url)
+        if processed_url is None:
+            logger.debug(f"URL skipped: {processed_url}: {status}")
             return None
 
-        processed_url, html_path, md_path = paths
+        # Filenames
+        domain, _ = split_url(url)
+        html_path = HTML_DIR / domain / self._hash_filename(processed_url, ".html")
+        md_path = MARKDOWN_DIR / domain / self._hash_filename(processed_url, ".md")
 
         # Cache hit: markdown exists
         if md_path.exists() and not reclean and not refetch:
@@ -159,9 +140,9 @@ class Scraper:
         # Cache hit: HTML exists, just reconvert
         if html_path.exists() and not refetch:
             html_content = html_path.read_text(encoding="utf-8")
-            note = self._convert_and_save(html_content, md_path, clean)
+            note, status = self._convert_and_save(html_content, md_path, clean)
             if note is None:
-                logger.warning(f"Failed to extract content from {processed_url}")
+                logger.warning(f"Failed to convert {processed_url}: {status}")
             return note
 
         # Cache miss: fetch fresh
@@ -181,7 +162,13 @@ class Scraper:
                 html_path.parent.mkdir(parents=True, exist_ok=True)
                 html_path.write_text(html_content, encoding="utf-8")
 
-                return self._convert_and_save(html_content, md_path, clean)
+                converted_note, status = self._convert_and_save(
+                    html_content, md_path, clean
+                )
+                if converted_note:
+                    return converted_note
+                else:
+                    logger.warning(f"Failed to convert {processed_url}: {status}")
             except Exception as e:
                 self._log_fetch_error(processed_url, e)
                 return None
@@ -201,20 +188,18 @@ class Scraper:
         clean: bool = True,
     ) -> list[MarkdownNote]:
         """Scrape multiple URLs concurrently.
-        
+
         Args:
             urls: List of URLs to scrape.
             refetch: Re-download HTML even if cached.
             reclean: Regenerate Markdown even if cached.
             clean: Apply markdown cleaning to extracted content.
-            
+
         Returns:
             List of successfully scraped MarkdownNotes (failed URLs are logged
             and omitted from results).
         """
-        return asyncio.run(
-            self._scrape_batch_async(urls, refetch, reclean, clean)
-        )
+        return asyncio.run(self._scrape_batch_async(urls, refetch, reclean, clean))
 
     async def _scrape_batch_async(
         self,
@@ -228,11 +213,14 @@ class Scraper:
         to_fetch: list[tuple[str, Path, Path]] = []
 
         for url in urls:
-            paths = self._get_paths(url)
-            if paths is None:
+            processed_url, status = process_url(url)
+            if processed_url is None:
+                logger.debug(f"URL skipped: {url}: {status}")
                 continue
 
-            processed_url, html_path, md_path = paths
+            domain, _ = split_url(processed_url)
+            html_path = HTML_DIR / domain / self._hash_filename(processed_url, ".html")
+            md_path = MARKDOWN_DIR / domain / self._hash_filename(processed_url, ".md")
 
             # Cache hit: markdown exists
             if md_path.exists() and not reclean and not refetch:
@@ -242,9 +230,11 @@ class Scraper:
             # Cache hit: HTML exists, just reconvert
             if html_path.exists() and not refetch:
                 html_content = html_path.read_text(encoding="utf-8")
-                note = self._convert_and_save(html_content, md_path, clean)
+                note, status = self._convert_and_save(html_content, md_path, clean)
                 if note:
                     results.append(note)
+                else:
+                    logger.warning(f"Failed to convert {processed_url}: {status}")
                 continue
 
             to_fetch.append((processed_url, html_path, md_path))
@@ -267,7 +257,9 @@ class Scraper:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
 
-            async def fetch_one(url: str, html_path: Path, md_path: Path) -> MarkdownNote | None:
+            async def fetch_one(
+                url: str, html_path: Path, md_path: Path
+            ) -> MarkdownNote | None:
                 async with semaphore:
                     logger.info(f"Scraping {url[:80]}...")
                     page = await browser.new_page()
@@ -283,7 +275,13 @@ class Scraper:
                         async with aiofiles.open(html_path, "w", encoding="utf-8") as f:
                             await f.write(html_content)
 
-                        return self._convert_and_save(html_content, md_path, clean)
+                        converted_note, status = self._convert_and_save(
+                            html_content, md_path, clean
+                        )
+                        if converted_note:
+                            return converted_note
+                        logger.warning(f"Failed to convert {url}: {status}")
+
                     except Exception as e:
                         self._log_fetch_error(url, e)
                         return None

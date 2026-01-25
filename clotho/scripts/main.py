@@ -17,7 +17,9 @@ all_links: list[str] = []
 for note in note_files:
     extracted_links = note.extract_links()
     if extracted_links:
-        logger.debug(f"Extracted {len(extracted_links)} links from {note.note_path.name}")
+        logger.debug(
+            f"Extracted {len(extracted_links)} links from {note.note_path.name}"
+        )
         all_links.extend(extracted_links)
 
 logger.info(f"Collected {len(all_links)} total links to scrape")
