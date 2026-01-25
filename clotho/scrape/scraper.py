@@ -11,11 +11,12 @@ from clotho.notes import MarkdownNote
 from config import HTML_DIR, MARKDOWN_DIR
 
 from .clean_markdown import clean_markdown
-from .convert import html_to_markdown
+from .convert import count_words, html_to_markdown
 from .url_processor import process_url, split_url
 
 TIMEOUT_MS = 10000
 DEFAULT_CONCURRENCY = 5
+DEFAULT_MIN_WORDS = 200
 
 
 class Scraper:
@@ -33,9 +34,11 @@ class Scraper:
         self,
         page_timeout: int = TIMEOUT_MS,
         max_concurrency: int = DEFAULT_CONCURRENCY,
+        min_words: int = DEFAULT_MIN_WORDS,
     ):
         self.page_timeout = page_timeout
         self.max_concurrency = max_concurrency
+        self.min_words = min_words
 
     def _hash_filename(self, url: str, extension: str = ".md") -> str:
         """Generate a hashed filename from URL.
@@ -61,7 +64,7 @@ class Scraper:
             Tuple of (processed_url, html_cache_path, markdown_cache_path),
             or None if the URL should be skipped.
         """
-        processed_url = process_url(url)
+        processed_url, _ = process_url(url)
         if processed_url is None:
             return None
 
@@ -88,6 +91,13 @@ class Scraper:
         """
         md_content = html_to_markdown(html_content)
         if md_content is None:
+            return None
+
+        word_count = count_words(md_content)
+        if word_count < self.min_words:
+            logger.debug(
+                f"Skipping {md_path.name}: {word_count} words < {self.min_words} minimum"
+            )
             return None
 
         if clean:

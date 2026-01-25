@@ -14,6 +14,21 @@ NEXT_DATA_RE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 
+WORD_RE = re.compile(r"\b\w+\b")
+
+
+def count_words(text: str) -> int:
+    """Count the number of words in text using regex.
+
+    Args:
+        text: The text to count words in.
+
+    Returns:
+        The number of words found.
+    """
+    words = WORD_RE.findall(text)
+    return len(words)
+
 
 def html_to_markdown(
     html_content: str,
