@@ -34,6 +34,7 @@ def configure_logger():
         level="DEBUG",
         backtrace=True,
         diagnose=True,
+        enqueue=True,
     )
 
     # File - mode="w" truncates on each run
@@ -44,4 +45,5 @@ def configure_logger():
         backtrace=True,
         diagnose=True,
         mode="w",
+        enqueue=True,
     )
