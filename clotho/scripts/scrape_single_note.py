@@ -2,6 +2,9 @@ from loguru import logger
 
 from clotho.notes import MarkdownNote
 from clotho.scrape import Scraper
+from config import configure_logger
+
+configure_logger()
 
 # Collect all links from notes
 all_links: list[str] = [

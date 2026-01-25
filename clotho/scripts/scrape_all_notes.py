@@ -6,7 +6,9 @@ from loguru import logger
 
 from clotho.notes import MarkdownNote
 from clotho.scrape import Scraper
-from config import MARKDOWN_DIR, NOTES_PATH
+from config import MARKDOWN_DIR, NOTES_PATH, configure_logger
+
+configure_logger()
 
 # Get all note files in directory
 note_files: list[MarkdownNote] = MarkdownNote.get_note_files(NOTES_PATH)

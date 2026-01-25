@@ -12,7 +12,9 @@ from turftopic import KeyNMF
 from turftopic.vectorizers.spacy import LemmaCountVectorizer
 
 from clotho.notes import MarkdownNote
-from config import MARKDOWN_DIR
+from config import MARKDOWN_DIR, configure_logger
+
+configure_logger()
 
 
 def build_corpus(notes: list[MarkdownNote]) -> tuple[list[str], list[str]]:
