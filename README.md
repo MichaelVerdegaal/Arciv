@@ -14,9 +14,5 @@ Transforms Obsidian markdown notes into a queryable knowledge graph that surface
 - "Similar obstacles to my CUDA GPU utilization issue"
 
 ## Useful references
-- [HelixDB Python SDK documentation](https://docs.helix-db.com/guides/professors/backend_setup)
-- [HelixDB professor example](https://www.helix-db.com/blog/building-a-graphrag-system-for-professor-recommendations-with-helixdb)
-- [LinearRAG paper](https://arxiv.org/html/2510.10114v4)
 - [Semantic entity resolution](https://blog.graphlet.ai/the-rise-of-semantic-entity-resolution-45c48d5eb00a)
 - [Personal knowledge graphs](https://personalknowledgegraphs.com/#/page/pkg)
-- [Helix docs repository](https://github.com/HelixDB/helix-ql-docs)
