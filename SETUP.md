@@ -15,4 +15,5 @@ How to set up the Clotho project locally.
     2. `source .venv/bin/activate` `Bash`
     3. `uv sync`
     4. `playwright install` (to install browser engines for Playwright)
-    5. `python -m spacy download en_core_web_sm` (to download SpaCy model)
+    5. `python -m spacy download en_core_web_sm` (to download SpaCy model). This has to be redone if the virtual
+       environment is deleted.

@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
 from loguru import logger
 
 # Directory constants
@@ -14,6 +15,9 @@ NOTES_PATH = Path(
 
 # File constants
 STOPWORDS_FILE = DATA_DIR / "stopwords_en.txt"
+
+# Load environment variables
+load_dotenv(ROOT_DIR / ".env")
 
 
 def configure_logger():

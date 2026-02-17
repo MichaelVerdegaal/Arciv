@@ -5,15 +5,19 @@ using KeyNMF from turftopic. Unlike keyword extraction (per-document),
 topic modeling finds shared themes across the entire corpus.
 """
 
+import os
+
 import torch
 from loguru import logger
 from sentence_transformers import SentenceTransformer
-from turftopic import KeyNMF
+from turftopic import KeyNMF, Topeax
 from turftopic.vectorizers.spacy import LemmaCountVectorizer
 
 from clotho.notes import MarkdownNote
 from config import MARKDOWN_DIR, configure_logger
 
+HF_TOKEN = os.getenv("HF_TOKEN")
+print(f"Using HF Token: {HF_TOKEN is not None}")
 configure_logger()
 
 
@@ -41,7 +45,7 @@ def build_corpus(notes: list[MarkdownNote]) -> tuple[list[str], list[str]]:
     return texts, filenames
 
 
-def create_keynmf_model(
+def create_topic_model(
     n_topics: int = 10,
     top_n_words: int = 10,
     device: str | None = None,
@@ -59,13 +63,27 @@ def create_keynmf_model(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    logger.info(f"Initializing KeyNMF on {device}")
+    logger.info(f"Initializing topic model on {device}")
 
-    # Use paraphrase model as recommended in KeyNMF docs
-    encoder = SentenceTransformer("paraphrase-MiniLM-L6-v2", device=device)
+    # Embedding model needs to be small, and be able to do semantic similarity
+    encoder = SentenceTransformer(
+        "google/embeddinggemma-300m",
+        device=device,
+        prompts={
+            "query": "task: clustering  | query: {content}",
+            "passage": "task: clustering  | query: {content}",
+        },
+        default_prompt_name="query",
+        model_kwargs={"dtype": torch.bfloat16},
+    )
+    # encoder = SentenceTransformer("paraphrase-MiniLM-L6-v2", device=device)
 
     vectorizer = LemmaCountVectorizer(
-        "en_core_web_sm", stop_words="english", lowercase=True, min_df=3
+        "en_core_web_sm",
+        stop_words="english",
+        lowercase=True,
+        min_df=3,
+        ngram_range=(1, 1),
     )
     model = KeyNMF(
         n_components=n_topics,
@@ -73,6 +91,9 @@ def create_keynmf_model(
         top_n=top_n_words,
         vectorizer=vectorizer,
     )
+    # model = Topeax(
+    #     encoder=encoder, perplexity=30, vectorizer=vectorizer, random_state=42
+    # )
 
     return model
 
@@ -97,55 +118,20 @@ def main() -> None:
         return
 
     # Determine number of topics
-    n_topics = 10
+    n_topics = 7
     logger.info(f"Discovering {n_topics} topics")
 
     # Create and fit model
-    model = create_keynmf_model(n_topics=n_topics)
+    model = create_topic_model(n_topics=n_topics)
 
-    logger.info("Fitting KeyNMF model...")
-    doc_topic_matrix = model.fit_transform(corpus)
+    logger.info("Fitting topic model...")
+    _ = model.fit_transform(corpus)
 
     # Print discovered topics
     logger.info("\n" + "=" * 60)
     logger.info("DISCOVERED TOPICS")
     logger.info("=" * 60)
     model.print_topics()
-
-    # Show document-topic assignments
-    logger.info("\n" + "=" * 60)
-    logger.info("DOCUMENT-TOPIC ASSIGNMENTS")
-    logger.info("=" * 60)
-
-    for i, filename in enumerate(filenames):
-        # Get dominant topic for this document
-        topic_scores = doc_topic_matrix[i]
-        dominant_topic = topic_scores.argmax()
-        score = topic_scores[dominant_topic]
-
-        logger.info(
-            f"  {filename[:50]:<50} → Topic {dominant_topic} (score: {score:.3f})"
-        )
-
-    # Optional: Group documents by topic
-    logger.info("\n" + "=" * 60)
-    logger.info("DOCUMENTS GROUPED BY TOPIC")
-    logger.info("=" * 60)
-
-    for topic_id in range(n_topics):
-        # Find documents where this topic is dominant
-        docs_in_topic = [
-            filenames[i]
-            for i in range(len(filenames))
-            if doc_topic_matrix[i].argmax() == topic_id
-        ]
-
-        if docs_in_topic:
-            logger.info(f"\nTopic {topic_id} ({len(docs_in_topic)} docs):")
-            for doc in docs_in_topic[:5]:  # Show first 5
-                logger.info(f"  - {doc}")
-            if len(docs_in_topic) > 5:
-                logger.info(f"  ... and {len(docs_in_topic) - 5} more")
 
 
 if __name__ == "__main__":
