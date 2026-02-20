@@ -6,12 +6,10 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "aiofiles>=25.1.0", # Asynchronous file operations
-    "chonkie[hub,st]>=1.4.2", # Text chunking
-    "hf-xet>=1.2.0", # Hugging Face faster downloads
     "loguru>=0.7.3", # Logging
-    "playwright>=1.56.0", # Hugging Face models
+    "playwright>=1.56.0", # Scraping and browser automation
     "trafilatura>=2.0.0", # HTML to markdown conversion
-    "python-dotenv>=1.2.1",
+    "python-dotenv>=1.2.1", # Environment variable management
 ]
 
 [dependency-groups]
