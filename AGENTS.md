@@ -2,15 +2,8 @@
 
 ## Project description
 
-Clotho is a personal knowledge organization project. It attempts to provide a seamless
-way to organize a large collection of markdown notes. Techniques possible covered are:
-
-- topic modeling
-- keyword extraction
-- scraping
-- semantic search
-- knowledge graphs
-- embeddings
+Clotho is a personal knowledge framework. It attempts to provide a seamless
+way to organize a large collection of (markdown) notes. Techniques possible covered are:
 
 ## Tech Stack
 
@@ -23,28 +16,15 @@ way to organize a large collection of markdown notes. Techniques possible covere
 
 ```bash
 uv add <package>           # Add dependency
-uv add --dev <package>     # Add dev dependency
-uv run ruff check .        # Lint
-uv run ruff format .       # Format code
+uv add --group dev <package>     # Add dev dependency
+uv run ruff check        # Lint
+uv run ruff format       # Format code
 ```
 
-### Helix CLI
-
-```bash
-helix check       # Validate config and queries
-helix compile     # Compile queries to executable
-helix build       # Build instance
-helix push        # Deploy/update instance
-helix start       # Start stopped instance
-helix stop        # Stop instance
-helix status      # Show instance status
-helix prune       # Clean unused containers
-```
 
 ## Code Standards
 
 ✅ **Always do:**
-
 - Type hint all function parameters and return types. Prefer builtin types (e.g. `list`, `dict`) over `typing` module
   types (e.g. `List`, `Dict`).
 - Raise specific exceptions with context
