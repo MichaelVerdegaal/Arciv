@@ -10,6 +10,7 @@ dependencies = [
     "playwright>=1.56.0", # Scraping and browser automation
     "trafilatura>=2.0.0", # HTML to markdown conversion
     "python-dotenv>=1.2.1", # Environment variable management
+    "tldextract>=5.3.1",
 ]
 
 [dependency-groups]
