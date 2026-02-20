@@ -1,6 +1,7 @@
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Self
 
 
 class Note:
@@ -23,7 +24,7 @@ class Note:
         self._read_content()
 
     def __repr__(self) -> str:
-        return f"Note({self.filename}{self.extension})"
+        return f"{self.__class__.__name__}({self.filename}{self.extension})"
 
     def _read_content(self) -> None:
         """Reads text content and strips YAML frontmatter.
@@ -57,7 +58,7 @@ class Note:
         return created_date.isoformat(), modified_date.isoformat()
 
     @classmethod
-    def get_note_files(cls, note_dir: Path) -> list[Path]:
+    def get_note_files(cls, note_dir: Path) -> list[Self]:
         """Get all markdown files in the given directory.
 
         Args:
@@ -66,7 +67,7 @@ class Note:
         Returns:
             List of paths to markdown files found recursively
         """
-        return list(note_dir.glob("**/*.md"))
+        return [cls(note_path) for note_path in note_dir.glob("**/*.md")]
 
     @staticmethod
     def _validate_path(note_path: str | Path) -> Path:

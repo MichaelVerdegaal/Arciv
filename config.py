@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
 from loguru import logger
 
 # Directory constants
@@ -15,13 +16,38 @@ NOTES_PATH = Path(
 # File constants
 STOPWORDS_FILE = DATA_DIR / "stopwords_en.txt"
 
+# Load environment variables
+load_dotenv(ROOT_DIR / ".env")
 
-# Configure loguru: remove default handler, add stdout with diagnostics
-logger.remove()
-logger.add(
-    sys.stdout,
-    format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-    level="DEBUG",
-    backtrace=True,
-    diagnose=True,
-)
+
+def configure_logger():
+    """Configure loguru logger with detailed formatting."""
+    logger.remove()
+
+    # Shared format (color tags get stripped in file output)
+    log_format = (
+        "<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | "
+        "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
+        "<level>{message}</level>"
+    )
+
+    # Console with colors
+    logger.add(
+        sys.stdout,
+        format=log_format,
+        level="DEBUG",
+        backtrace=True,
+        diagnose=True,
+        enqueue=True,
+    )
+
+    # File - mode="w" truncates on each run
+    logger.add(
+        ROOT_DIR / "execution.log",
+        format=log_format,
+        level="DEBUG",
+        backtrace=True,
+        diagnose=True,
+        mode="w",
+        enqueue=True,
+    )

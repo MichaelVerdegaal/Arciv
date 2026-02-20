@@ -44,7 +44,7 @@ venv.bak/
 
 # PyPI configuration file
 .pypirc
-
-.helix/
 target/
+
+# Logs
 *.log
