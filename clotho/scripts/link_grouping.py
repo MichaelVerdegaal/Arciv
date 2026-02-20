@@ -2,6 +2,7 @@
 Work in progress script for testing and development purposes.
 """
 
+import tldextract
 from loguru import logger
 
 from clotho.notes import MarkdownNote
@@ -40,3 +41,19 @@ for url in all_links:
         filtered_links.append(processed_url)
 
 logger.info(f"{len(filtered_links)} links after applying URL rules")
+
+# Group filtered links by registered domain using tldextract
+domain_groups: dict[str, list[str]] = {}
+for url in filtered_links:
+    top_domain = tldextract.extract(url).top_domain_under_public_suffix
+    if not top_domain:
+        logger.warning(f"Skipped {url}: no valid public suffix")
+        continue
+    domain_groups.setdefault(top_domain, []).append(url)
+
+logger.info(f"Found {len(domain_groups)} domain groups")
+
+# Log each group sorted by URL count descending
+for domain, urls in sorted(domain_groups.items(), key=lambda item: len(item[1]), reverse=True):
+    logger.info(f"  {domain}: {len(urls)} URLs")
+    f.write(f"{domain}: {len(urls)} URLs\n")
