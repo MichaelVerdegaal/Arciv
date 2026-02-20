@@ -59,38 +59,56 @@ logger.info(f"Found {len(domain_groups)} domain groups")
 for domain, urls in sorted(domain_groups.items(), key=lambda item: len(item[1]), reverse=True):
     logger.info(f"  {domain}: {len(urls)} URLs")
 
-# Write notes to vault
-VAULT_LINKS_DIR = Path(r"C:\Users\Michael.Verdegaal\Documents\DevVault\links")
-VAULT_LINKS_DIR.mkdir(parents=True, exist_ok=True)
+# Write notes to vault (3-level hierarchy: urls.md -> domain notes -> page notes)
+VAULT_LINKS_DIR = Path(r"C:\Users\Michael\Documents\DevVault\links")
+VAULT_DOMAINS_DIR = VAULT_LINKS_DIR / "domains"
+VAULT_PAGES_DIR = VAULT_LINKS_DIR / "pages"
+VAULT_DOMAINS_DIR.mkdir(parents=True, exist_ok=True)
+VAULT_PAGES_DIR.mkdir(parents=True, exist_ok=True)
+
+domain_backlinks: list[str] = []
 
 for domain, urls in domain_groups.items():
-    # Build URL note filenames (stems without .md) for backlinks
-    url_note_stems: list[str] = []
+    page_backlinks: list[str] = []
+
     for url in urls:
         stem = hash_filename(url).removesuffix(".md")
-        url_note_stems.append(stem)
+        page_backlinks.append(f"- [[{stem}|{url}]]")
 
-        # Create URL note
-        url_note_path = VAULT_LINKS_DIR / hash_filename(url)
-        url_note_content = "\n".join([
-            f"# {stem}",
-            "",
-            f"url:: {url}",
-            f"domain:: [[{domain}]]",
+        # Create page note
+        page_note_path = VAULT_PAGES_DIR / hash_filename(url)
+        page_note_content = "\n".join([
+            f"domain: [[{domain}]]",
+            f"url: {url}"
             "",
         ])
-        url_note_path.write_text(url_note_content, encoding="utf-8")
+        page_note_path.write_text(page_note_content, encoding="utf-8")
 
-    # Create domain note with backlinks to all URL notes
-    domain_note_path = VAULT_LINKS_DIR / f"{domain}.md"
-    backlinks = [f"- [[{stem}]]" for stem in url_note_stems]
+    # Create domain note with backlinks to urls index and all page notes
+    domain_note_path = VAULT_DOMAINS_DIR / f"{domain}.md"
     domain_note_content = "\n".join([
         f"# {domain}",
         "",
-        *backlinks,
+        *page_backlinks,
         "",
     ])
     domain_note_path.write_text(domain_note_content, encoding="utf-8")
-    logger.debug(f"Created domain note {domain}.md with {len(url_note_stems)} URL notes")
+    logger.debug(f"Created domain note {domain}.md with {len(page_backlinks)} page notes")
 
-logger.info(f"Wrote {sum(len(u) for u in domain_groups.values())} URL notes and {len(domain_groups)} domain notes to {VAULT_LINKS_DIR}")
+    domain_backlinks.append(f"- [[{domain}]]")
+
+# Create top-level urls index note
+urls_note_path = VAULT_LINKS_DIR / "urls.md"
+urls_note_content = "\n".join([
+    "# URLs",
+    "",
+    *sorted(domain_backlinks),
+    "",
+])
+urls_note_path.write_text(urls_note_content, encoding="utf-8")
+logger.debug(f"Created urls.md with {len(domain_backlinks)} domain backlinks")
+
+logger.info(
+    f"Wrote {sum(len(u) for u in domain_groups.values())} page notes, "
+    f"{len(domain_groups)} domain notes, and urls.md to {VAULT_LINKS_DIR}"
+)
