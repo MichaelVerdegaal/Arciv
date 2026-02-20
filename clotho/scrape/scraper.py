@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 from pathlib import Path
 
 import aiofiles
@@ -12,7 +11,7 @@ from config import HTML_DIR, MARKDOWN_DIR
 
 from .clean_markdown import clean_markdown
 from .convert import count_words, html_to_markdown
-from .url_processor import process_url, split_url
+from .url_processor import hash_filename, process_url, split_url
 
 TIMEOUT_MS = 10000
 DEFAULT_CONCURRENCY = 5
@@ -43,6 +42,8 @@ class Scraper:
     def _hash_filename(self, url: str, extension: str = ".md") -> str:
         """Generate a hashed filename from URL.
 
+        Delegates to the module-level :func:`hash_filename` utility.
+
         Args:
             url: The URL to hash.
             extension: File extension including the dot.
@@ -50,9 +51,7 @@ class Scraper:
         Returns:
             Filename in format "{domain}-{hash}{extension}".
         """
-        domain, _ = split_url(url)
-        url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
-        return f"{domain}-{url_hash}{extension}"
+        return hash_filename(url, extension)
 
     def _convert_and_save(
         self,

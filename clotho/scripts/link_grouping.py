@@ -2,12 +2,14 @@
 Work in progress script for testing and development purposes.
 """
 
+from pathlib import Path
+
 import tldextract
 from loguru import logger
 
 from clotho.notes import MarkdownNote
 from config import NOTES_PATH, configure_logger
-from clotho.scrape import process_url
+from clotho.scrape import hash_filename, process_url
 configure_logger()
 
 # Get all note files in directory
@@ -56,4 +58,39 @@ logger.info(f"Found {len(domain_groups)} domain groups")
 # Log each group sorted by URL count descending
 for domain, urls in sorted(domain_groups.items(), key=lambda item: len(item[1]), reverse=True):
     logger.info(f"  {domain}: {len(urls)} URLs")
-    f.write(f"{domain}: {len(urls)} URLs\n")
+
+# Write notes to vault
+VAULT_LINKS_DIR = Path(r"C:\Users\Michael.Verdegaal\Documents\DevVault\links")
+VAULT_LINKS_DIR.mkdir(parents=True, exist_ok=True)
+
+for domain, urls in domain_groups.items():
+    # Build URL note filenames (stems without .md) for backlinks
+    url_note_stems: list[str] = []
+    for url in urls:
+        stem = hash_filename(url).removesuffix(".md")
+        url_note_stems.append(stem)
+
+        # Create URL note
+        url_note_path = VAULT_LINKS_DIR / hash_filename(url)
+        url_note_content = "\n".join([
+            f"# {stem}",
+            "",
+            f"url:: {url}",
+            f"domain:: [[{domain}]]",
+            "",
+        ])
+        url_note_path.write_text(url_note_content, encoding="utf-8")
+
+    # Create domain note with backlinks to all URL notes
+    domain_note_path = VAULT_LINKS_DIR / f"{domain}.md"
+    backlinks = [f"- [[{stem}]]" for stem in url_note_stems]
+    domain_note_content = "\n".join([
+        f"# {domain}",
+        "",
+        *backlinks,
+        "",
+    ])
+    domain_note_path.write_text(domain_note_content, encoding="utf-8")
+    logger.debug(f"Created domain note {domain}.md with {len(url_note_stems)} URL notes")
+
+logger.info(f"Wrote {sum(len(u) for u in domain_groups.values())} URL notes and {len(domain_groups)} domain notes to {VAULT_LINKS_DIR}")

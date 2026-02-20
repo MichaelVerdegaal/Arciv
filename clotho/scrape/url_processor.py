@@ -1,5 +1,6 @@
 """url_processor.py - URL processing for scraping: skip, rewrite, or pass through."""
 
+import hashlib
 import re
 from collections.abc import Callable
 from urllib.parse import urlparse, urlunparse
@@ -121,6 +122,21 @@ DOMAIN_REWRITERS: dict[str, Callable[[str], str]] = {
     "raw.githubusercontent.com": _rewrite_raw_github,
     "medium.com": _rewrite_medium,
 }
+
+
+def hash_filename(url: str, extension: str = ".md") -> str:
+    """Generate a hashed filename from a URL.
+
+    Args:
+        url: The URL to hash.
+        extension: File extension including the dot.
+
+    Returns:
+        Filename in format "{domain}-{hash}{extension}".
+    """
+    domain, _ = split_url(url)
+    url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+    return f"{domain}-{url_hash}{extension}"
 
 
 def process_url(url: str) -> tuple[str | None, str]:
