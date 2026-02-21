@@ -5,6 +5,8 @@ import re
 from collections.abc import Callable
 from urllib.parse import urlparse, urlunparse
 
+import tldextract
+
 # URLs starting with these prefixes are skipped entirely
 SKIP_PREFIXES = ("https://localhost",)
 
@@ -104,16 +106,48 @@ def _rewrite_medium(url: str) -> str:
 def split_url(url: str) -> tuple[str, str]:
     """Split the domain and the path from a URL.
 
+    Uses tldextract for accurate domain decomposition, stripping any
+    leading ``www.`` subdomain.
+
     Args:
-        url: The URL to extract from
+        url: The URL to extract from.
 
     Returns:
-        A tuple of (domain, path) where domain has 'www.' prefix removed
+        A tuple of (domain, path) where leading 'www.' is removed from the
+        domain.
     """
     parsed = urlparse(url)
-    domain = parsed.netloc.removeprefix("www.")
-    path = parsed.path
-    return domain.lower(), path
+    extracted = tldextract.extract(url)
+
+    # Strip leading 'www' from subdomain parts
+    subdomain_parts = extracted.subdomain.split(".") if extracted.subdomain else []
+    if subdomain_parts and subdomain_parts[0] == "www":
+        subdomain_parts = subdomain_parts[1:]
+    subdomain = ".".join(subdomain_parts)
+
+    parts = [p for p in (subdomain, extracted.domain, extracted.suffix) if p]
+    domain = ".".join(parts).lower()
+
+    # Fallback for edge cases where tldextract returns nothing useful
+    if not domain:
+        domain = parsed.netloc.removeprefix("www.").lower()
+
+    return domain, parsed.path
+
+
+def registered_domain(url: str) -> str:
+    """Extract the registered domain from a URL.
+
+    Returns the top-level domain under the public suffix
+    (e.g. ``github.com`` from ``https://api.github.com/repos``).
+
+    Args:
+        url: The URL to extract from.
+
+    Returns:
+        The registered domain, or an empty string if not resolvable.
+    """
+    return tldextract.extract(url).top_domain_under_public_suffix
 
 
 # Domain -> rewriter function
