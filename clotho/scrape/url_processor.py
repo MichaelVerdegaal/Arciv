@@ -38,6 +38,8 @@ SKIP_DOMAIN_SUFFIXES = (
     "content.powerapps.com",
     "app.fabric.microsoft.com",
     "app.powerbi.com",
+    "youtube.com",
+    "youtu.be",
 )
 
 # Matches IP addresses as domain (e.g., "192.168.2.13", "10.0.0.1:8080")
