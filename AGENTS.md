@@ -8,7 +8,7 @@ way to organize a large collection of (markdown) notes. Techniques possible cove
 ## Tech Stack
 
 **Python:** 3.13  
-**Tools:** UV (packages), Ruff (lint/format), Ty (type check)
+**Tools:** UV (packages), Ruff (lint/format)
 
 ## Commands
 
@@ -31,9 +31,9 @@ uv run ruff format       # Format code
 - When writing regex, put the pattern inside a constant with the _RE suffix for the variable name (e.g. `DATE_RE`).
 - When adding imports in a __init__.py file, add it to the `__all__` list as well. 
 - If you're importing a variable or function from another file in the same module, use a relative import.
+- Use pathlib over OS for file paths.
 
 ⚠️ **Ask first:**
-
 - Adding dependencies beyond core stack
 - Changing schema node/edge types
 - Modifying query patterns
