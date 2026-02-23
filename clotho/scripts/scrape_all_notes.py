@@ -5,7 +5,7 @@ from loguru import logger
 from clotho.db import PageDatabase
 from clotho.notes import MarkdownNote
 from clotho.scrape import Scraper
-from config import DB_PATH, NOTES_PATH, configure_logger
+from config import DB_PATH, HTML_DIR, NOTES_PATH, configure_logger
 
 configure_logger()
 
@@ -23,7 +23,7 @@ logger.info(f"Collected {len(url_sources)} unique URLs to scrape")
 
 # Scrape all links concurrently
 with PageDatabase(DB_PATH) as db:
-    scraper = Scraper(db)
+    scraper = Scraper(db, html_dir=HTML_DIR)
     pages = scraper.scrape_batch(
         list(url_sources.keys()),
         source_notes=url_sources,

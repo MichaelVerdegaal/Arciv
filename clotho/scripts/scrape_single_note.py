@@ -4,7 +4,7 @@ from loguru import logger
 
 from clotho.db import Page, PageDatabase
 from clotho.scrape import Scraper
-from config import DB_PATH, configure_logger
+from config import DB_PATH, HTML_DIR, configure_logger
 
 configure_logger()
 
@@ -17,7 +17,7 @@ test_urls: list[str] = [
 
 # Scrape each URL individually (sync, for debugging)
 with PageDatabase(DB_PATH) as db:
-    scraper = Scraper(db)
+    scraper = Scraper(db, html_dir=HTML_DIR)
     for url in test_urls:
         page: Page | None = scraper.scrape(url, refetch=True, reclean=True)
         if page:

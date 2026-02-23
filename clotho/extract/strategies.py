@@ -9,7 +9,7 @@ from pathlib import Path
 
 from yake import KeywordExtractor as YakeExtractor
 
-from config import STOPWORDS_FILE
+from config import DATA_DIR
 
 
 class ExtractionStrategy(ABC):
@@ -57,7 +57,7 @@ class YakeStrategy(ExtractionStrategy):
     """
 
     _cached_stopwords: set[str] | None = None
-    DEFAULT_STOPWORDS_PATH: Path = STOPWORDS_FILE
+    DEFAULT_STOPWORDS_PATH: Path = DATA_DIR / "stopwords_en.txt"
 
     def __init__(
         self,

@@ -99,6 +99,24 @@ class PageDatabase:
             embedding=row["embedding"],
         )
 
+    def _get_merged_notes(self, url: str, new_notes: list[str]) -> list[str]:
+        """Merge new source notes with any existing ones for a URL.
+
+        Args:
+            url: The page URL (primary key).
+            new_notes: Note filenames to merge with existing.
+
+        Returns:
+            Sorted, deduplicated union of existing and new notes.
+        """
+        row = self._conn.execute(
+            "SELECT source_notes FROM pages WHERE url = ?", (url,)
+        ).fetchone()
+        if row is None:
+            return sorted(set(new_notes))
+        existing = Page.parse_source_notes(row["source_notes"])
+        return sorted(set(existing) | set(new_notes))
+
     # -- CRUD operations --
 
     def upsert(self, page: Page) -> None:
@@ -108,12 +126,7 @@ class PageDatabase:
             page: The page to insert or update. If the URL already exists,
                 source_notes are merged (union) rather than replaced.
         """
-        existing_row = self._conn.execute(
-            "SELECT source_notes FROM pages WHERE url = ?", (page.url,)
-        ).fetchone()
-        if existing_row:
-            existing_notes = Page.parse_source_notes(existing_row["source_notes"])
-            page.source_notes = sorted(set(existing_notes) | set(page.source_notes))
+        page.source_notes = self._get_merged_notes(page.url, page.source_notes)
 
         self._conn.execute(
             _UPSERT_SQL,
@@ -144,14 +157,11 @@ class PageDatabase:
             url: The page URL (primary key).
             new_notes: Note filenames to add.
         """
-        row = self._conn.execute(
-            "SELECT source_notes FROM pages WHERE url = ?", (url,)
-        ).fetchone()
+        row = self._conn.execute("SELECT 1 FROM pages WHERE url = ?", (url,)).fetchone()
         if row is None:
             return
 
-        existing = Page.parse_source_notes(row["source_notes"])
-        merged = sorted(set(existing) | set(new_notes))
+        merged = self._get_merged_notes(url, new_notes)
         self._conn.execute(
             "UPDATE pages SET source_notes = ? WHERE url = ?",
             (json.dumps(merged), url),

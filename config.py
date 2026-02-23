@@ -13,7 +13,6 @@ NOTES_PATH = Path(
 )  # TODO: will remove hardcoding later
 
 # File constants
-STOPWORDS_FILE = DATA_DIR / "stopwords_en.txt"
 DB_PATH = DATA_DIR / "clotho.db"
 
 # Load environment variables
@@ -41,13 +40,13 @@ def configure_logger():
         enqueue=True,
     )
 
-    # File - mode="w" truncates on each run
+    # File - mode="a" appends across runs
     logger.add(
         ROOT_DIR / "execution.log",
         format=log_format,
         level="DEBUG",
         backtrace=True,
         diagnose=True,
-        mode="w",
+        rotation="1 day",
         enqueue=True,
     )
