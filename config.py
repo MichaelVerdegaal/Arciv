@@ -23,7 +23,7 @@ def configure_logger():
     """Configure loguru logger with detailed formatting."""
     logger.remove()
 
-    # Shared format (color tags get stripped in file output)
+    # Shared formt (color tags get stripped in file output)
     log_format = (
         "<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | "
         "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "

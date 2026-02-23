@@ -8,10 +8,12 @@ import brotli
 from loguru import logger
 from playwright.async_api import Browser as AsyncBrowser, async_playwright
 from playwright.sync_api import sync_playwright
+from playwright_stealth import Stealth
 
 from clotho.db import Page, PageDatabase
 
 from .url_processor import hash_filename, process_url, registered_domain, split_url
+from .user_agents import random_user_agent
 
 TIMEOUT_MS = 10000
 DEFAULT_CONCURRENCY = 5
@@ -190,9 +192,10 @@ class Scraper:
         Returns:
             Raw HTML string, or None if the fetch failed.
         """
-        with sync_playwright() as p:
+        stealth = Stealth()
+        with stealth.use_sync(sync_playwright()) as p:
             browser = p.chromium.launch(headless=True)
-            pw_page = browser.new_page()
+            pw_page = browser.new_page(user_agent=random_user_agent())
             try:
                 pw_page.goto(
                     url,
@@ -264,8 +267,9 @@ class Scraper:
     ) -> list[Page]:
         """Fetch URLs concurrently with a shared browser instance."""
         semaphore = asyncio.Semaphore(self.max_concurrency)
+        stealth = Stealth()
 
-        async with async_playwright() as p:
+        async with stealth.use_async(async_playwright()) as p:
             browser = await p.chromium.launch(headless=True)
             tasks = [
                 self._fetch_one_async(semaphore, browser, *item) for item in to_fetch
@@ -300,7 +304,7 @@ class Scraper:
             The Page if fetch succeeded, None otherwise.
         """
         async with semaphore:
-            pw_page = await browser.new_page()
+            pw_page = await browser.new_page(user_agent=random_user_agent())
             try:
                 await pw_page.goto(
                     processed_url,
