@@ -1,6 +1,5 @@
 """SQLite database for storing scraped page data."""
 
-import json
 import sqlite3
 from pathlib import Path
 from typing import Self
@@ -11,7 +10,6 @@ _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS pages (
     url             TEXT PRIMARY KEY,
     original_url    TEXT NOT NULL,
-    source_notes    TEXT NOT NULL DEFAULT '[]',
     domain          TEXT NOT NULL DEFAULT '',
     status          TEXT NOT NULL DEFAULT 'pending',
     fail_reason     TEXT,
@@ -23,17 +21,22 @@ CREATE TABLE IF NOT EXISTS pages (
     scraped_at      TEXT,
     embedding       BLOB
 );
+
+CREATE TABLE IF NOT EXISTS page_sources (
+    url       TEXT NOT NULL REFERENCES pages(url),
+    note_name TEXT NOT NULL,
+    PRIMARY KEY (url, note_name)
+);
 """
 
 _UPSERT_SQL = """\
 INSERT INTO pages (
-    url, original_url, source_notes, domain, status,
+    url, original_url, domain, status,
     fail_reason, md_content, html_path, title, author,
     word_count, scraped_at, embedding
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(url) DO UPDATE SET
     original_url = excluded.original_url,
-    source_notes = excluded.source_notes,
     domain       = excluded.domain,
     status       = excluded.status,
     fail_reason  = excluded.fail_reason,
@@ -48,7 +51,7 @@ ON CONFLICT(url) DO UPDATE SET
 
 
 class PageDatabase:
-    """SQLite-backed storage for scraped pages.
+    """SQLite-backed storage for scraped pages and their source notes.
 
     Use as a context manager to ensure the connection is closed:
 
@@ -65,8 +68,7 @@ class PageDatabase:
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute(_SCHEMA)
-        self._conn.commit()
+        self._conn.executescript(_SCHEMA)
 
     def close(self) -> None:
         """Close the database connection."""
@@ -86,7 +88,6 @@ class PageDatabase:
         return Page(
             url=row["url"],
             original_url=row["original_url"],
-            source_notes=Page.parse_source_notes(row["source_notes"]),
             domain=row["domain"],
             status=row["status"],
             fail_reason=row["fail_reason"],
@@ -99,41 +100,19 @@ class PageDatabase:
             embedding=row["embedding"],
         )
 
-    def _get_merged_notes(self, url: str, new_notes: list[str]) -> list[str]:
-        """Merge new source notes with any existing ones for a URL.
-
-        Args:
-            url: The page URL (primary key).
-            new_notes: Note filenames to merge with existing.
-
-        Returns:
-            Sorted, deduplicated union of existing and new notes.
-        """
-        row = self._conn.execute(
-            "SELECT source_notes FROM pages WHERE url = ?", (url,)
-        ).fetchone()
-        if row is None:
-            return sorted(set(new_notes))
-        existing = Page.parse_source_notes(row["source_notes"])
-        return sorted(set(existing) | set(new_notes))
-
-    # -- CRUD operations --
+    # -- page CRUD --
 
     def upsert(self, page: Page) -> None:
-        """Insert or update a page, merging source_notes with any existing record.
+        """Insert or update a page.
 
         Args:
-            page: The page to insert or update. If the URL already exists,
-                source_notes are merged (union) rather than replaced.
+            page: The page to insert or update.
         """
-        page.source_notes = self._get_merged_notes(page.url, page.source_notes)
-
         self._conn.execute(
             _UPSERT_SQL,
             (
                 page.url,
                 page.original_url,
-                page.source_notes_json(),
                 page.domain,
                 page.status,
                 page.fail_reason,
@@ -148,23 +127,17 @@ class PageDatabase:
         )
         self._conn.commit()
 
-    def merge_source_notes(self, url: str, new_notes: list[str]) -> None:
-        """Add source notes to an existing page without modifying other fields.
+    def ensure_pages(self, url_map: dict[str, tuple[str, str]]) -> None:
+        """Create pending page entries for URLs not yet in the database.
 
-        No-op if the URL doesn't exist in the database.
+        Existing pages are left unchanged.
 
         Args:
-            url: The page URL (primary key).
-            new_notes: Note filenames to add.
+            url_map: Mapping of processed_url -> (original_url, domain).
         """
-        row = self._conn.execute("SELECT 1 FROM pages WHERE url = ?", (url,)).fetchone()
-        if row is None:
-            return
-
-        merged = self._get_merged_notes(url, new_notes)
-        self._conn.execute(
-            "UPDATE pages SET source_notes = ? WHERE url = ?",
-            (json.dumps(merged), url),
+        self._conn.executemany(
+            "INSERT OR IGNORE INTO pages (url, original_url, domain) VALUES (?, ?, ?)",
+            [(url, orig, domain) for url, (orig, domain) in url_map.items()],
         )
         self._conn.commit()
 
@@ -184,7 +157,7 @@ class PageDatabase:
         """Get all pages with a given status.
 
         Args:
-            status: One of 'pending', 'scraped', 'failed', 'too_short'.
+            status: One of 'pending', 'fetched', 'scraped', 'failed', 'too_short'.
 
         Returns:
             List of matching Pages.
@@ -233,3 +206,52 @@ class PageDatabase:
             "SELECT 1 FROM pages WHERE url = ? LIMIT 1", (url,)
         ).fetchone()
         return row is not None
+
+    # -- source notes --
+
+    def rebuild_sources(self, url_to_notes: dict[str, list[str]]) -> None:
+        """Replace all page_sources with the current note-to-URL mapping.
+
+        Clears the entire page_sources table and repopulates from the
+        provided mapping. This ensures removed links in notes are reflected
+        in the database.
+
+        Args:
+            url_to_notes: Mapping of processed_url -> list of note filenames.
+        """
+        self._conn.execute("DELETE FROM page_sources")
+        self._conn.executemany(
+            "INSERT OR IGNORE INTO page_sources (url, note_name) VALUES (?, ?)",
+            [(url, note) for url, notes in url_to_notes.items() for note in notes],
+        )
+        self._conn.commit()
+
+    def get_sources(self, url: str) -> list[str]:
+        """Get source note filenames for a URL.
+
+        Args:
+            url: The processed/normalized URL.
+
+        Returns:
+            Sorted list of note filenames that reference this URL.
+        """
+        rows = self._conn.execute(
+            "SELECT note_name FROM page_sources WHERE url = ? ORDER BY note_name",
+            (url,),
+        ).fetchall()
+        return [row["note_name"] for row in rows]
+
+    def get_urls_for_note(self, note_name: str) -> list[str]:
+        """Get all URLs referenced by a specific note.
+
+        Args:
+            note_name: The note filename.
+
+        Returns:
+            List of processed URLs referenced by the note.
+        """
+        rows = self._conn.execute(
+            "SELECT url FROM page_sources WHERE note_name = ? ORDER BY url",
+            (note_name,),
+        ).fetchall()
+        return [row["url"] for row in rows]

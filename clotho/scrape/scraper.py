@@ -1,40 +1,37 @@
-"""Web scraper that fetches pages and stores results in SQLite."""
+"""Web scraper that fetches HTML pages and stores them as compressed archives."""
 
 import asyncio
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
 
 import aiofiles
 import brotli
 from loguru import logger
-from playwright.async_api import async_playwright
+from playwright.async_api import Browser as AsyncBrowser, async_playwright
 from playwright.sync_api import sync_playwright
 
 from clotho.db import Page, PageDatabase
-from clotho.parse import ConversionResult, parse_html
 
 from .url_processor import hash_filename, process_url, registered_domain, split_url
 
 TIMEOUT_MS = 10000
 DEFAULT_CONCURRENCY = 5
-DEFAULT_MIN_WORDS = 200
 BROTLI_QUALITY = 6
 
 
 class Scraper:
-    """Web scraper that fetches pages and stores results in SQLite.
+    """Web scraper that fetches HTML pages and stores compressed archives.
 
-    Supports both single-page scraping (synchronous, for debugging) and
-    batch scraping (async with concurrency control). All results are
-    persisted to a PageDatabase.
+    Handles URL processing, HTML fetching via Playwright, and Brotli-compressed
+    archival. Does NOT parse HTML to markdown — use clotho.parse.Parser for that.
+
+    Supports both single-page fetching (sync, for debugging) and batch
+    fetching (async with concurrency control).
 
     Args:
-        db: Database to store scraped pages.
+        db: Database to store page records.
         html_dir: Directory for storing compressed HTML archives.
         page_timeout: Playwright page load timeout in milliseconds.
         max_concurrency: Maximum concurrent page fetches for batch operations.
-        min_words: Minimum word count for a page to be considered valid.
     """
 
     def __init__(
@@ -43,13 +40,11 @@ class Scraper:
         html_dir: Path,
         page_timeout: int = TIMEOUT_MS,
         max_concurrency: int = DEFAULT_CONCURRENCY,
-        min_words: int = DEFAULT_MIN_WORDS,
     ):
         self.db = db
         self.html_dir = html_dir
         self.page_timeout = page_timeout
         self.max_concurrency = max_concurrency
-        self.min_words = min_words
 
     # =========================================================================
     # INTERNAL HELPERS
@@ -77,92 +72,49 @@ class Scraper:
             brotli.compress(html_content.encode("utf-8"), quality=BROTLI_QUALITY)
         )
 
-    @staticmethod
-    def _load_compressed_html(path: Path) -> str:
-        """Load and decompress a Brotli-compressed HTML file."""
-        return brotli.decompress(path.read_bytes()).decode("utf-8")
+    def _needs_fetch(self, processed_url: str, refetch: bool) -> bool:
+        """Check if a URL needs to be fetched.
 
-    def _resolve_cache(
-        self,
-        processed_url: str,
-        html_abs_path: Path,
-        refetch: bool,
-        reclean: bool,
-    ) -> Literal["cached", "reconvert", "fetch"]:
-        """Determine what work is needed for a URL.
+        Returns True for new URLs, pending URLs, and all URLs when refetch
+        is True. Already-fetched/scraped/failed URLs are skipped.
 
         Args:
-            processed_url: The processed/normalized URL.
-            html_abs_path: Path to the compressed HTML archive on disk.
-            refetch: Whether to re-download HTML even if cached.
-            reclean: Whether to re-convert HTML to markdown even if cached.
+            processed_url: The URL to check.
+            refetch: Force re-download regardless of status.
 
         Returns:
-            "cached" if existing scraped result can be reused,
-            "reconvert" if HTML exists on disk and just needs re-parsing,
-            "fetch" if the page needs to be downloaded.
+            True if the page should be fetched.
         """
+        if refetch:
+            return True
         existing = self.db.get(processed_url)
-        if existing and existing.status == "scraped" and not reclean and not refetch:
-            return "cached"
-        if not refetch and html_abs_path.exists():
-            return "reconvert"
-        return "fetch"
+        if existing is None:
+            return True
+        return existing.status == "pending"
 
-    def _build_and_store(
+    def _store_fetch_success(
         self,
         processed_url: str,
         original_url: str,
-        source_notes: list[str],
         domain: str,
         html_subpath: str,
-        result: ConversionResult | None,
-    ) -> Page | None:
-        """Build a Page from conversion result, store in DB, and log.
-
-        Returns:
-            The Page if scraping succeeded (status='scraped'), None otherwise.
-            Failed/too-short outcomes are still stored in the database.
-        """
+    ) -> Page:
+        """Record a successful fetch in the database."""
         page = Page(
             url=processed_url,
             original_url=original_url,
-            source_notes=source_notes,
             domain=domain,
+            status="fetched",
             html_path=html_subpath,
         )
-
-        if result is None:
-            page.status = "failed"
-            page.fail_reason = "extraction failed"
-        elif result.word_count < self.min_words:
-            page.status = "too_short"
-            page.fail_reason = (
-                f"too short ({result.word_count} < {self.min_words} words)"
-            )
-            page.word_count = result.word_count
-        else:
-            page.status = "scraped"
-            page.md_content = result.md_content
-            page.title = result.title
-            page.author = result.author
-            page.word_count = result.word_count
-            page.scraped_at = datetime.now(timezone.utc).isoformat()
-
         self.db.upsert(page)
-
-        if page.status != "scraped":
-            logger.warning(f"Failed {processed_url}: {page.fail_reason}")
-            return None
-
-        logger.info(f"Scraped {processed_url} ({page.word_count} words)")
+        logger.info(f"Fetched {processed_url}")
         return page
 
     def _store_fetch_failure(
         self,
         processed_url: str,
         original_url: str,
-        source_notes: list[str],
         domain: str,
         fail_reason: str,
     ) -> None:
@@ -170,7 +122,6 @@ class Scraper:
         page = Page(
             url=processed_url,
             original_url=original_url,
-            source_notes=source_notes,
             domain=domain,
             status="failed",
             fail_reason=fail_reason,
@@ -196,68 +147,39 @@ class Scraper:
     # SYNCHRONOUS - Single page, debuggable
     # =========================================================================
 
-    def scrape(
-        self,
-        url: str,
-        source_notes: list[str] | None = None,
-        refetch: bool = False,
-        reclean: bool = False,
-        clean: bool = True,
-    ) -> Page | None:
-        """Scrape a single URL synchronously.
+    def scrape(self, url: str, refetch: bool = False) -> Page | None:
+        """Fetch a single URL synchronously.
 
-        This is the simple, debuggable path. Use for single pages or debugging.
-        For multiple URLs, use scrape_batch() instead.
+        Downloads the HTML, saves it as a Brotli-compressed archive, and
+        records the result in the database with status 'fetched'.
+        Does NOT convert HTML to markdown.
 
         Args:
-            url: The URL to scrape.
-            source_notes: Daily note filenames that referenced this URL.
-            refetch: Re-download HTML even if cached.
-            reclean: Re-convert HTML to markdown even if cached.
-            clean: Apply markdown cleaning to extracted content.
+            url: The URL to fetch.
+            refetch: Re-download HTML even if already fetched.
 
         Returns:
-            Page if scraping succeeded, None if skipped or failed.
-            Failed pages are still stored in the database.
+            Page if fetch succeeded or already cached, None if skipped/failed.
         """
         processed_url, skip_reason = process_url(url)
         if processed_url is None:
             logger.warning(f"Skipped {url}: {skip_reason}")
             return None
 
-        notes = source_notes or []
         domain = registered_domain(processed_url) or split_url(processed_url)[0]
         html_abs_path, html_subpath = self._html_path(processed_url)
 
-        # Merge source notes with any existing record
-        if notes:
-            self.db.merge_source_notes(processed_url, notes)
-
-        # Use shared cache resolution
-        action = self._resolve_cache(processed_url, html_abs_path, refetch, reclean)
-
-        if action == "cached":
-            logger.info(f"Scraped {processed_url} (cached)")
+        if not self._needs_fetch(processed_url, refetch):
+            logger.info(f"Already fetched {processed_url} (cached)")
             return self.db.get(processed_url)
 
-        if action == "reconvert":
-            html_content = self._load_compressed_html(html_abs_path)
-            result = parse_html(html_content, clean)
-            return self._build_and_store(
-                processed_url, url, notes, domain, html_subpath, result
-            )
-
-        # action == "fetch"
         html_content = self._fetch_sync(processed_url)
         if html_content is None:
-            self._store_fetch_failure(processed_url, url, notes, domain, "fetch failed")
+            self._store_fetch_failure(processed_url, url, domain, "fetch failed")
             return None
-        self._save_compressed_html(html_content, html_abs_path)
 
-        result = parse_html(html_content, clean)
-        return self._build_and_store(
-            processed_url, url, notes, domain, html_subpath, result
-        )
+        self._save_compressed_html(html_content, html_abs_path)
+        return self._store_fetch_success(processed_url, url, domain, html_subpath)
 
     def _fetch_sync(self, url: str) -> str | None:
         """Fetch HTML content synchronously using Playwright.
@@ -289,43 +211,28 @@ class Scraper:
     # ASYNC BATCH - Multiple pages with concurrency
     # =========================================================================
 
-    def scrape_batch(
-        self,
-        urls: list[str],
-        source_notes: dict[str, list[str]] | None = None,
-        refetch: bool = False,
-        reclean: bool = False,
-        clean: bool = True,
-    ) -> list[Page]:
-        """Scrape multiple URLs concurrently.
+    def scrape_batch(self, urls: list[str], refetch: bool = False) -> list[Page]:
+        """Fetch multiple URLs concurrently.
+
+        Downloads HTML for URLs that need it, skipping already-fetched pages.
+        Does NOT convert HTML to markdown.
 
         Args:
-            urls: List of URLs to scrape.
-            source_notes: Optional mapping of original URL to source note
-                filenames that referenced it.
-            refetch: Re-download HTML even if cached.
-            reclean: Re-convert HTML to markdown even if cached.
-            clean: Apply markdown cleaning to extracted content.
+            urls: List of URLs to fetch.
+            refetch: Re-download HTML even if already fetched.
 
         Returns:
-            List of successfully scraped Pages. Failed URLs are stored in
-            the database but omitted from results.
+            List of newly fetched Pages.
         """
-        return asyncio.run(
-            self._scrape_batch_async(urls, source_notes, refetch, reclean, clean)
-        )
+        return asyncio.run(self._scrape_batch_async(urls, refetch))
 
     async def _scrape_batch_async(
         self,
         urls: list[str],
-        source_notes_map: dict[str, list[str]] | None,
         refetch: bool,
-        reclean: bool,
-        clean: bool,
     ) -> list[Page]:
-        """Check caches, then fetch what's missing concurrently."""
-        results: list[Page] = []
-        to_fetch: list[tuple[str, str, list[str], str, str, Path]] = []
+        """Process URLs, skip cached, fetch the rest concurrently."""
+        to_fetch: list[tuple[str, str, str, str, Path]] = []
         seen_processed: set[str] = set()
 
         for url in urls:
@@ -334,56 +241,26 @@ class Scraper:
                 logger.warning(f"Skipped {url}: {skip_reason}")
                 continue
 
-            notes = (source_notes_map or {}).get(url, [])
-            domain = registered_domain(processed_url) or split_url(processed_url)[0]
-            html_abs_path, html_subpath = self._html_path(processed_url)
-
-            # Deduplicate processed URLs (multiple originals can map to same)
             if processed_url in seen_processed:
-                if notes:
-                    self.db.merge_source_notes(processed_url, notes)
                 continue
             seen_processed.add(processed_url)
 
-            # Merge source notes with any existing record
-            if notes:
-                self.db.merge_source_notes(processed_url, notes)
-
-            # Use shared cache resolution
-            action = self._resolve_cache(processed_url, html_abs_path, refetch, reclean)
-
-            if action == "cached":
-                existing = self.db.get(processed_url)
-                if existing:
-                    logger.info(f"Scraped {processed_url} (cached)")
-                    results.append(existing)
+            if not self._needs_fetch(processed_url, refetch):
+                logger.info(f"Already fetched {processed_url} (cached)")
                 continue
 
-            if action == "reconvert":
-                html_content = self._load_compressed_html(html_abs_path)
-                result = parse_html(html_content, clean)
-                page = self._build_and_store(
-                    processed_url, url, notes, domain, html_subpath, result
-                )
-                if page:
-                    results.append(page)
-                continue
+            domain = registered_domain(processed_url) or split_url(processed_url)[0]
+            html_abs_path, html_subpath = self._html_path(processed_url)
+            to_fetch.append((processed_url, url, domain, html_subpath, html_abs_path))
 
-            # action == "fetch"
-            to_fetch.append(
-                (processed_url, url, notes, domain, html_subpath, html_abs_path)
-            )
+        if not to_fetch:
+            return []
 
-        if to_fetch:
-            fetched = await self._fetch_all(to_fetch, clean)
-            results.extend(fetched)
-
-        return results
+        return await self._fetch_all(to_fetch)
 
     async def _fetch_all(
         self,
-        to_fetch: list[tuple[str, str, list[str], str, str, Path]],
-        clean: bool,
+        to_fetch: list[tuple[str, str, str, str, Path]],
     ) -> list[Page]:
         """Fetch URLs concurrently with a shared browser instance."""
         semaphore = asyncio.Semaphore(self.max_concurrency)
@@ -391,41 +268,36 @@ class Scraper:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             tasks = [
-                self._fetch_and_store_async(semaphore, browser, *item, clean)
-                for item in to_fetch
+                self._fetch_one_async(semaphore, browser, *item) for item in to_fetch
             ]
             fetched = await asyncio.gather(*tasks)
             await browser.close()
 
         return [page for page in fetched if page is not None]
 
-    async def _fetch_and_store_async(
+    async def _fetch_one_async(
         self,
         semaphore: asyncio.Semaphore,
-        browser: object,
+        browser: AsyncBrowser,
         processed_url: str,
         original_url: str,
-        notes: list[str],
         domain: str,
         html_subpath: str,
         html_abs_path: Path,
-        clean: bool,
     ) -> Page | None:
-        """Fetch a single URL, save HTML, convert, and store.
+        """Fetch a single URL and save the Brotli-compressed HTML archive.
 
         Args:
             semaphore: Concurrency limiter.
             browser: Playwright browser instance.
             processed_url: The processed/normalized URL.
             original_url: The original URL before processing.
-            notes: Source note filenames.
             domain: Registered domain.
             html_subpath: Relative path for DB storage.
             html_abs_path: Absolute path for HTML archive.
-            clean: Whether to apply markdown cleaning.
 
         Returns:
-            The Page if scraping succeeded, None otherwise.
+            The Page if fetch succeeded, None otherwise.
         """
         async with semaphore:
             pw_page = await browser.new_page()
@@ -446,22 +318,14 @@ class Scraper:
                 async with aiofiles.open(html_abs_path, "wb") as f:
                     await f.write(compressed)
 
-                # Convert and store
-                result = parse_html(html_content, clean)
-                return self._build_and_store(
-                    processed_url,
-                    original_url,
-                    notes,
-                    domain,
-                    html_subpath,
-                    result,
+                return self._store_fetch_success(
+                    processed_url, original_url, domain, html_subpath
                 )
 
             except Exception as e:
                 self._store_fetch_failure(
                     processed_url,
                     original_url,
-                    notes,
                     domain,
                     self._format_fetch_error(e),
                 )

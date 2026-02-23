@@ -6,10 +6,12 @@ from .convert import (
     html_to_markdown,
     parse_html,
 )
+from .parser import Parser
 
 __all__ = [
     "ConversionResult",
     "MarkdownCleaner",
+    "Parser",
     "clean_markdown",
     "count_words",
     "extract_metadata",
