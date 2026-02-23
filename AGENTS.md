@@ -82,6 +82,7 @@ that obviously works, not the one that impressively almost works.
 - Put regex patterns in constants with the `_RE` suffix (e.g. `DATE_RE`).
 - When adding imports in `__init__.py`, add to `__all__` as well.
 - Use relative imports within the same module.
+- Use `pathlib` over `os` for file paths.
 
 ⚠️ **Ask first:**
 

@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 from loguru import logger
-from trafilatura import extract
+from trafilatura import bare_extraction, extract
 
 # Next.js __NEXT_DATA__ scripts can contain literal "</script>" inside JSON strings,
 # causing the script to prematurely close and leak JSON into the document body.
@@ -15,6 +15,9 @@ NEXT_DATA_RE = re.compile(
 )
 
 WORD_RE = re.compile(r"\b\w+\b")
+
+# Fallback regex for extracting <title> when trafilatura doesn't find it
+TITLE_TAG_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.DOTALL | re.IGNORECASE)
 
 
 def count_words(text: str) -> int:
@@ -68,6 +71,52 @@ def html_to_markdown(
         favor_precision=favor_precision,
         prune_xpath=prune_xpath,
     )
+
+
+def extract_metadata(html_content: str) -> tuple[str | None, str | None]:
+    """Extract title and author from HTML content.
+
+    Uses trafilatura's bare_extraction for metadata parsing.
+
+    Args:
+        html_content: Raw HTML string.
+
+    Returns:
+        Tuple of (title, author). Either may be None if not found.
+    """
+    try:
+        result = bare_extraction(html_content)
+    except Exception:
+        return _title_from_tag(html_content), None
+
+    if not result:
+        return _title_from_tag(html_content), None
+
+    # trafilatura 2.x returns a Document object with attributes
+    title = getattr(result, "title", None)
+    author = getattr(result, "author", None)
+
+    # Fall back to <title> tag if trafilatura didn't extract one
+    if not title:
+        title = _title_from_tag(html_content)
+
+    return title or None, author or None
+
+
+def _title_from_tag(html_content: str) -> str | None:
+    """Extract title from the HTML <title> tag as a fallback.
+
+    Args:
+        html_content: Raw HTML string.
+
+    Returns:
+        The title text, or None if no <title> tag found.
+    """
+    match = TITLE_TAG_RE.search(html_content)
+    if match:
+        title = match.group(1).strip()
+        return title if title else None
+    return None
 
 
 def convert_html_file(

@@ -15,6 +15,7 @@ NOTES_PATH = Path(
 
 # File constants
 STOPWORDS_FILE = DATA_DIR / "stopwords_en.txt"
+DB_PATH = DATA_DIR / "clotho.db"
 
 # Load environment variables
 load_dotenv(ROOT_DIR / ".env")

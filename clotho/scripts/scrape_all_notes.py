@@ -1,12 +1,11 @@
-"""
-Work in progress script for testing and development purposes.
-"""
+"""Scrape all URLs from Obsidian daily notes into the database."""
 
 from loguru import logger
 
+from clotho.db import PageDatabase
 from clotho.notes import MarkdownNote
 from clotho.scrape import Scraper
-from config import MARKDOWN_DIR, NOTES_PATH, configure_logger
+from config import DB_PATH, NOTES_PATH, configure_logger
 
 configure_logger()
 
@@ -14,23 +13,28 @@ configure_logger()
 note_files: list[MarkdownNote] = MarkdownNote.get_note_files(NOTES_PATH)
 logger.info(f"Found {len(note_files)} notes in NOTES_PATH")
 
-# Collect all links from notes
-all_links: list[str] = []
+# Extract links with source note tracking
+url_sources: dict[str, list[str]] = {}
 for note in note_files:
-    extracted_links = note.extract_links()
-    if extracted_links:
-        logger.debug(
-            f"Extracted {len(extracted_links)} links from {note.note_path.name}"
-        )
-        all_links.extend(extracted_links)
+    for link in note.extract_links():
+        url_sources.setdefault(link, []).append(note.filename)
 
-logger.info(f"Collected {len(all_links)} total links to scrape")
+logger.info(f"Collected {len(url_sources)} unique URLs to scrape")
 
 # Scrape all links concurrently
-scraper: Scraper = Scraper()
-scraped_notes: list[MarkdownNote] = scraper.scrape_batch(
-    all_links, refetch=False, reclean=False
-)
+with PageDatabase(DB_PATH) as db:
+    scraper = Scraper(db)
+    pages = scraper.scrape_batch(
+        list(url_sources.keys()),
+        source_notes=url_sources,
+        refetch=False,
+        reclean=False,
+    )
 
-logger.info(f"Scraped {len(scraped_notes)} notes total")
-scraped_notes = MarkdownNote.get_note_files(MARKDOWN_DIR)
+    logger.info(
+        f"Results: {len(pages)} scraped, "
+        f"{db.count()} total in DB "
+        f"({db.count('scraped')} scraped, "
+        f"{db.count('failed')} failed, "
+        f"{db.count('too_short')} too short)"
+    )
