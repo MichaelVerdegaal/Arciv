@@ -191,6 +191,15 @@ class Scraper:
             url=processed_url,
             original_url=original_url,
             source_notes=source_notes,
+            domain=domain,
+            status="failed",
+            fail_reason=fail_reason,
+        )
+        self.db.upsert(page)
+        logger.warning(f"Failed {processed_url}: {fail_reason}")
+
+    @staticmethod
+    def _format_fetch_error(error: Exception) -> str:
         """Format a fetch error into a concise reason string."""
         error_msg = str(error).split("\n")[0]
 
@@ -210,10 +219,11 @@ class Scraper:
     def scrape(
         self,
         url: str,
+        source_notes: list[str] | None = None,
         refetch: bool = False,
         reclean: bool = False,
         clean: bool = True,
-    ) -> MarkdownNote | None:
+    ) -> Page | None:
         """Scrape a single URL synchronously.
 
         This is the simple, debuggable path. Use for single pages or debugging.
@@ -221,66 +231,77 @@ class Scraper:
 
         Args:
             url: The URL to scrape.
+            source_notes: Daily note filenames that referenced this URL.
             refetch: Re-download HTML even if cached.
-            reclean: Regenerate Markdown even if cached.
+            reclean: Re-convert HTML to markdown even if cached.
             clean: Apply markdown cleaning to extracted content.
 
         Returns:
-            MarkdownNote for the scraped content, or None if scraping failed.
+            Page if scraping succeeded, None if skipped or failed.
+            Failed pages are still stored in the database.
         """
         processed_url, skip_reason = process_url(url)
         if processed_url is None:
             logger.warning(f"Skipped {url}: {skip_reason}")
             return None
 
-        # Filenames
-        domain, _ = split_url(processed_url)
-        html_path = HTML_DIR / domain / self._hash_filename(processed_url, ".html")
-        md_path = MARKDOWN_DIR / domain / self._hash_filename(processed_url, ".md")
-        md_filename = md_path.name
+        notes = source_notes or []
+        domain = registered_domain(processed_url) or split_url(processed_url)[0]
+        html_abs_path, html_subpath = self._html_path(processed_url)
 
-        # Cache hit: markdown exists
-        if md_path.exists() and not reclean and not refetch:
-            logger.info(f"Scraped {processed_url} -> {md_filename} (cached)")
-            return MarkdownNote(md_path)
+        # Merge source notes with any existing record
+        existing = self.db.get(processed_url)
+        if existing and notes:
+            self.db.merge_source_notes(processed_url, notes)
 
-        # Cache hit: HTML exists, just reconvert
-        if html_path.exists() and not refetch:
-            html_content = html_path.read_text(encoding="utf-8")
-            note, fail_reason = self._convert_and_save(html_content, md_path, clean)
-            if note:
-                logger.info(f"Scraped {processed_url} -> {md_filename} (reconverted)")
-            else:
-                logger.warning(f"Failed {processed_url}: {fail_reason}")
-            return note
+        # Cache hit: already scraped, no reclean/refetch needed
+        if existing and existing.status == "scraped" and not reclean and not refetch:
+            logger.info(f"Scraped {processed_url} (cached)")
+            return existing
 
-        # Cache miss: fetch fresh
+        # Get HTML content: from compressed cache or fresh fetch
+        html_content: str | None = None
+        if not refetch and html_abs_path.exists():
+            html_content = self._load_compressed_html(html_abs_path)
+        else:
+            html_content = self._fetch_sync(processed_url)
+            if html_content is None:
+                self._store_fetch_failure(
+                    processed_url, url, notes, domain, "fetch failed"
+                )
+                return None
+            self._save_compressed_html(html_content, html_abs_path)
+
+        # Convert HTML to markdown and store result
+        result = self._convert(html_content, clean)
+        return self._build_and_store(
+            processed_url, url, notes, domain, html_subpath, result
+        )
+
+    def _fetch_sync(self, url: str) -> str | None:
+        """Fetch HTML content synchronously using Playwright.
+
+        Args:
+            url: The URL to fetch.
+
+        Returns:
+            Raw HTML string, or None if the fetch failed.
+        """
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
+            pw_page = browser.new_page()
             try:
-                page.goto(
-                    processed_url,
+                pw_page.goto(
+                    url,
                     wait_until="domcontentloaded",
                     timeout=self.page_timeout,
                 )
-                html_content = page.content()
-
-                html_path.parent.mkdir(parents=True, exist_ok=True)
-                html_path.write_text(html_content, encoding="utf-8")
-
-                note, fail_reason = self._convert_and_save(html_content, md_path, clean)
-                if note:
-                    logger.info(f"Scraped {processed_url} -> {md_filename}")
-                else:
-                    logger.warning(f"Failed {processed_url}: {fail_reason}")
-                return note
-
+                return pw_page.content()
             except Exception as e:
-                logger.warning(f"Failed {processed_url}: {self._format_fetch_error(e)}")
+                logger.warning(f"Fetch error {url}: {self._format_fetch_error(e)}")
                 return None
             finally:
-                page.close()
+                pw_page.close()
                 browser.close()
 
     # =========================================================================
@@ -290,34 +311,41 @@ class Scraper:
     def scrape_batch(
         self,
         urls: list[str],
+        source_notes: dict[str, list[str]] | None = None,
         refetch: bool = False,
         reclean: bool = False,
         clean: bool = True,
-    ) -> list[MarkdownNote]:
+    ) -> list[Page]:
         """Scrape multiple URLs concurrently.
 
         Args:
             urls: List of URLs to scrape.
+            source_notes: Optional mapping of original URL to source note
+                filenames that referenced it.
             refetch: Re-download HTML even if cached.
-            reclean: Regenerate Markdown even if cached.
+            reclean: Re-convert HTML to markdown even if cached.
             clean: Apply markdown cleaning to extracted content.
 
         Returns:
-            List of successfully scraped MarkdownNotes (failed URLs are logged
-            and omitted from results).
+            List of successfully scraped Pages. Failed URLs are stored in
+            the database but omitted from results.
         """
-        return asyncio.run(self._scrape_batch_async(urls, refetch, reclean, clean))
+        return asyncio.run(
+            self._scrape_batch_async(urls, source_notes, refetch, reclean, clean)
+        )
 
     async def _scrape_batch_async(
         self,
         urls: list[str],
+        source_notes_map: dict[str, list[str]] | None,
         refetch: bool,
         reclean: bool,
         clean: bool,
-    ) -> list[MarkdownNote]:
+    ) -> list[Page]:
         """Check caches, then fetch what's missing concurrently."""
-        results: list[MarkdownNote] = []
-        to_fetch: list[tuple[str, Path, Path]] = []
+        results: list[Page] = []
+        to_fetch: list[tuple[str, str, list[str], str, str, Path]] = []
+        seen_processed: set[str] = set()
 
         for url in urls:
             processed_url, skip_reason = process_url(url)
@@ -325,31 +353,47 @@ class Scraper:
                 logger.warning(f"Skipped {url}: {skip_reason}")
                 continue
 
-            domain, _ = split_url(processed_url)
-            html_path = HTML_DIR / domain / self._hash_filename(processed_url, ".html")
-            md_path = MARKDOWN_DIR / domain / self._hash_filename(processed_url, ".md")
-            md_filename = md_path.name
+            notes = (source_notes_map or {}).get(url, [])
+            domain = registered_domain(processed_url) or split_url(processed_url)[0]
+            html_abs_path, html_subpath = self._html_path(processed_url)
 
-            # Cache hit: markdown exists
-            if md_path.exists() and not reclean and not refetch:
-                logger.info(f"Scraped {processed_url} -> {md_filename} (cached)")
-                results.append(MarkdownNote(md_path))
+            # Deduplicate processed URLs (multiple originals can map to same)
+            if processed_url in seen_processed:
+                if notes:
+                    self.db.merge_source_notes(processed_url, notes)
+                continue
+            seen_processed.add(processed_url)
+
+            # Merge source notes with any existing record
+            existing = self.db.get(processed_url)
+            if existing and notes:
+                self.db.merge_source_notes(processed_url, notes)
+
+            # Cache hit: already scraped
+            if (
+                existing
+                and existing.status == "scraped"
+                and not reclean
+                and not refetch
+            ):
+                logger.info(f"Scraped {processed_url} (cached)")
+                results.append(existing)
                 continue
 
-            # Cache hit: HTML exists, just reconvert
-            if html_path.exists() and not refetch:
-                html_content = html_path.read_text(encoding="utf-8")
-                note, fail_reason = self._convert_and_save(html_content, md_path, clean)
-                if note:
-                    logger.info(
-                        f"Scraped {processed_url} -> {md_filename} (reconverted)"
-                    )
-                    results.append(note)
-                else:
-                    logger.warning(f"Failed {processed_url}: {fail_reason}")
+            # HTML cached: reconvert without fetching
+            if not refetch and html_abs_path.exists():
+                html_content = self._load_compressed_html(html_abs_path)
+                result = self._convert(html_content, clean)
+                page = self._build_and_store(
+                    processed_url, url, notes, domain, html_subpath, result
+                )
+                if page:
+                    results.append(page)
                 continue
 
-            to_fetch.append((processed_url, html_path, md_path))
+            to_fetch.append(
+                (processed_url, url, notes, domain, html_subpath, html_abs_path)
+            )
 
         if to_fetch:
             fetched = await self._fetch_all(to_fetch, clean)
@@ -359,44 +403,60 @@ class Scraper:
 
     async def _fetch_all(
         self,
-        to_fetch: list[tuple[str, Path, Path]],
+        to_fetch: list[tuple[str, str, list[str], str, str, Path]],
         clean: bool,
-    ) -> list[MarkdownNote]:
-        """Fetch URLs concurrently with shared browser instance."""
+    ) -> list[Page]:
+        """Fetch URLs concurrently with a shared browser instance."""
         semaphore = asyncio.Semaphore(self.max_concurrency)
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
 
             async def fetch_one(
-                url: str, html_path: Path, md_path: Path
-            ) -> MarkdownNote | None:
-                md_filename = md_path.name
+                processed_url: str,
+                original_url: str,
+                notes: list[str],
+                domain: str,
+                html_subpath: str,
+                html_abs_path: Path,
+            ) -> Page | None:
                 async with semaphore:
-                    page = await browser.new_page()
+                    pw_page = await browser.new_page()
                     try:
-                        await page.goto(
-                            url,
+                        await pw_page.goto(
+                            processed_url,
                             wait_until="domcontentloaded",
                             timeout=self.page_timeout,
                         )
-                        html_content = await page.content()
+                        html_content = await pw_page.content()
 
-                        html_path.parent.mkdir(parents=True, exist_ok=True)
-                        async with aiofiles.open(html_path, "w", encoding="utf-8") as f:
-                            await f.write(html_content)
-
-                        note, fail_reason = self._convert_and_save(
-                            html_content, md_path, clean
+                        # Save Brotli-compressed HTML archive
+                        html_abs_path.parent.mkdir(parents=True, exist_ok=True)
+                        compressed = brotli.compress(
+                            html_content.encode("utf-8"),
+                            quality=BROTLI_QUALITY,
                         )
-                        if note:
-                            logger.info(f"Scraped {url} -> {md_filename}")
-                        else:
-                            logger.warning(f"Failed {url}: {fail_reason}")
-                        return note
+                        async with aiofiles.open(html_abs_path, "wb") as f:
+                            await f.write(compressed)
+
+                        # Convert and store
+                        result = self._convert(html_content, clean)
+                        return self._build_and_store(
+                            processed_url,
+                            original_url,
+                            notes,
+                            domain,
+                            html_subpath,
+                            result,
+                        )
 
                     except Exception as e:
-                        logger.warning(f"Failed {url}: {self._format_fetch_error(e)}")
+                        self._store_fetch_failure(
+                            processed_url,
+                            original_url,
+                            notes,
+                            domain,
+                            self._format_fetch_error(e),
                         )
                         return None
                     finally:

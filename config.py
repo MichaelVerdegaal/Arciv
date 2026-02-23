@@ -8,7 +8,6 @@ from loguru import logger
 ROOT_DIR = Path(__file__).parent
 DATA_DIR = ROOT_DIR / "data"
 HTML_DIR = DATA_DIR / "html"
-MARKDOWN_DIR = DATA_DIR / "markdown"
 NOTES_PATH = Path(
     "C:/Users/Michael/Documents/DevVault/Daily notes"
 )  # TODO: will remove hardcoding later
