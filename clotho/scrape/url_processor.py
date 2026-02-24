@@ -107,29 +107,20 @@ def _rewrite_medium(url: str) -> str:
 
 
 def split_url(url: str) -> tuple[str, str]:
-    """Split the domain and the path from a URL.
+    """Split the registered domain and the path from a URL.
 
-    Uses tldextract for accurate domain decomposition, stripping any
-    leading ``www.`` subdomain.
+    Uses tldextract for accurate domain decomposition, returning only
+    the registered domain (e.g. ``medium.com`` from ``aignishant.medium.com``).
 
     Args:
         url: The URL to extract from.
 
     Returns:
-        A tuple of (domain, path) where leading 'www.' is removed from the
-        domain.
+        A tuple of (domain, path) where domain is the registered domain
+        without subdomains.
     """
     parsed = urlparse(url)
-    extracted = tldextract.extract(url)
-
-    # Strip leading 'www' from subdomain parts
-    subdomain_parts = extracted.subdomain.split(".") if extracted.subdomain else []
-    if subdomain_parts and subdomain_parts[0] == "www":
-        subdomain_parts = subdomain_parts[1:]
-    subdomain = ".".join(subdomain_parts)
-
-    parts = [p for p in (subdomain, extracted.domain, extracted.suffix) if p]
-    domain = ".".join(parts).lower()
+    domain = tldextract.extract(url).top_domain_under_public_suffix
 
     # Fallback for edge cases where tldextract returns nothing useful
     if not domain:
