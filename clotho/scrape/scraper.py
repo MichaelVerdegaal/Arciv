@@ -18,6 +18,7 @@ from .user_agents import random_user_agent
 TIMEOUT_MS = 10000
 DEFAULT_CONCURRENCY = 5
 BROTLI_QUALITY = 6
+BLOCKED_RESOURCE_TYPES = {"image", "stylesheet", "font"}
 
 
 class Scraper:
@@ -196,6 +197,12 @@ class Scraper:
         with stealth.use_sync(sync_playwright()) as p:
             browser = p.chromium.launch(headless=True)
             pw_page = browser.new_page(user_agent=random_user_agent())
+            pw_page.route(
+                "**/*",
+                lambda route: route.abort()
+                if route.request.resource_type in BLOCKED_RESOURCE_TYPES
+                else route.continue_(),
+            )
             try:
                 pw_page.goto(
                     url,
@@ -305,6 +312,12 @@ class Scraper:
         """
         async with semaphore:
             pw_page = await browser.new_page(user_agent=random_user_agent())
+            await pw_page.route(
+                "**/*",
+                lambda route: route.abort()
+                if route.request.resource_type in BLOCKED_RESOURCE_TYPES
+                else route.continue_(),
+            )
             try:
                 await pw_page.goto(
                     processed_url,

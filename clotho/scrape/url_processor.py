@@ -29,6 +29,8 @@ SKIP_SUFFIXES = (
     ".wmv",
     ".flv",
     ".mkv",
+    ".json",
+    ".xml",
 )
 
 # Domains ending with these suffixes are skipped (handles subdomains)
