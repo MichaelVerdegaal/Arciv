@@ -10,7 +10,7 @@ from clotho.db import Page, PageDatabase
 
 from .convert import ConversionResult, parse_html
 
-DEFAULT_MIN_WORDS = 200
+DEFAULT_MIN_WORDS = 150
 
 
 class Parser:

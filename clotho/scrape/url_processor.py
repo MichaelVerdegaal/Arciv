@@ -40,6 +40,7 @@ SKIP_DOMAIN_SUFFIXES = (
     "app.powerbi.com",
     "youtube.com",
     "youtu.be",
+    "azure.com"
 )
 
 # Matches IP addresses as domain (e.g., "192.168.2.13", "10.0.0.1:8080")
