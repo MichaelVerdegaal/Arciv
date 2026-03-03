@@ -193,6 +193,29 @@ class PageDatabase:
             row = self._conn.execute("SELECT COUNT(*) AS n FROM pages").fetchone()
         return row["n"]
 
+    def update_embedding(self, url: str, embedding: bytes) -> None:
+        """Set the embedding blob for a single page.
+
+        Args:
+            url: The processed/normalized URL (primary key).
+            embedding: Embedding vector serialized as bytes.
+        """
+        self._conn.execute(
+            "UPDATE pages SET embedding = ? WHERE url = ?", (embedding, url)
+        )
+        self._conn.commit()
+
+    def update_embeddings_batch(self, pairs: list[tuple[bytes, str]]) -> None:
+        """Set embedding blobs for multiple pages in a single transaction.
+
+        Args:
+            pairs: List of (embedding_bytes, url) tuples.
+        """
+        self._conn.executemany(
+            "UPDATE pages SET embedding = ? WHERE url = ?", pairs
+        )
+        self._conn.commit()
+
     def url_exists(self, url: str) -> bool:
         """Check if a URL exists in the database.
 
