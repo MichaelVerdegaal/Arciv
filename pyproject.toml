@@ -6,12 +6,17 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "aiofiles>=25.1.0", # Asynchronous file operations
-    "chonkie[hub,st]>=1.4.2", # Text chunking
-    "hf-xet>=1.2.0", # Hugging Face faster downloads
     "loguru>=0.7.3", # Logging
-    "playwright>=1.56.0", # Hugging Face models
+    "playwright>=1.56.0", # Scraping and browser automation
     "trafilatura>=2.0.0", # HTML to markdown conversion
-    "python-dotenv>=1.2.1",
+    "python-dotenv>=1.2.1", # Environment variable management
+    "tldextract>=5.3.1", # Extracting domain information from URLs
+    "hf-xet>=1.2.0", # Quicker huggingface downloads
+    "torch==2.9.1", # PyTorch for machine learning
+    "chonkie[hub,st]>=1.5.6", # Chunking
+    "sentence-transformers>=5.2.3",  # Sentence embeddings
+    "brotli>=1.2.0",  # Compression for HTML files
+    "playwright-stealth>=2.0.2",  # Stealth plugin for Playwright
 ]
 
 [dependency-groups]
@@ -19,6 +24,10 @@ dev = [
     "ruff>=0.14.5", # Linting / formatting
 ]
 
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
 
 [[tool.uv.index]]
 name = "pytorch-cu126"

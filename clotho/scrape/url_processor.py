@@ -1,8 +1,11 @@
 """url_processor.py - URL processing for scraping: skip, rewrite, or pass through."""
 
+import hashlib
 import re
 from collections.abc import Callable
 from urllib.parse import urlparse, urlunparse
+
+import tldextract
 
 # URLs starting with these prefixes are skipped entirely
 SKIP_PREFIXES = ("https://localhost",)
@@ -26,6 +29,8 @@ SKIP_SUFFIXES = (
     ".wmv",
     ".flv",
     ".mkv",
+    ".json",
+    ".xml",
 )
 
 # Domains ending with these suffixes are skipped (handles subdomains)
@@ -35,6 +40,9 @@ SKIP_DOMAIN_SUFFIXES = (
     "content.powerapps.com",
     "app.fabric.microsoft.com",
     "app.powerbi.com",
+    "youtube.com",
+    "youtu.be",
+    "azure.com"
 )
 
 # Matches IP addresses as domain (e.g., "192.168.2.13", "10.0.0.1:8080")
@@ -101,18 +109,41 @@ def _rewrite_medium(url: str) -> str:
 
 
 def split_url(url: str) -> tuple[str, str]:
-    """Split the domain and the path from a URL.
+    """Split the registered domain and the path from a URL.
+
+    Uses tldextract for accurate domain decomposition, returning only
+    the registered domain (e.g. ``medium.com`` from ``aignishant.medium.com``).
 
     Args:
-        url: The URL to extract from
+        url: The URL to extract from.
 
     Returns:
-        A tuple of (domain, path) where domain has 'www.' prefix removed
+        A tuple of (domain, path) where domain is the registered domain
+        without subdomains.
     """
     parsed = urlparse(url)
-    domain = parsed.netloc.removeprefix("www.")
-    path = parsed.path
-    return domain.lower(), path
+    domain = tldextract.extract(url).top_domain_under_public_suffix
+
+    # Fallback for edge cases where tldextract returns nothing useful
+    if not domain:
+        domain = parsed.netloc.removeprefix("www.").lower()
+
+    return domain, parsed.path
+
+
+def registered_domain(url: str) -> str:
+    """Extract the registered domain from a URL.
+
+    Returns the top-level domain under the public suffix
+    (e.g. ``github.com`` from ``https://api.github.com/repos``).
+
+    Args:
+        url: The URL to extract from.
+
+    Returns:
+        The registered domain, or an empty string if not resolvable.
+    """
+    return tldextract.extract(url).top_domain_under_public_suffix
 
 
 # Domain -> rewriter function
@@ -121,6 +152,21 @@ DOMAIN_REWRITERS: dict[str, Callable[[str], str]] = {
     "raw.githubusercontent.com": _rewrite_raw_github,
     "medium.com": _rewrite_medium,
 }
+
+
+def hash_filename(url: str, extension: str = ".md") -> str:
+    """Generate a hashed filename from a URL.
+
+    Args:
+        url: The URL to hash.
+        extension: File extension including the dot.
+
+    Returns:
+        Filename in format "{domain}-{hash}{extension}".
+    """
+    domain, _ = split_url(url)
+    url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+    return f"{domain}-{url_hash}{extension}"
 
 
 def process_url(url: str) -> tuple[str | None, str]:

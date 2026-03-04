@@ -1,12 +1,12 @@
-"""
-Work in progress script for testing and development purposes.
-"""
+"""Scrape all URLs from Obsidian daily notes into the database."""
 
 from loguru import logger
 
+from clotho.db import PageDatabase
 from clotho.notes import MarkdownNote
-from clotho.scrape import Scraper
-from config import MARKDOWN_DIR, NOTES_PATH, configure_logger
+from clotho.parse import Parser
+from clotho.scrape import Scraper, process_url, registered_domain, split_url
+from config import DB_PATH, HTML_DIR, NOTES_PATH, configure_logger
 
 configure_logger()
 
@@ -14,23 +14,44 @@ configure_logger()
 note_files: list[MarkdownNote] = MarkdownNote.get_note_files(NOTES_PATH)
 logger.info(f"Found {len(note_files)} notes in NOTES_PATH")
 
-# Collect all links from notes
-all_links: list[str] = []
+# Extract links and build processed URL -> notes mapping
+url_sources: dict[str, list[str]] = {}
+original_urls: dict[str, str] = {}
 for note in note_files:
-    extracted_links = note.extract_links()
-    if extracted_links:
-        logger.debug(
-            f"Extracted {len(extracted_links)} links from {note.note_path.name}"
-        )
-        all_links.extend(extracted_links)
+    for link in note.extract_links():
+        processed, _ = process_url(link)
+        if processed is None:
+            continue
+        url_sources.setdefault(processed, []).append(note.filename)
+        if processed not in original_urls:
+            original_urls[processed] = link
 
-logger.info(f"Collected {len(all_links)} total links to scrape")
+logger.info(f"Collected {len(url_sources)} unique URLs")
 
-# Scrape all links concurrently
-scraper: Scraper = Scraper()
-scraped_notes: list[MarkdownNote] = scraper.scrape_batch(
-    all_links, refetch=False, reclean=False
-)
+with PageDatabase(DB_PATH) as db:
+    # Register new URLs as pending page entries
+    page_map = {
+        url: (original_urls[url], registered_domain(url) or split_url(url)[0])
+        for url in url_sources
+    }
+    db.ensure_pages(page_map)
 
-logger.info(f"Scraped {len(scraped_notes)} notes total")
-scraped_notes = MarkdownNote.get_note_files(MARKDOWN_DIR)
+    # Rebuild source mapping from current note contents
+    db.rebuild_sources(url_sources)
+
+    # Fetch HTML for pending URLs
+    scraper = Scraper(db, html_dir=HTML_DIR)
+    fetched = scraper.scrape_batch(list(url_sources.keys()))
+
+    # Parse fetched HTML into markdown
+    parser = Parser(db, html_dir=HTML_DIR)
+    parsed = parser.parse_unparsed()
+
+    logger.info(
+        f"Results: {len(fetched)} fetched, {len(parsed)} parsed, "
+        f"{db.count()} total in DB "
+        f"({db.count('scraped')} scraped, "
+        f"{db.count('fetched')} fetched, "
+        f"{db.count('failed')} failed, "
+        f"{db.count('too_short')} too short)"
+    )

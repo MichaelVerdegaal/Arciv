@@ -1,11 +1,13 @@
-from .convert import count_words, html_to_markdown
 from .scraper import Scraper
-from .url_processor import process_url, split_url
+from .url_processor import hash_filename, process_url, registered_domain, split_url
+from .user_agents import USER_AGENTS, random_user_agent
 
 __all__ = [
     "Scraper",
-    "split_url",
+    "USER_AGENTS",
+    "hash_filename",
     "process_url",
-    "html_to_markdown",
-    "count_words",
+    "random_user_agent",
+    "registered_domain",
+    "split_url",
 ]

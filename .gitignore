@@ -48,3 +48,8 @@ target/
 
 # Logs
 *.log
+
+# .sqlite db
+*.db
+*.db-shm
+*.db-wal

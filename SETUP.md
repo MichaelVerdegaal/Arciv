@@ -2,18 +2,24 @@
 
 How to set up the Clotho project locally.
 
-## Prerequisites
 
-- Python version installed, see `.python-version` for the minimum required version.
-- HelixCLI installed, run `curl -sSL https://install.helix-db.com | bash` in CLI or
-  see [the docs](https://docs.helix-db.com/documentation/cli-v2/getting-started)
+## Installation
+### Requirements
+
+- Python installed, of version as specified in `.python-version`.
+- [UV](https://docs.astral.sh/uv/) installed for package management
+- A residential proxy provider
 
 ## Steps
-
 1. Set up virtual environment
-    1. `uv venv`
-    2. `source .venv/bin/activate` `Bash`
-    3. `uv sync`
-    4. `playwright install` (to install browser engines for Playwright)
-    5. `python -m spacy download en_core_web_sm` (to download SpaCy model). This has to be redone if the virtual
-       environment is deleted.
+2. `uv venv`
+3. `source .venv/bin/activate` (Bash)
+4. `uv sync`
+5. `playwright install` (to install browser engines for Playwright)
+
+## Post-installation
+
+Run `clotho/update_user_agents.py`.
+
+
+
