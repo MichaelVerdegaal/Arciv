@@ -17,18 +17,6 @@ natural language queries instead of remembering exact keywords or filenames.
 4. **Retrieval** — Sentence embeddings (Qwen3-Embedding-0.6B) stored in SQLite,
    cosine similarity search
 
-### Key Libraries
-
-- `playwright` — async web scraping
-- `trafilatura` — HTML content extraction
-- `tldextract` — domain parsing (registered domain grouping)
-- `sentence-transformers` — document embedding
-- `loguru` — logging (one log statement per URL processed)
-
-## Tech Stack
-
-**Python:** 3.13
-**Tools:** UV (packages), Ruff (lint/format)
 
 ## Commands
 
