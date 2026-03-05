@@ -76,59 +76,91 @@ Replace the custom Playwright scraper with [Scrapling](https://github.com/D4Vinc
 
 **Estimated effort:** 1-2 days depending on how many custom rules need porting.
 
-### Step 3: Database migration
+### Step 3: Database migration — graph DB with exploration model
 
-Replace the vibecoded SQLite layer. The current code is verbose, hard to follow, and was only meant for prototyping.
+Replace the vibecoded SQLite layer with a graph database. The current SQLite code is verbose, barely understandable, and fails the 2am test.
 
-**Why move away from SQLite:**
+**Why a graph DB:**
 
-- The current SQLite code fails the 2am test — it's vibecoded and I barely understand it
-- Storing documents with metadata and embeddings maps naturally to a document store
-- Want proper schema flexibility as the data model evolves (adding PDF support, new metadata fields)
+- Documents naturally link to other documents — graph edges express this directly
+- The exploration model (see below) is fundamentally about traversing a link graph
+- A `type` field + graph edges replaces the need for class hierarchies entirely
+- Graph queries like "find all unexplored documents linked from this note" are first-class operations
 
-**Leading candidate: SurrealDB**
+**The exploration model:**
 
-- Document-oriented with flexible schema, good fit for storing pages with varying metadata
-- Supports embedded vector fields and basic vector search (eliminates manual numpy cosine similarity)
-- Graph capabilities available if I ever need relational queries ("which domains co-occur in notes")
-- Can run fully embedded in-process via the Python SDK — same operational simplicity as SQLite, no separate server needed
+The core idea is exploratory crawling with provenance tracking. Every piece of content is a single `Document` node, differentiated by type and depth:
 
-**Data model: Source → Document hierarchy**
+1. **Start by inventorying notes** — each Obsidian daily note becomes a Document at depth 0
+2. **Extract references** — URLs, internal links, paper references found in a document become new Document nodes, connected via edges, at depth 1
+3. **Scrape/fetch** — each Document tracks whether its text content has been retrieved
+4. **Explore** — each Document tracks whether its own outbound references have been discovered and created as nodes. If not, you can selectively explore further, creating depth 2+ nodes
+5. **Repeat** — this is a targeted crawler. You control how deep to go, and can explore selectively rather than blindly spidering everything
+
+This replaces the Source → Document → LinkDocument/PaperDocument hierarchy with a single node type and graph relationships. Much simpler, much more flexible.
+
+**Document node schema:**
 
 ```
-Source
-├── name: string                    # e.g. daily note filename
-├── source_type: string             # "daily_note" (extensible later)
-├── created_at: datetime
-└── documents: list[Document]
+Document {
+    url: string (unique)
+    original_url: string | null       # pre-normalization URL
+    domain: string | null             # tldextract registered domain
 
-Document (base)
-├── url: string (unique)
-├── original_url: string
-├── domain: string
-├── status: "pending" | "scraped" | "failed" | "too_short" | "cloudflare"
-├── fail_reason: string | null
-├── title: string | null
-├── word_count: int
-├── embedding: vector | null
-├── scraped_at: datetime
-└── source: Source                  # back-reference
+    type: enum                        # how this document was discovered:
+                                      #   "source"    — original Obsidian note
+                                      #   "url"       — web link found in a document
+                                      #   "internal"  — Obsidian internal link
+                                      #   "paper"     — arXiv/research paper reference
 
-LinkDocument(Document)
-├── md_content: string
-├── html_archive_path: string       # path to .html.br file
-└── author: string | null
+    depth: int                        # 0 = original note, 1 = directly linked, 2+ = deeper exploration
 
-PaperDocument(Document)              # Step 5 — implement when PDF ingestion is built
-├── abstract: string | null
-├── authors: list[string]
-├── pdf_path: string | null
-└── arxiv_id: string | null
+    # Content state
+    fetch_status: enum                # "pending" | "fetched" | "failed" | "too_short" | "cloudflare"
+    fail_reason: string | null
+    text: string | null               # extracted markdown content (null if not yet fetched)
+    html_archive_path: string | null  # path to .html.br file
+
+    # Exploration state
+    explored: bool                    # have all outbound references been discovered as nodes?
+
+    # Metadata
+    title: string | null
+    author: string | null
+    word_count: int | null
+    embedding: vector | null
+    scraped_at: datetime | null
+}
 ```
 
-A Source (e.g. a daily note) contains multiple Documents. Documents are either LinkDocuments (scraped web pages) or PaperDocuments (arXiv papers). PaperDocument fields are placeholders — implement when step 5 is reached.
+**Graph edges:**
 
-> **Note:** Only LinkDocument is implemented through steps 1-4. PaperDocument is defined in the schema for forward compatibility but has no code paths until PDF ingestion is built.
+```
+(Document)--[LINKS_TO]-->(Document)     # web URL found in content
+(Document)--[REFERENCES]-->(Document)   # paper/arXiv citation
+(Document)--[INTERNAL_LINK]-->(Document) # Obsidian [[wikilink]]
+```
+
+> **Note on type vs edges:** The `type` field describes *what* the document is (a note, a web page, a paper). The edges describe *how* documents relate to each other. Both are useful — `type` is easy to filter on, edges capture the relationship graph.
+
+**DB candidates:**
+
+| | SurrealDB | HelixDB |
+|---|---|---|
+| **Embedded mode** | Yes — runs in-process via Python SDK, no server needed | No — requires running as a service |
+| **Vector search** | Built-in vector fields + KNN search | Not built-in |
+| **Graph queries** | SurrealQL — SQL-like, works but verbose for deep traversals | Cleaner, more intuitive graph traversal syntax |
+| **Python SDK** | Available, maturing | Available |
+| **Maturity** | More established, larger community | Newer, smaller community |
+
+Decision deferred to when step 3 starts. Both work. SurrealDB is more pragmatic (embedded + vector search in one). HelixDB has nicer graph ergonomics if you're willing to run a service and handle vector search separately.
+
+**Scope for step 3 (initial implementation):**
+
+- Migrate existing scraped data into graph DB
+- Only depth 0 (notes) and depth 1 (URLs found in notes) — no deeper exploration yet
+- Rewrite search CLI against new storage layer
+- Exploration system is a future extension, not step 3 deliverable
 
 **Estimated effort:** 2-3 days (including rewriting the search CLI against the new storage layer).
 
@@ -161,12 +193,12 @@ Low priority. Build this once steps 1-4 are stable and in daily use.
 
 **Scope when ready:**
 
-- Download PDFs from arXiv links found in daily notes
+- Detect arXiv links during URL extraction (already partially done)
+- Download PDFs from arXiv
 - Extract text from PDF (pymupdf or similar)
-- Store as a page with `content_type: "paper"` field (no class hierarchy needed)
+- Store as a Document node with `type: "paper"` — no special subclass needed
+- Optionally extend Document schema with paper-specific metadata (arxiv_id, abstract, authors list) when the need is concrete
 - Embed and search alongside web pages
-
-**Do not pre-build abstractions for this.** A `content_type` field on the existing Page schema is sufficient. If papers genuinely need different fields (authors list, abstract, citation info), extend the schema then — not now.
 
 ---
 
@@ -197,6 +229,6 @@ Grouped ~788 URLs by registered domain. Big clusters (microsoft.com, github.com)
 ## Principles
 
 - **2am test**: Can I understand and debug this at 2am? If not, rewrite it.
-- **Build for what exists, not what might exist**: No vector database until brute-force is too slow. No frontend until the CLI reveals what's needed. Schema can anticipate future types, but code paths should only exist for what's implemented.
+- **Build for what exists, not what might exist**: No deep exploration until depth-1 search works well. No frontend until the CLI reveals what's needed. Schema can anticipate future needs, but code paths should only exist for what's implemented.
 - **Retrieval over organization**: The goal is to *find* things, not to *categorize* them. Organization is a secondary enrichment, not the core.
 - **Swap later is fine**: Embedding model, database, scraper — all are replaceable. Ship something that works, iterate based on real usage.
