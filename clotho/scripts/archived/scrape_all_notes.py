@@ -18,7 +18,7 @@ logger.info(f"Found {len(note_files)} notes in NOTES_PATH")
 url_sources: dict[str, list[str]] = {}
 original_urls: dict[str, str] = {}
 for note in note_files:
-    for link in note.extract_links():
+    for link in note.extract_urls():
         processed, _ = process_url(link)
         if processed is None:
             continue

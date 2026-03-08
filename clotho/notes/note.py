@@ -1,5 +1,4 @@
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Self
 
@@ -17,7 +16,6 @@ class Note:
         # Set attributes
         self.filename: str = self.note_path.stem
         self.extension: str = self.note_path.suffix
-        self.creation_date, self.modification_date = self._file_dates(self.note_path)
 
         # Read file text content
         self.text: str = ""
@@ -41,21 +39,6 @@ class Note:
         frontmatter_pattern_re = r"^---\s*\n.*?\n---\s*\n"
         content = re.sub(frontmatter_pattern_re, "", note_text, flags=re.DOTALL)
         self.text = content.strip()
-
-    @staticmethod
-    def _file_dates(filepath: Path) -> tuple[str, str]:
-        """Get the file creation and modification dates as ISO format strings.
-
-        Args:
-            filepath: Path to the file
-
-        Returns:
-            Tuple of (creation_date_iso, modification_date_iso)
-        """
-        tz = timezone.utc
-        created_date = datetime.fromtimestamp(filepath.stat().st_mtime, tz=tz)
-        modified_date = datetime.fromtimestamp(filepath.stat().st_mtime, tz=tz)
-        return created_date.isoformat(), modified_date.isoformat()
 
     @classmethod
     def get_note_files(cls, note_dir: Path) -> list[Self]:
@@ -96,16 +79,16 @@ class Note:
 
         return note_path
 
-    def extract_links(self) -> list[str]:
+    def extract_urls(self) -> list[str]:
         """Extract all URLs from the note content.
 
         Returns:
             List of extracted URLs
         """
-        link_pattern_re = r"https?://[^\s<>\[\]\"]+"
+        URL_PATTERN_RE = r"https?://[^\s<>\[\]\"]+"
         cleaned = []
 
-        for url in re.findall(link_pattern_re, self.text):
+        for url in re.findall(URL_PATTERN_RE, self.text):
             url = url.rstrip(".,;:!?'")
             while url.endswith(")") and url.count(")") > url.count("("):
                 url = url[:-1]

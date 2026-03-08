@@ -17,7 +17,7 @@ dependencies = [
     "sentence-transformers>=5.2.3", # Sentence embeddings
     "brotli>=1.2.0", # Compression for HTML files
     "playwright-stealth>=2.0.2", # Stealth plugin for Playwright
-    "surrealdb>=1.0.8",  # Database
+    "real-ladybug>=0.15.1", # Graph DB
 ]
 
 [dependency-groups]
