@@ -15,7 +15,7 @@ note_files: list[MarkdownNote] = MarkdownNote.get_note_files(NOTES_PATH)
 logger.info(f"Found {len(note_files)} notes in NOTES_PATH")
 
 # Schema definition
-db = lb.Database(str(DATA_DIR / "clotho.lbug"))
+db = lb.Database("clotho.lbug")
 conn = lb.Connection(db)
 
 # Create schema
