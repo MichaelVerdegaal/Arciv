@@ -4,7 +4,7 @@ from loguru import logger
 
 from clotho.notes import MarkdownNote
 from clotho.scrape import process_url
-from config import NOTES_PATH, configure_logger
+from config import NOTES_PATH, configure_logger, DATA_DIR
 import real_ladybug as lb
 
 
@@ -15,36 +15,51 @@ note_files: list[MarkdownNote] = MarkdownNote.get_note_files(NOTES_PATH)
 logger.info(f"Found {len(note_files)} notes in NOTES_PATH")
 
 # Schema definition
-db = lb.Database("test.lbug")
+db = lb.Database(str(DATA_DIR / "clotho.lbug"))
 conn = lb.Connection(db)
 
 # Create schema
 conn.execute("""
-CREATE NODE TABLE Note (
-    title STRING PRIMARY KEY,
-    content STRING,
+CREATE NODE TABLE Source (
+    name STRING PRIMARY KEY,
     uri STRING,
-    note_type STRING,
-    fetched BOOLEAN DEFAULTfalse,
-    level INT16 0,
     created_at TIMESTAMP DEFAULT current_timestamp()
-
+)
+""")
+conn.execute("""
+CREATE NODE TABLE Note (
+    name STRING PRIMARY KEY,
+    content STRING,
+    rel_path STRING,
+    note_type STRING,
+    fetched BOOLEAN DEFAULT false,
+    explored BOOLEAN DEFAULT false,
+    level INT16 DEFAULT 0,
+    created_at TIMESTAMP DEFAULT current_timestamp()
 )
 """)
 conn.execute("""CREATE REL TABLE FoundIn(FROM Note TO Note, since INT64)""")
 
 
+# Create source
+conn.execute("""
+    CREATE (n:Source {name: "daily notes", uri: $uri})
+""", parameters={
+    "name": "daily notes",
+    "uri": f"file:///{str(NOTES_PATH)}",
+})
+
 # Process some notes
-for note in note_files[:3]:
+for note in note_files:
     logger.info(f"Processing note: {note.filename}")
 
     conn.execute("""
-        CREATE (n:Note {title: $title, content: $content, uri: $uri, fetched: true, note_type: $note_type})
+        CREATE (n:Note {name: $name, content: $content, rel_path: $rel_path, fetched: true, explored: false})
 
     """, parameters={
-        "title": note.filename,
+        "name": note.filename,
         "content": note.text,
-        "uri": f"file:///{note.filename}{note.extension}",
+        "rel_path": f"{note.note_path.relative_to(NOTES_PATH)}",
         "note_type": "obsidian",
     })
 
