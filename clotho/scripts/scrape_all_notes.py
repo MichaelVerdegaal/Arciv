@@ -27,41 +27,65 @@ CREATE NODE TABLE Source (
 )
 """)
 conn.execute("""
-CREATE NODE TABLE Note (
+CREATE NODE TABLE Document (
     name STRING PRIMARY KEY,
     content STRING,
     rel_path STRING,
-    note_type STRING,
+    type STRING,
     fetched BOOLEAN DEFAULT false,
     explored BOOLEAN DEFAULT false,
     level INT16 DEFAULT 0,
     created_at TIMESTAMP DEFAULT current_timestamp()
 )
 """)
-conn.execute("""CREATE REL TABLE FoundIn(FROM Note TO Note, since INT64)""")
+conn.execute("CREATE REL TABLE ExistsIn (FROM Source TO Document)")
 
 
-# Create source
-conn.execute("""
+# Create Source node
+conn.execute(
+    """
     CREATE (n:Source {name: "daily notes", uri: $uri})
-""", parameters={
-    "name": "daily notes",
-    "uri": f"file:///{str(NOTES_PATH)}",
-})
+""",
+    parameters={
+        "name": "daily notes",
+        "uri": f"file:///{str(NOTES_PATH)}",
+    },
+)
 
 # Process some notes
 for note in note_files:
     logger.info(f"Processing note: {note.filename}")
 
-    conn.execute("""
-        CREATE (n:Note {name: $name, content: $content, rel_path: $rel_path, fetched: true, explored: false})
+    # Create Document node 
+    document_name: str = note.filename
+    conn.execute(
+        """
+        CREATE (n:Document {
+            name: $name, 
+            content: $content, 
+            rel_path: $rel_path,
+            type: $type, 
+            fetched: true
+        })
+    """,
+        parameters={
+            "name": document_name,
+            "content": note.text,
+            "rel_path": f"{note.note_path.relative_to(NOTES_PATH)}",
+            "type": "obsidian",
+        },
+    )
 
-    """, parameters={
-        "name": note.filename,
-        "content": note.text,
-        "rel_path": f"{note.note_path.relative_to(NOTES_PATH)}",
-        "note_type": "obsidian",
-    })
+    # Create relation from Source to Document
+    conn.execute(
+        """
+        MATCH (s:Source {name: "daily notes"}), (d:Document {name: $doc_name})
+        CREATE (s)-[:ExistsIn]->(d)
+    """,
+        parameters={
+            "doc_name": document_name,
+        },
+    )
 
     # for url in note.extract_urls():
     #     processed, _ = process_url(url)
