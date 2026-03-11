@@ -19,7 +19,7 @@ ensure_schema(conn)
 
 # Create Source node
 conn.execute(
-    load_query("create_source_node"),
+    load_query("queries/create_source"),
     parameters={
         "name": "daily notes",
         "uri": f"file:///{str(NOTES_PATH)}",
@@ -33,7 +33,7 @@ for note in note_files:
     # Create Document node
     document_name: str = note.filename
     conn.execute(
-        load_query("create_document_node"),
+        load_query("queries/create_document"),
         parameters={
             "name": document_name,
             "content": note.text,
@@ -44,7 +44,7 @@ for note in note_files:
 
     # Create relation from Source to Document
     conn.execute(
-        load_query("create_exists_in_rel"),
+        load_query("queries/create_contains"),
         parameters={
             "source_name": "daily notes",
             "doc_name": document_name,

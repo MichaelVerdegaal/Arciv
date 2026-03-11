@@ -5,9 +5,9 @@ import real_ladybug as lb
 from .query import load_query
 
 SCHEMA_QUERIES = [
-    "create_source_table",
-    "create_document_table",
-    "create_exists_in_table",
+    "schema/create_source_table",
+    "schema/create_document_table",
+    "schema/create_contains_table",
 ]
 
 

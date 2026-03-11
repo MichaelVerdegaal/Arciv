@@ -4,23 +4,24 @@ from functools import lru_cache
 
 import real_ladybug as lb
 
-from config import QUERIES_DIR
+from config import CYPHER_DIR
 
 
 @lru_cache(maxsize=None)
 def load_query(name: str) -> str:
-    """Load a Cypher query from a .cypher file in the queries directory.
+    """Load a Cypher query from a .cypher file in the cypher directory.
 
     Args:
-        name: Query filename without the .cypher extension.
+        name: Path relative to the cypher directory, without the .cypher
+            extension (e.g. "schema/create_source_table").
 
     Returns:
         The query string with leading/trailing whitespace stripped.
 
     Raises:
-        FileNotFoundError: If no .cypher file exists with that name.
+        FileNotFoundError: If no .cypher file exists at that path.
     """
-    path = QUERIES_DIR / f"{name}.cypher"
+    path = CYPHER_DIR / f"{name}.cypher"
     return path.read_text(encoding="utf-8").strip()
 
 
