@@ -175,3 +175,168 @@ These cannot be used as variable names, function names, or parameters without ba
 **Operators:** `AND`, `DISTINCT`, `IN`, `IS`, `NOT`, `OR`, `STARTS`, `XOR`
 
 **Schema:** `FROM`, `PRIMARY`, `TABLE`, `TO`
+
+## LadybugDB-specific behavior (differs from Neo4j)
+
+LadybugDB follows openCypher but diverges from Neo4j in several ways that cause silent failures or errors if you use Neo4j patterns.
+
+### Schema is mandatory
+
+You **cannot** `CREATE (:Foo {bar: 1})` without first defining the `Foo` node table with a primary key. Every node table requires an explicit schema. See the main ladybug.md for DDL patterns.
+
+### Walk semantics (not trail)
+
+LadybugDB defaults to **walk** semantics in `MATCH` — edges and nodes may repeat in paths. Neo4j defaults to trail (no repeated edges). Use `is_trail(p)` or `is_acyclic(p)` to check path properties, or specify `TRAIL` / `ACYCLIC` explicitly in variable-length patterns.
+
+Variable-length relationships **require an upper bound** to guarantee termination. If omitted, the default upper bound is **30 hops** (configurable via `VAR_LENGTH_EXTEND_MAX_DEPTH`).
+
+### Unsupported clauses and workarounds
+
+| Neo4j | LadybugDB equivalent |
+|---|---|
+| `REMOVE n.prop` | `SET n.prop = NULL` |
+| `FOREACH` | `UNWIND` |
+| `LOAD CSV FROM` | `LOAD FROM` (supports CSV, Parquet, etc.) |
+| `SET n += {map}` | Not supported — update properties one by one |
+| `FINISH` | `RETURN COUNT(*)` |
+| `CALL <subquery>` | Not supported |
+| `USE graph` | Not supported — each graph is a separate database |
+| `SHOW FUNCTIONS` | `CALL show_functions() RETURN *` (all `SHOW XXX` → `CALL show_xxx() RETURN *`) |
+
+### WHERE clause restrictions
+
+`WHERE` inside node/relationship patterns is **not supported**:
+
+```cypher
+-- ❌ Not supported
+MATCH (n:Person WHERE n.name = 'Andy') RETURN n;
+
+-- ✅ Correct
+MATCH (n:Person) WHERE n.name = 'Andy' RETURN n;
+```
+
+Label filtering in `WHERE` is **not supported**:
+
+```cypher
+-- ❌ Not supported
+MATCH (n) WHERE n:Person RETURN n;
+
+-- ✅ Correct
+MATCH (n:Person) RETURN n;
+-- or
+MATCH (n) WHERE label(n) = 'Person' RETURN n;
+```
+
+### Function name differences
+
+| Neo4j | LadybugDB |
+|---|---|
+| `labels(n)` | `label(n)` |
+| `elementId(n)` | `id(n)` |
+| `toInteger(x)`, `toFloat(x)`, etc. | `cast(x, 'INT64')`, `cast(x, 'DOUBLE')` |
+| `date()` (current) | `current_date()` |
+| `timestamp()` (current) | `current_timestamp()` |
+| `tail(list)` | `list_slice()` |
+| `head(list)` / `tail(list)` | `list_extract()` or `list[index]` |
+
+Most list functions have a `list_` prefix: `list_concat`, `list_reverse`, `list_reduce`, etc.
+
+### Vector similarity functions
+
+| Function | Purpose |
+|---|---|
+| `ARRAY_COSINE_SIMILARITY(a, b)` | Cosine similarity |
+| `ARRAY_DISTANCE(a, b)` | Euclidean distance |
+
+### Not supported
+
+Spatial functions, `isNaN()`, `e()`, `pi()`, `haversin()`, local datetime, real-time clock, and transaction time clock are not available.
+
+## Subqueries
+
+LadybugDB supports `EXISTS` and `COUNT` subqueries. `CALL <subquery>` is **not** supported. Subqueries are defined in curly braces `{}` and cannot contain a `RETURN` clause.
+
+### EXISTS
+
+Checks if a pattern has at least one match. Can be nested.
+
+```cypher
+MATCH (n:Note)
+WHERE EXISTS { MATCH (n)-[:CoversTopic]->(t:Topic {name: 'AI'}) }
+RETURN n.title;
+```
+
+### COUNT
+
+Returns the number of matches for a pattern. Can be aliased and used in `WHERE`.
+
+```cypher
+-- As a return expression
+MATCH (a:Person)
+RETURN a.name, COUNT { MATCH (a)<-[:AuthoredBy]-(n:Note) } AS note_count
+ORDER BY note_count DESC;
+
+-- As a filter
+MATCH (a:Person)
+WHERE COUNT { MATCH (a)<-[:AuthoredBy]-(n:Note) } >= 3
+RETURN a.name;
+```
+
+`COUNT` supports `DISTINCT`: `COUNT(DISTINCT b)`.
+
+## Transactions
+
+LadybugDB is ACID-compliant. Every query is part of a transaction (auto-committed if not explicitly managed).
+
+**Critical constraint:** At any point there can be multiple read transactions but only **one** write transaction.
+
+### Manual transactions
+
+```cypher
+BEGIN TRANSACTION;              -- starts read-write transaction
+-- ... queries ...
+COMMIT;                         -- or ROLLBACK;
+
+BEGIN TRANSACTION READ ONLY;    -- starts read-only transaction
+-- ... read queries ...
+COMMIT;
+```
+
+### Auto transactions
+
+Any command sent without `BEGIN TRANSACTION` is automatically wrapped in a transaction.
+
+### Checkpoint
+
+`CHECKPOINT;` merges WAL data to database files. Happens automatically when WAL exceeds `CHECKPOINT_THRESHOLD` (default 16MB) and no active transactions exist. Cannot force checkpoint while transactions are active.
+
+## Configuration
+
+Set via standalone `CALL` statements (cannot be combined with other clauses like `RETURN`).
+
+| Option | Description | Default |
+|---|---|---|
+| `THREADS` | Execution thread count | System max |
+| `TIMEOUT` | Query timeout in ms | N/A |
+| `VAR_LENGTH_EXTEND_MAX_DEPTH` | Max depth for variable-length paths | 30 |
+| `ENABLE_SEMI_MASK` | Semi mask optimization | `true` |
+| `PROGRESS_BAR` | CLI progress bar | `false` |
+| `CHECKPOINT_THRESHOLD` | WAL size (bytes) before auto-checkpoint | 16777216 (16MB) |
+| `WARNING_LIMIT` | Max warnings per connection | 8192 |
+| `SPILL_TO_DISK` | Spill to disk on memory pressure during `COPY FROM` | `true` |
+
+```cypher
+CALL THREADS=5;
+CALL TIMEOUT=3000;
+CALL var_length_extend_max_depth=10;
+```
+
+## Attach/Detach external databases
+
+Connect to external LadybugDB databases or relational DBMSs for cross-database queries. Attaching to non-LadybugDB databases requires installing an extension.
+
+```cypher
+ATTACH '/path/to/other' AS other_db (dbtype lbug);
+MATCH (a:other_db.SomeTable) RETURN *;
+DETACH other_db;
+```
