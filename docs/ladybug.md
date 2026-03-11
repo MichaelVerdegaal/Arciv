@@ -284,6 +284,174 @@ RETURN a.name;
 
 `COUNT` supports `DISTINCT`: `COUNT(DISTINCT b)`.
 
+## Query clauses reference
+
+### MATCH patterns
+
+**Multi-label nodes:** `MATCH (a:User:City)` matches nodes with label `User` OR `City`. Properties not present in a label return as `NULL`.
+
+**Multi-label relationships:** `MATCH (a)-[e:Follows|:LivesIn]->(b)` matches either relationship type.
+
+**Equality predicate sugar:** `MATCH (a:User {name: 'Adam'})-[e:Follows {since: 2020}]->(b:User)` is equivalent to adding `WHERE a.name = 'Adam' AND e.since = 2020`.
+
+**Undirected relationships:** Use `-` instead of `->` or `<-`: `MATCH (a)-[e:Follows]-(b)` matches both directions.
+
+**Omitting variables:** Variables can be omitted for nodes/rels you don't reference later: `MATCH (a:User)-[:Follows]->(:User)-[:LivesIn]->(c:City)`.
+
+**Multiple patterns (comma-separated):** Required for cyclic patterns: `MATCH (a)-[:Follows]->(b)-[:Follows]->(c), (a)-[:Follows]->(c)`. Labels only need to be specified on first occurrence of a variable.
+
+### Recursive relationships (variable-length paths)
+
+Syntax: `-[:Label*min..max]->`. Default semantics is **WALK** (nodes/edges may repeat). Default max is **30** if omitted.
+
+**Path semantics keywords** (placed after `*`):
+
+| Keyword | Meaning |
+|---|---|
+| *(default)* | WALK — nodes and edges may repeat |
+| `TRAIL` | No repeated edges |
+| `ACYCLIC` | No repeated nodes (but source/destination not considered) |
+
+```cypher
+MATCH (a:User)-[e:Follows* TRAIL 1..4]->(b:User) WHERE a.name = 'Adam' RETURN b.name;
+MATCH (a:User)-[e:Follows* ACYCLIC 1..6]->(b:User) WHERE a.name = 'Adam' RETURN b.name;
+```
+
+**Filtering intermediate nodes/edges:** Use `(r, n | WHERE <predicate>)` syntax. First variable = relationship, second = node. Only predicates on nodes alone OR relationships alone (or conjunctions of these) are supported — predicates mixing both (`n.age > 45 OR r.since < 2022`) are **not** supported.
+
+```cypher
+MATCH p = (a:User)-[:Follows*1..2 (r, n | WHERE r.since < 2022 AND n.age > 45)]->(b:User)
+WHERE a.name = 'Adam'
+RETURN b.name;
+```
+
+**Projecting intermediate properties:** Use `{r.prop}, {n.prop}` after the filter to limit which properties are returned. Improves performance and memory.
+
+```cypher
+MATCH (a:User)-[e:Follows*1..2 (r, n | WHERE r.since > 2020 | {r.since}, {n.name})]->(b:User)
+RETURN nodes(e), rels(e);
+```
+
+**Path functions:** `nodes(p)`, `rels(p)`, `length(p)`, `properties(nodes(p), 'name')`, `properties(rels(p), '_ID')`, `is_trail(p)`, `is_acyclic(p)`, `cost(e)` (for weighted shortest).
+
+### Shortest path variants
+
+| Syntax | Behavior |
+|---|---|
+| `-[* SHORTEST 1..max]-` | Single shortest path per destination |
+| `-[* ALL SHORTEST 1..max]-` | All shortest paths (same minimum length) |
+| `-[* WSHORTEST(prop) 1..max]-` | Weighted shortest path using relationship property |
+| `-[* ALL WSHORTEST(prop) 1..max]-` | All weighted shortest paths |
+
+Lower bound is forced to 1 for shortest path queries.
+
+```cypher
+MATCH (a:User)-[e* SHORTEST 1..4]->(b:City) WHERE a.name = 'Adam'
+RETURN b.name, length(e);
+
+MATCH p = (a:User)-[e:Follows* WSHORTEST(score)]->(b:User) WHERE a.name = 'Adam'
+RETURN properties(nodes(p), 'name'), cost(e);
+```
+
+### RETURN
+
+**Return all properties:** `RETURN a.*` expands to all properties of `a` (without `_ID`, `_LABEL`). `RETURN *` returns all bound variables.
+
+**Implicit GROUP BY:** Non-aggregated expressions in `RETURN` become group-by keys automatically. NULL keys are grouped together; NULL values are ignored in aggregations.
+
+```cypher
+MATCH (a:User)-[:Follows]->(b:User)
+RETURN a.name, avg(b.age) AS avg_friend_age;
+```
+
+### WITH
+
+Projects expressions (optionally with aggregations) as an intermediate step. Two primary uses: computing aggregations for later predicates, and top-k before further querying.
+
+**`ORDER BY` after `WITH` requires `LIMIT` or `SKIP`** — otherwise ordering is meaningless since subsequent operators ignore order.
+
+```cypher
+-- Use aggregation result as filter
+MATCH (a:User)
+WITH avg(a.age) AS avgAge
+MATCH (b:User) WHERE b.age > avgAge
+RETURN b.name;
+
+-- Top-k then further query
+MATCH (a:User)
+WITH a ORDER BY a.age DESC LIMIT 1
+MATCH (a)-[:Follows]->(b:User)
+RETURN b.name;
+```
+
+### UNWIND
+
+Explodes a list into rows. `WHERE` **cannot** follow `UNWIND` directly — use `WITH` as intermediary:
+
+```cypher
+-- ❌ Parser error
+UNWIND [1, 2, 3] AS x WHERE x > 1 RETURN x;
+
+-- ✅ Correct
+UNWIND [1, 2, 3] AS x WITH x WHERE x > 1 RETURN x;
+```
+
+### OPTIONAL MATCH
+
+Semantically a left outer join. Unmatched patterns produce `NULL` values:
+
+```cypher
+MATCH (u:User)
+OPTIONAL MATCH (u)-[:Follows]->(f:User)
+RETURN u.name, f.name;
+-- Users with no outgoing Follows get NULL for f.name
+```
+
+### UNION / UNION ALL
+
+Combines two result sets with the same column count and types. `UNION` deduplicates; `UNION ALL` preserves duplicates.
+
+### WHERE
+
+`WHERE` evaluates predicates and filters tuples. Expressions evaluating to `NULL` are treated as `FALSE`. Use `IS NULL` / `IS NOT NULL` for null checks. Subquery patterns are supported in `WHERE`:
+
+```cypher
+MATCH (a:User)
+WHERE (a)-[:Follows]->(:User {name: 'Noura'})-[:LivesIn]->(:City {name: 'Guelph'})
+RETURN a.name;
+-- Note: nodes/rels in the WHERE subquery pattern are NOT in scope for RETURN
+```
+
+### CALL clause (schema functions)
+
+`CALL` executes schema introspection functions. Must be followed by `RETURN *` or `YIELD`. This is different from the standalone `CALL` statement for configuration.
+
+| Function | Returns |
+|---|---|
+| `SHOW_TABLES()` | id, name, type, database name, comment for all tables |
+| `TABLE_INFO('tableName')` | property id, name, type, default, primary key flag |
+| `SHOW_CONNECTION('relName')` | source/destination table names and primary keys |
+| `SHOW_ATTACHED_DATABASES()` | name and type of attached databases |
+| `SHOW_FUNCTIONS()` | All registered functions |
+| `SHOW_WARNINGS()` / `CLEAR_WARNINGS()` | Import warning contents |
+| `SHOW_INDEXES()` | table name, index name, type, properties, definition |
+| `SHOW_OFFICIAL_EXTENSIONS()` | Available installable extensions |
+| `SHOW_LOADED_EXTENSIONS()` | Currently loaded extensions |
+| `SHOW_PROJECTED_GRAPHS()` | Existing projected graphs |
+| `CURRENT_SETTING('option')` | Value of a configuration setting |
+| `DB_VERSION()` | Database version |
+
+### YIELD
+
+Renames `CALL` output columns. **All** output columns must appear in `YIELD` (no `YIELD *`). Column names must match the original function output exactly.
+
+```cypher
+CALL TABLE_INFO('Note')
+YIELD `property id` AS pid, name AS prop_name, type AS prop_type,
+      `default expression` AS default_val, `primary key` AS is_pk
+RETURN prop_name, prop_type;
+```
+
 ## Transactions
 
 LadybugDB is ACID-compliant. Every query is part of a transaction (auto-committed if not explicitly managed).
