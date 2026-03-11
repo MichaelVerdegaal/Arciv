@@ -252,6 +252,153 @@ Most list functions have a `list_` prefix: `list_concat`, `list_reverse`, `list_
 
 Spatial functions, `isNaN()`, `e()`, `pi()`, `haversin()`, local datetime, real-time clock, and transaction time clock are not available.
 
+## Data Definition Language (DDL)
+
+### CREATE NODE TABLE
+
+Every node table requires a primary key (type `STRING`, numeric, `DATE`, `BLOB`, or `SERIAL`). Properties without a `DEFAULT` default to `NULL`.
+
+```cypher
+CREATE NODE TABLE User (
+    name STRING PRIMARY KEY,
+    age INT64 DEFAULT 0,
+    created_at TIMESTAMP DEFAULT current_timestamp()
+);
+
+-- With SERIAL auto-incrementing primary key
+CREATE NODE TABLE Note (
+    id SERIAL PRIMARY KEY,
+    title STRING,
+    content STRING,
+    embedding FLOAT[384]
+);
+```
+
+### CREATE REL TABLE
+
+Relationships define `FROM`/`TO` node table pairs. No comma between `FROM` and `TO`, but comma between multiple pairs. Relationships cannot have user-defined primary keys — they get auto-generated internal IDs.
+
+```cypher
+-- Single pair
+CREATE REL TABLE Follows (FROM User TO User, since DATE);
+
+-- Multiple pairs in one table
+CREATE REL TABLE Mentions (FROM Note TO User, FROM Note TO Topic, context STRING);
+```
+
+**Relationship multiplicities** (default is `MANY_MANY`):
+
+| Multiplicity | Meaning |
+|---|---|
+| `MANY_MANY` | No constraints (default) |
+| `MANY_ONE` | Each source node has at most one forward edge |
+| `ONE_MANY` | Each destination node has at most one backward edge |
+| `ONE_ONE` | At most one edge in both directions |
+
+```cypher
+CREATE REL TABLE LivesIn (FROM User TO City, MANY_ONE);
+```
+
+### IF NOT EXISTS
+
+Schema creation is **not idempotent** by default — running `CREATE NODE TABLE Foo (...)` twice throws an exception. Always use `IF NOT EXISTS` for DDL that may run more than once:
+
+```cypher
+CREATE NODE TABLE IF NOT EXISTS User (name STRING PRIMARY KEY, age INT64 DEFAULT 0);
+CREATE REL TABLE IF NOT EXISTS Follows (FROM User TO User, since DATE);
+```
+
+### CREATE TABLE AS (schema inference)
+
+Create and populate a table in one statement. Schema is inferred from the subquery or file:
+
+```cypher
+-- From file (schema inferred from CSV header)
+CREATE NODE TABLE Person AS
+    LOAD FROM "person.csv"
+    RETURN *;
+
+-- From existing data
+CREATE NODE TABLE RecentNotes AS
+    MATCH (n:Note) WHERE n.created_at > timestamp('2025-06-01')
+    RETURN n.*;
+
+-- Relationship from file
+CREATE REL TABLE Knows (FROM Person TO Person) AS
+    LOAD FROM "knows.csv"
+    RETURN *;
+```
+
+### ALTER TABLE
+
+```cypher
+-- Add column (defaults to NULL if no DEFAULT specified)
+ALTER TABLE User ADD grade INT64 DEFAULT 40;
+ALTER TABLE User ADD IF NOT EXISTS grade INT64;
+
+-- Drop column
+ALTER TABLE User DROP age;
+ALTER TABLE User DROP IF EXISTS grade;
+
+-- Rename table or column
+ALTER TABLE User RENAME TO Student;
+ALTER TABLE User RENAME age TO grade;
+
+-- Add/drop connections on relationship tables
+ALTER TABLE Follows ADD FROM User TO Celebrity;
+ALTER TABLE Follows DROP FROM User TO Celebrity;
+
+-- Comment on table (visible via SHOW_TABLES())
+COMMENT ON TABLE User IS 'User information';
+```
+
+### DROP TABLE
+
+**You must drop all relationship tables referencing a node table before dropping the node table.** Relationship tables can be dropped freely.
+
+```cypher
+DROP TABLE Follows;         -- drop rel first
+DROP TABLE User;            -- then node
+DROP TABLE IF EXISTS Foo;   -- safe drop
+```
+
+### Data import (COPY FROM)
+
+Bulk load data from files. Supports CSV, Parquet, and other formats. Use `LOAD FROM` (not `LOAD CSV FROM` as in Neo4j).
+
+```cypher
+COPY User FROM "user.csv";
+COPY Follows FROM "follows.csv";
+COPY Note FROM "notes.parquet";
+```
+
+In Python, you can also bulk load from a Pandas/Polars DataFrame:
+
+```python
+import pandas as pd
+df = pd.DataFrame({"name": ["AI", "Graphs", "Memory"]})
+conn.execute("COPY Topic FROM df")
+```
+
+### Subgraphs
+
+Subgraphs provide database-level isolation (like `CREATE DATABASE` in SQL). Two modes:
+
+```cypher
+-- Strictly typed (default) — schema required before insert
+CREATE GRAPH my_graph;
+USE my_graph;
+
+-- Open type — nodes can be created without prior schema (Neo4j-like)
+CREATE GRAPH my_graph ANY;
+USE my_graph;
+CREATE (u:User {name: 'Alice'});  -- no CREATE NODE TABLE needed
+
+-- List and drop
+CALL SHOW_GRAPHS() RETURN *;
+DROP GRAPH my_graph;
+```
+
 ## Subqueries
 
 LadybugDB supports `EXISTS` and `COUNT` subqueries. `CALL <subquery>` is **not** supported. Subqueries are defined in curly braces `{}` and cannot contain a `RETURN` clause.
