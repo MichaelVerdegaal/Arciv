@@ -15,8 +15,9 @@ How to set up the Clotho project locally.
 2. `uv venv`
 3. `source .venv/bin/activate` (Bash)
 4. `uv sync`
-5. `playwright install` (to install browser engines for Playwright)
+5. `patchright install chrome` to install browser engine for Playwright. Use `--force` flag on
+   existing install error.
 
 ## Post-installation
 
-Run `clotho/update_user_agents.py`.
+Run `clotho/scripts/update_user_agents.py`.
