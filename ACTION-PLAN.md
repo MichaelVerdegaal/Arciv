@@ -13,7 +13,7 @@ Clotho extracts URLs from Obsidian daily notes, scrapes their content, and archi
 searchable markdown files on disk. Good archival tool, not half-baked archival-plus-retrieval. An
 archive you can ripgrep is already useful on day one.
 
----
+
 
 ## The Plan
 
@@ -87,48 +87,62 @@ leave the long tail as known, logged gaps.** A logged gap is fine; a corrupted a
 If arxiv and PDF links are a meaningful share, add a lite-parse path that drops a `page.md` into the
 same slug folder. If they're under a few percent, park them. Skip deep OCR tuning either way.
 
----
+
 
 ## After v1
 
-Declare archival v1 done and actually use it. Interim retrieval is ripgrep over
-`/saved/**/*.md`. Add FTS5 only once the search gap is felt, not before. Brotli, proxies,
-and the exploration crawler stay parked until a concrete need appears.
+Declare archival v1 done and actually use it. Interim retrieval is ripgrep over `/saved/**/*.md`.
+Add FTS5 only once the search gap is felt, not before. Brotli, proxies, and the exploration crawler
+stay parked until a concrete need appears.
 
 Realistically 3–5 focused days of work to a trustworthy v1, with step 5 the swing factor. The
 failure mode to watch is letting steps 5 and 6 pull in proxies, OCR, a Medium-mirror
 reimplementation, and FTS all at once. Finish the archive, use it, then decide.
 - Embed and search alongside web pages
 
----
+
 
 ## Parking Lot (revisit only when there's a concrete need)
 
-- **Topic tagging with KeyNMF**: Revisit as enrichment layer *after* semantic search is in daily use. Only if browsing-by-topic turns out to be a real need.
-- **model2vec / static embeddings**: If corpus grows past ~5k documents and embedding speed becomes a bottleneck.
-- **Obsidian plugin / integration**: Only if the CLI→frontend path proves insufficient. Building an Obsidian plugin is its own project.
-- **RAG with LLM**: Full question-answering over saved content. The embedding search is the retrieval half; adding an LLM for generation is straightforward once retrieval works. But search alone might be sufficient.
-- **Automatic re-scraping**: Periodic refresh of pages that might have updated. Low priority — most saved content is static.
+- **Topic tagging with KeyNMF**: Revisit as enrichment layer *after* semantic search is in daily
+  use. Only if browsing-by-topic turns out to be a real need.
+- **model2vec / static embeddings**: If corpus grows past ~5k documents and embedding speed becomes
+  a bottleneck.
+- **Obsidian plugin / integration**: Only if the CLI→frontend path proves insufficient. Building an
+  Obsidian plugin is its own project.
+- **RAG with LLM**: Full question-answering over saved content. The embedding search is the
+  retrieval half; adding an LLM for generation is straightforward once retrieval works. But search
+  alone might be sufficient.
+- **Automatic re-scraping**: Periodic refresh of pages that might have updated. Low priority — most
+  saved content is static.
 - **Bloom filters for deduplication**: Current URL dedup is fine at this scale.
 
----
+
 
 ## Discarded Routes (for reference)
 
 ### Keyword extraction with YAKE
-Statistical, collection-independent, per-document. Struggled with technical terms and hyphenated compounds (e.g. "Chronos-2"). Embedding-based approaches handle these much better.
+Statistical, collection-independent, per-document. Struggled with technical terms and hyphenated
+compounds (e.g. "Chronos-2"). Embedding-based approaches handle these much better.
 
 ### Topic modeling with KeyNMF
-Got 15 clean topics (forecasting, ML/DL, agents, MLOps, MCP, Copilot). Didn't solve the actual problem — topic labels don't help *find* a specific resource. Was solving "organize" when I needed "retrieve."
+Got 15 clean topics (forecasting, ML/DL, agents, MLOps, MCP, Copilot). Didn't solve the actual
+problem — topic labels don't help *find* a specific resource. Was solving "organize" when I needed
+"retrieve."
 
 ### Domain-based Obsidian graph
-Grouped ~788 URLs by registered domain. Big clusters (microsoft.com, github.com) too broad; small clusters just moved the "remember 700 things" problem to "remember 300 domain names."
+Grouped ~788 URLs by registered domain. Big clusters (microsoft.com, github.com) too broad; small
+clusters just moved the "remember 700 things" problem to "remember 300 domain names."
 
----
+
 
 ## Principles
 
 - **2am test**: Can I understand and debug this at 2am? If not, rewrite it.
-- **Build for what exists, not what might exist**: No deep exploration until depth-1 search works well. No frontend until the CLI reveals what's needed. Schema can anticipate future needs, but code paths should only exist for what's implemented.
-- **Retrieval over organization**: The goal is to *find* things, not to *categorize* them. Organization is a secondary enrichment, not the core.
-- **Swap later is fine**: Embedding model, database, scraper — all are replaceable. Ship something that works, iterate based on real usage.
+- **Build for what exists, not what might exist**: No deep exploration until depth-1 search works
+  well. No frontend until the CLI reveals what's needed. Schema can anticipate future needs, but
+  code paths should only exist for what's implemented.
+- **Retrieval over organization**: The goal is to *find* things, not to *categorize* them.
+  Organization is a secondary enrichment, not the core.
+- **Swap later is fine**: Embedding model, database, scraper — all are replaceable. Ship something
+  that works, iterate based on real usage.

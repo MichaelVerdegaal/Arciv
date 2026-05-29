@@ -9,7 +9,7 @@ ROOT_DIR = Path(__file__).parent
 DATA_DIR = ROOT_DIR / "data"
 SAVED_DIR = DATA_DIR / "saved"
 NOTES_PATH = Path(
-    "C:/Users/Michael/Documents/DevVault/Daily notes"
+    r"C:\Users\Michael.Verdegaal\Documents\WorkVault\Daily notes"
 )  # TODO: will remove hardcoding later
 
 # File constants
