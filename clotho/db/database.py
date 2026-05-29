@@ -195,6 +195,36 @@ class PageDatabase:
         ).fetchall()
         return [(row["domain"], row["fail_reason"], row["n"]) for row in rows]
 
+    def prune_orphans(self, canonical_urls: set[str]) -> int:
+        """Delete failed rows whose URLs are no longer in the canonical set.
+
+        Only deletes rows where ``fetched = 0`` (never successfully archived)
+        AND the URL is absent from the freshly-extracted canonical set. This
+        clears stale rows from old rewrites or broken-URL extractions without
+        ever touching archived content.
+
+        Args:
+            canonical_urls: The current set of processed URLs from notes.
+
+        Returns:
+            Number of rows deleted.
+        """
+        # Fetch all failed URLs
+        rows = self._conn.execute(
+            "SELECT url FROM pages WHERE fetched = 0 AND fail_reason IS NOT NULL"
+        ).fetchall()
+
+        to_delete = [row["url"] for row in rows if row["url"] not in canonical_urls]
+
+        if to_delete:
+            self._conn.executemany(
+                "DELETE FROM pages WHERE url = ?",
+                [(url,) for url in to_delete],
+            )
+            self._conn.commit()
+
+        return len(to_delete)
+
     # -- source notes --
 
     def rebuild_sources(self, url_to_notes: dict[str, list[str]]) -> None:

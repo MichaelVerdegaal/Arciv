@@ -173,13 +173,21 @@ def is_raw_text_url(url: str) -> bool:
 def is_pdf_url(url: str) -> bool:
     """Check if a URL points to a PDF file.
 
+    Matches explicit ``.pdf`` extensions and known PDF-serving path patterns
+    (e.g. arxiv ``/pdf/`` routes that serve PDFs without a file extension).
+
     Args:
         url: The URL to check.
 
     Returns:
-        True if the URL path ends with .pdf.
+        True if the URL likely serves a PDF.
     """
-    return urlparse(url).path.lower().endswith(".pdf")
+    path = urlparse(url).path.lower()
+    if path.endswith(".pdf"):
+        return True
+    # Paths like /pdf/2305.14406 serve PDFs directly (arxiv, etc.)
+    segments = [s for s in path.split("/") if s]
+    return len(segments) >= 2 and segments[0] == "pdf"
 
 
 def hash_filename(url: str, extension: str = ".md") -> str:

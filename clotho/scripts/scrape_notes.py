@@ -58,6 +58,11 @@ def scrape_all(refetch: bool = False, reparse: bool = False) -> None:
         ]
         db.ensure_pages(url_entries)
 
+        # Prune orphan rows: failed rows whose URL is no longer canonical
+        pruned = db.prune_orphans(set(url_sources.keys()))
+        if pruned:
+            logger.info(f"Pruned {pruned} orphan rows from previous runs")
+
         # Rebuild note → URL mapping
         db.rebuild_sources(url_sources)
 

@@ -47,6 +47,9 @@ _TRANSIENT_ERRORS = (
 
 _pdf_parser = LiteParse(ocr_enabled=False, quiet=True)
 
+# Sentinel value returned by _fetch_sync when the browser triggers a download
+_DOWNLOAD_SENTINEL = "__DOWNLOAD__"
+
 
 class Scraper:
     """Fetches web pages, validates content, and archives HTML + markdown.
@@ -402,6 +405,17 @@ class Scraper:
             self._store_failure(processed_url, url, domain, slug, "fetch failed")
             return None
 
+        # Browser got a download trigger instead of HTML — try as PDF
+        if html == _DOWNLOAD_SENTINEL:
+            pdf_bytes = self._download_pdf(processed_url)
+            if pdf_bytes is None:
+                self._store_failure(
+                    processed_url, url, domain, slug,
+                    "download triggered but PDF fetch failed",
+                )
+                return None
+            return self._process_pdf(pdf_bytes, processed_url, url, domain, slug)
+
         return self._process_html(html, processed_url, url, domain, slug)
 
     def _fetch_sync(self, url: str) -> str | None:
@@ -441,7 +455,10 @@ class Scraper:
                     )
                     return pw_page.content()
                 except Exception as e:
-                    logger.warning(f"Fetch error {url}: {self._format_fetch_error(e)}")
+                    error_msg = self._format_fetch_error(e)
+                    if "Download is starting" in error_msg:
+                        return _DOWNLOAD_SENTINEL
+                    logger.warning(f"Fetch error {url}: {error_msg}")
                     return None
                 finally:
                     pw_page.close()
@@ -597,8 +614,30 @@ class Scraper:
                     html = await pw_page.content()
                 except Exception as e:
                     last_reason = self._format_fetch_error(e)
+
+                    # Browser triggered a file download — try the PDF path
+                    if "Download is starting" in last_reason:
+                        await pw_page.close()
+                        pdf_bytes = self._download_pdf(processed_url)
+                        if pdf_bytes is not None:
+                            return self._process_pdf(
+                                pdf_bytes, processed_url, original_url, domain, slug
+                            )
+                        self._store_failure(
+                            processed_url,
+                            original_url,
+                            domain,
+                            slug,
+                            "download triggered but PDF fetch failed",
+                        )
+                        logger.warning(
+                            f"Fetch error {processed_url}: download triggered "
+                            f"but PDF fetch failed"
+                        )
+                        return None
                 finally:
-                    await pw_page.close()
+                    if not pw_page.is_closed():
+                        await pw_page.close()
 
             if html is not None:
                 break
