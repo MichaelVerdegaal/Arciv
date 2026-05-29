@@ -1,203 +1,103 @@
-# Clotho: Action Plan v2
+# Clotho: Action Plan v3 — Trustworthy Archive
 
 ## The Problem
 
-I write daily notes in Obsidian and accumulate links to technical resources — documentation, blog posts, papers, repos. Over time I can't find them again. Two failure modes:
+I write daily notes in Obsidian and accumulate links to technical resources — documentation, blog
+posts, papers, repos. Over time I can't find them again. The URL is opaque, the daily note only
+gives me a date, and search can only match words I happened to write — not the content behind the
+link.
 
-1. **"I know I saved something about X but can't find it"** — Obsidian's keyword search requires remembering the exact words I wrote, not what the linked content was *about*.
-2. **"I want to see what I have on topic X"** — No way to get a topical overview across hundreds of links scattered through daily notes.
+## What This Tool Does
 
-Root cause: **my links have no semantic context in the vault.** The URL is opaque, the daily note only gives me a date, and search can only match words I happened to write — not the content behind the link.
-
-Key insight from discarded routes (YAKE, KeyNMF topic modeling, domain-based Obsidian graph): I was optimizing *organization* as a proxy for *retrieval*. I don't need to organize my links — I need to **search** them semantically.
-
----
-
-## Current State (PoC Complete)
-
-### What exists and works
-
-- **Scraping pipeline**: Playwright-based async scraper with concurrency control, URL normalization (GitHub rewrites, Medium→Freedium proxy), deduplication, content validation
-- **Content conversion**: HTML→Markdown via trafilatura, ~506 valid conversions from ~650 scraped pages
-- **Storage**: SQLite database with page metadata, markdown content, Brotli-compressed HTML archives (175MB → 22MB)
-- **Embeddings**: Corpus embedded with pplx-embed (worked but GPU was struggling)
-- **Semantic search CLI**: Vibecoded but functional — brute-force cosine similarity over stored embeddings, returns top-k results with URL, title, and snippet. Results were actually good.
-
-### What needs replacing
-
-- **SQLite layer**: Vibecoded, verbose, barely understandable. Fails the 2am test.
-- **Embedding model**: pplx-embed too heavy for available GPU. Need a model that fits hardware constraints.
-- **Scraper framework**: Custom scraper is slapdash. Scrapling covers the same ground with better robustness.
+Clotho extracts URLs from Obsidian daily notes, scrapes their content, and archives them as
+searchable markdown files on disk. Good archival tool, not half-baked archival-plus-retrieval. An
+archive you can ripgrep is already useful on day one.
 
 ---
 
 ## The Plan
 
-### Step 1: Swap embedding model ⬅️ DO FIRST
+### Step 1: Lock the data model
 
-The current pplx-embed model is too heavy for the available GPU. Replace with a model that fits hardware constraints while maintaining retrieval quality.
+Storage layout is `/saved/<slug>/page.html` and `/saved/<slug>/page.md`, reusing the existing
+`<domain>-<hash>` slug convention. Co-locating the two files kills the "two subfolders per page"
+annoyance, and md-present-or-not on disk becomes an instant parse-status signal.
 
-**Candidates to evaluate:**
+The DB holds pointers and minimal state, not content:
 
-| Model | Params | Dims | Notes |
-|---|---|---|---|
-| `BAAI/bge-small-en-v1.5` | 33M | 384 | Strong retrieval performance for size, runs on CPU comfortably |
-| `sentence-transformers/all-MiniLM-L6-v2` | 22M | 384 | Tried before for topic modeling, proven baseline |
-| `sentence-transformers/static-retrieval-mrl-en-v1` | ~30M | 768 | Static model, extremely fast even on CPU, no transformer inference |
-| `Qwen/Qwen3-Embedding-0.6B` | 600M | 1024 | Tested before, good quality but check if GPU can handle it |
+```sql
+pages:
+  url          TEXT PRIMARY KEY            -- normalized URL
+  original_url TEXT NOT NULL               -- pre-rewrite URL (debugging the rewriter)
+  domain       TEXT NOT NULL               -- microsoft, arxiv, substacks dominate
+  slug         TEXT NOT NULL               -- folder under /saved/, e.g. "github.com-a1b2c3d4"
+  fetched      INTEGER NOT NULL DEFAULT 0  -- 1 = valid HTML archived
+  fail_reason  TEXT                        -- null on success; else "cloudflare"/"too_short"/"http_404"
+  title        TEXT
+  author       TEXT
+  word_count   INTEGER NOT NULL DEFAULT 0
+  scraped_at   TEXT
 
-**Evaluation approach:**
-
-- Pick 10-15 queries that represent real retrieval needs ("kubernetes networking", "darts forecasting covariates", "MCP protocol specification", etc.)
-- Embed corpus with each candidate
-- Compare top-5 results qualitatively — does the right document show up?
-- Measure embedding time and query latency
-- Pick the model that gives good-enough results on reasonable hardware
-
-**Decision criteria:** Good retrieval quality on technical content > raw benchmark scores. Must run locally without GPU pain. Can always swap later — the embedding column is just a blob.
-
-**Estimated effort:** Half a day to a day.
-
-### Step 2: Migrate scraping to Scrapling
-
-Replace the custom Playwright scraper with [Scrapling](https://github.com/D4Vinci/Scrapling).
-
-**Migration checklist:**
-
-- [ ] Verify Scrapling handles async operation / concurrency control
-- [ ] Port URL normalization rules (GitHub raw content rewrites, Medium→Freedium proxy)
-- [ ] Port domain blacklist / skip rules
-- [ ] Port content validation (min word count, cookie banner filtering)
-- [ ] Verify trafilatura integration still works downstream (Scrapling fetches HTML → trafilatura extracts content)
-- [ ] Test against known-tricky domains from the existing corpus
-- [ ] Ensure deduplication logic (URL normalization + seen-URL tracking) still works
-
-**What to keep:** trafilatura for HTML→Markdown conversion. The scraper fetches raw HTML; trafilatura does the content extraction. These are separate concerns.
-
-**Estimated effort:** 1-2 days depending on how many custom rules need porting.
-
-### Step 3: Database migration — graph DB with exploration model
-
-Replace the vibecoded SQLite layer with a graph database. The current SQLite code is verbose, barely understandable, and fails the 2am test.
-
-**Why a graph DB:**
-
-- Documents naturally link to other documents — graph edges express this directly
-- The exploration model (see below) is fundamentally about traversing a link graph
-- A `type` field + graph edges replaces the need for class hierarchies entirely
-- Graph queries like "find all unexplored documents linked from this note" are first-class operations
-
-**The exploration model:**
-
-The core idea is exploratory crawling with provenance tracking. Every piece of content is a single `Document` node, differentiated by type and depth:
-
-1. **Start by inventorying notes** — each Obsidian daily note becomes a Document at depth 0
-2. **Extract references** — URLs, internal links, paper references found in a document become new Document nodes, connected via edges, at depth 1
-3. **Scrape/fetch** — each Document tracks whether its text content has been retrieved
-4. **Explore** — each Document tracks whether its own outbound references have been discovered and created as nodes. If not, you can selectively explore further, creating depth 2+ nodes
-5. **Repeat** — this is a targeted crawler. You control how deep to go, and can explore selectively rather than blindly spidering everything
-
-This replaces the Source → Document → LinkDocument/PaperDocument hierarchy with a single node type and graph relationships. Much simpler, much more flexible.
-
-**Document node schema:**
-
-```
-Document {
-    url: string (unique)
-    original_url: string | null       # pre-normalization URL
-    domain: string | null             # tldextract registered domain
-
-    type: enum                        # how this document was discovered:
-                                      #   "source"    — original Obsidian note
-                                      #   "url"       — web link found in a document
-                                      #   "internal"  — Obsidian internal link
-                                      #   "paper"     — arXiv/research paper reference
-
-    depth: int                        # 0 = original note, 1 = directly linked, 2+ = deeper exploration
-
-    # Content state
-    fetch_status: enum                # "pending" | "fetched" | "failed" | "too_short" | "cloudflare"
-    fail_reason: string | null
-    text: string | null               # extracted markdown content (null if not yet fetched)
-    html_archive_path: string | null  # path to .html.br file
-
-    # Exploration state
-    explored: bool                    # have all outbound references been discovered as nodes?
-
-    # Metadata
-    title: string | null
-    author: string | null
-    word_count: int | null
-    embedding: vector | null
-    scraped_at: datetime | null
-}
+page_sources:                              -- unchanged
+  url, note_name  (PRIMARY KEY url, note_name)
 ```
 
-**Graph edges:**
+Dropped: `status` (collapsed to `fetched` bool + `fail_reason`), `md_content` (on disk now),
+`html_path` (replaced by `slug`), `embedding`.
 
-```
-(Document)--[LINKS_TO]-->(Document)     # web URL found in content
-(Document)--[REFERENCES]-->(Document)   # paper/arXiv citation
-(Document)--[INTERNAL_LINK]-->(Document) # Obsidian [[wikilink]]
-```
+### Step 2: Rewrite the storage layer
 
-> **Note on type vs edges:** The `type` field describes *what* the document is (a note, a web page, a paper). The edges describe *how* documents relate to each other. Both are useful — `type` is easy to filter on, edges capture the relationship graph.
+Mostly deletion from the old database.py (embedding and status methods go) plus one async helper
+that writes HTML and markdown into the slug folder. The scraper produces content and metadata;
+storage just lands it. The patchright swap also lands here — drop-in import swap that passes
+Cloudflare and the usual bot checks. Delete the rotating user-agent list and drop playwright-stealth
+entirely. Patchright's recommended setup injects no fingerprint and sets no custom user-agent or
+headers.
 
-**DB candidates:**
+### Step 3: Add quality validation
 
-| | SurrealDB | HelixDB |
-|---|---|---|
-| **Embedded mode** | Yes — runs in-process via Python SDK, no server needed | No — requires running as a service |
-| **Vector search** | Built-in vector fields + KNN search | Not built-in |
-| **Graph queries** | SurrealQL — SQL-like, works but verbose for deep traversals | Cleaner, more intuitive graph traversal syntax |
-| **Python SDK** | Available, maturing | Available |
-| **Maturity** | More established, larger community | Newer, smaller community |
+Validate before marking `fetched`. For an archive you'll trust years from now, the worst outcome is
+silently storing a Cloudflare challenge or a 404 page as if it were the article. After fetch, reject
+content that:
 
-Decision deferred to when step 3 starts. Both work. SurrealDB is more pragmatic (embedded + vector search in one). HelixDB has nicer graph ergonomics if you're willing to run a service and handle vector search separately.
+- Is suspiciously short
+- Matches known block-page signatures ("just a moment", "attention required", "enable javascript",
+  "browser is no longer supported")
+- Exceeds max file size (~10MB)
 
-**Scope for step 3 (initial implementation):**
+Mark rejected content `fetched=0` with a reason instead of archiving junk. Log each rejection with
+its reason and emit a single summary line at the end.
 
-- Migrate existing scraped data into graph DB
-- Only depth 0 (notes) and depth 1 (URLs found in notes) — no deeper exploration yet
-- Rewrite search CLI against new storage layer
-- Exploration system is a future extension, not step 3 deliverable
+### Step 4: Run a full baseline over the whole vault
 
-**Estimated effort:** 2-3 days (including rewriting the search CLI against the new storage layer).
+Point it at every note, fetch everything, then query: how many fetched, and group `fail_reason` by
+domain. Runtime is minutes to an hour, mostly unattended. The output is the one number that decides
+everything downstream — current coverage — plus a ranked list of what's failing and why. **Do not
+optimize anything before having this.**
 
-### Step 4: Build local frontend with Astro
+### Step 5: Close the gap to ~95%
 
-Once the CLI has been used enough to understand what the UX actually needs, build a proper search interface.
+Attack the biggest buckets first from the baseline results. Cloudflare → patchright already helped.
+"Overview" or "no longer supported" pages → word-count and suffix checks handle most. Dead Medium
+links → decide between Internet Archive fallback or accepting as a logged gap. **Stop at 95% and
+leave the long tail as known, logged gaps.** A logged gap is fine; a corrupted archive entry is not.
 
-**Why Astro:**
+### Step 6: PDFs (only if baseline says they matter)
 
-- Lightweight, doesn't force a specific JS framework
-- Can start with mostly static pages + islands of interactivity
-- Good fit for a local tool that's primarily about displaying search results
+If arxiv and PDF links are a meaningful share, add a lite-parse path that drops a `page.md` into the
+same slug folder. If they're under a few percent, park them. Skip deep OCR tuning either way.
 
-**Minimum viable frontend:**
+---
 
-- Search bar → results list (URL, title, domain, snippet, similarity score)
-- Click-through to full markdown content
-- Filter by domain, status, date range
-- Basic stats dashboard (corpus size, domain distribution, recent additions)
+## After v1
 
-**Backend:** Simple Python API (FastAPI or similar) wrapping the same search logic as the CLI.
+Declare archival v1 done and actually use it. Interim retrieval is ripgrep over
+`/saved/**/*.md`. Add FTS5 only once the search gap is felt, not before. Brotli, proxies,
+and the exploration crawler stay parked until a concrete need appears.
 
-**Prerequisite:** Use the CLI daily for a few weeks first. Note what's annoying, what's missing, what workflows emerge. Build the frontend to solve observed problems, not imagined ones.
-
-**Estimated effort:** 3-5 days for MVP (this is a real frontend project, don't underestimate it).
-
-### Step 5: PDF / arXiv paper ingestion (future)
-
-Low priority. Build this once steps 1-4 are stable and in daily use.
-
-**Scope when ready:**
-
-- Detect arXiv links during URL extraction (already partially done)
-- Download PDFs from arXiv
-- Extract text from PDF (pymupdf or similar)
-- Store as a Document node with `type: "paper"` — no special subclass needed
-- Optionally extend Document schema with paper-specific metadata (arxiv_id, abstract, authors list) when the need is concrete
+Realistically 3–5 focused days of work to a trustworthy v1, with step 5 the swing factor. The
+failure mode to watch is letting steps 5 and 6 pull in proxies, OCR, a Medium-mirror
+reimplementation, and FTS all at once. Finish the archive, use it, then decide.
 - Embed and search alongside web pages
 
 ---

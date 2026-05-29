@@ -10,8 +10,7 @@ dependencies = [
     "loguru>=0.7.3",        # Logging
     "tldextract>=5.3.1",    # Extracting domain information from URLs
     "trafilatura>=2.0.0",   # HTML to markdown conversion
-    "playwright>=1.60.0",   # Scraping and browser automation
-    "patchright>=1.60.0",   # Stealth plugin for Playwright
+    "patchright>=1.60.0",   # Undetected Playwright fork for scraping
 ]
 
 [dependency-groups]

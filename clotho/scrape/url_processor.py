@@ -169,6 +169,23 @@ def hash_filename(url: str, extension: str = ".md") -> str:
     return f"{domain}-{url_hash}{extension}"
 
 
+def slug_for_url(url: str) -> str:
+    """Generate a slug (folder name) for a URL.
+
+    The slug is used as the directory name under ``saved/`` where the
+    page's HTML and markdown files are stored.
+
+    Args:
+        url: The processed/normalized URL.
+
+    Returns:
+        Slug in format "{domain}-{hash}", e.g. "github.com-a1b2c3d4".
+    """
+    domain, _ = split_url(url)
+    url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+    return f"{domain}-{url_hash}"
+
+
 def process_url(url: str) -> tuple[str | None, str]:
     """Process URL for scraping.
 
