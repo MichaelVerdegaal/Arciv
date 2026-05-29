@@ -86,12 +86,13 @@ freedium redirects caught, Cloudflare blocks detected, too-short pages filtered.
 Executed the full remediation plan based on baseline results:
 
 **Tier 1 (highest recovery per effort):**
-- **arxiv PDFs (16):** Added `/pdf/` → `/abs/` rewrite in url_processor. No PDF parser needed.
+- **arxiv PDFs (16):** Arxiv `/pdf/` URLs now go through liteparse for direct PDF parsing. No
+  rewrite needed — PDFs are downloaded via HTTP and converted to text.
 - **Medium via freedium (41):** Removed the dead freedium-mirror.cfd rewrite entirely. Medium URLs
   now fetched directly — patchright clears most of Medium's soft wall. Lesson learned: third-party
   mirror rewrites are fragility, not reliability.
-- **URL extraction regex:** Rewrote `extract_urls()` to use a two-pass approach: first extracts
-  from markdown link syntax `[text](url)`, then catches bare URLs. Eliminates trailing junk like
+- **URL extraction regex:** Rewrote `extract_urls()` to use a two-pass approach: first extracts from
+  markdown link syntax `[text](url)`, then catches bare URLs. Eliminates trailing junk like
   `)seasonalities`, `)/`, `)+` that were creating broken or near-duplicate entries.
 
 **Tier 2 (worth doing):**
@@ -100,29 +101,30 @@ Executed the full remediation plan based on baseline results:
   recommended stealth configuration. Recovers Cloudflare-protected sites (neptune.ai,
   machinelearningmastery, openai docs, acm).
 - **Retry for transient failures:** Added automatic retry (up to 2 attempts) for timeouts and
-  connection resets. Covers kubernetes.io, lightning.ai, giskard.ai etc. that fail under concurrency.
-  Increased base timeout from 10s to 15s.
+  connection resets. Covers kubernetes.io, lightning.ai, giskard.ai etc. that fail under
+  concurrency. Increased base timeout from 10s to 15s.
 - **Raw text URLs:** `.md`, `.txt`, `.rst` files (e.g. raw.githubusercontent.com) now skip
   trafilatura and store content directly. Trivial fix, fits the existing URL-strategy approach.
 
 **Tier 3 (accepted gaps):**
 - Added a skip-list for non-content URLs: `claude.ai` (chat links), `lnkd.in` (shorteners),
-  `support.dfg.nl` (internal), `google.com/search`. These are marked "skipped (not content)"
-  instead of cluttering the failure summary.
+  `support.dfg.nl` (internal), `google.com/search`. These are marked "skipped (not content)" instead
+  of cluttering the failure summary.
 - ~179 long-tail singletons (JS SPAs, auth-walled, dead domains) left as known, logged gaps.
 
 **Other cleanup:**
-- Removed `liteparse` dependency. arxiv `/pdf/` → `/abs/` rewrite covers the PDF need without a
-  parser. The handful of true non-arxiv PDFs don't justify a whole PDF path yet.
+- Added PDF parsing via `liteparse`. All `.pdf` URLs (arxiv, SSRN, etc.) are now downloaded directly
+  via HTTP and parsed with liteparse instead of going through the browser. Removed the arxiv `/pdf/`
+  → `/abs/` rewrite — PDFs are handled natively now.
 - Added Click CLI with `scrape` (with `--refetch` and `--reparse` flags) and `update-agents`
   commands.
-- Removed `.pdf` from `SKIP_SUFFIXES` (arxiv PDFs get rewritten, not skipped).
+- Removed `.pdf` from `SKIP_SUFFIXES` (PDFs are parsed with liteparse, not skipped).
 
-### Step 6: PDFs — Parked
+### Step 6: PDFs — ✅ Done
 
-The gate says no. arxiv PDFs are covered by the `/pdf/` → `/abs/` rewrite. The handful of true
-non-arxiv PDFs (SSRN, d-nb) don't justify a PDF parsing path. Revisit only if abstract-only arxiv
-entries prove insufficient during actual archive use.
+All `.pdf` URLs are downloaded directly (HTTP, not browser) and parsed with `liteparse`. This covers
+arxiv papers (old and new), SSRN, d-nb, and any other PDF links. The arxiv rewriter was removed —
+`/pdf/` URLs pass through as PDFs, `/abs/` and `/html/` URLs work as normal HTML pages.
 
 
 
@@ -137,7 +139,6 @@ stay parked until a concrete need appears.
 
 ## Parking Lot (revisit only when there's a concrete need)
 
-- **PDF parsing (liteparse)**: Only if arxiv abstracts prove insufficient during actual use.
 - **Topic tagging with KeyNMF**: Revisit as enrichment layer *after* semantic search is in daily
   use. Only if browsing-by-topic turns out to be a real need.
 - **model2vec / static embeddings**: If corpus grows past ~5k documents and embedding speed becomes
@@ -150,8 +151,8 @@ stay parked until a concrete need appears.
 - **Automatic re-scraping**: Periodic refresh of pages that might have updated. Low priority — most
   saved content is static.
 - **Bloom filters for deduplication**: Current URL dedup is fine at this scale.
-- **Wayback Machine fallback**: For member-only Medium articles and other paywalled content.
-  Worth considering if direct Medium fetching proves insufficient.
+- **Wayback Machine fallback**: For member-only Medium articles and other paywalled content. Worth
+  considering if direct Medium fetching proves insufficient.
 
 
 

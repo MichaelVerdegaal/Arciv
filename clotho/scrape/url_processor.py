@@ -68,11 +68,6 @@ RAW_TEXT_EXTENSIONS = frozenset({".md", ".txt", ".rst", ".csv", ".tsv"})
 _GITHUB_BLOB_TREE_RE = re.compile(r"^/([^/]+/[^/]+)/(?:blob|tree)/")
 _RAW_GITHUB_PATH_RE = re.compile(r"^/([^/]+/[^/]+)/")
 
-# arxiv path patterns
-_ARXIV_PDF_RE = re.compile(r"^/pdf/(\d+\.\d+)(v\d+)?$")
-_ARXIV_ABS_RE = re.compile(r"^/abs/(\d+\.\d+)")
-
-
 def _rewrite_github(url: str) -> str:
     """Normalize GitHub file URLs to repository root.
 
@@ -114,27 +109,6 @@ def _rewrite_raw_github(url: str) -> str:
         return url
 
     return f"https://github.com/{match.group(1)}"
-
-
-def _rewrite_arxiv(url: str) -> str:
-    """Rewrite arxiv PDF URLs to HTML (full text) or abstract pages.
-
-    /pdf/2505.11604 → /html/2505.11604 (full text, falls back to /abs/ on fetch failure)
-    /abs/ URLs are kept as-is.
-
-    Args:
-        url: An arxiv.org URL.
-
-    Returns:
-        Rewritten URL pointing to /html/ or /abs/ instead of /pdf/.
-    """
-    parsed = urlparse(url)
-    match = _ARXIV_PDF_RE.match(parsed.path)
-    if match:
-        paper_id = match.group(1)
-        version = match.group(2) or ""
-        return f"https://arxiv.org/abs/{paper_id}{version}"
-    return url
 
 
 def split_url(url: str) -> tuple[str, str]:
@@ -179,7 +153,6 @@ def registered_domain(url: str) -> str:
 DOMAIN_REWRITERS: dict[str, Callable[[str], str]] = {
     "github.com": _rewrite_github,
     "raw.githubusercontent.com": _rewrite_raw_github,
-    "arxiv.org": _rewrite_arxiv,
 }
 
 
@@ -195,6 +168,18 @@ def is_raw_text_url(url: str) -> bool:
     parsed = urlparse(url)
     path_lower = parsed.path.lower()
     return any(path_lower.endswith(ext) for ext in RAW_TEXT_EXTENSIONS)
+
+
+def is_pdf_url(url: str) -> bool:
+    """Check if a URL points to a PDF file.
+
+    Args:
+        url: The URL to check.
+
+    Returns:
+        True if the URL path ends with .pdf.
+    """
+    return urlparse(url).path.lower().endswith(".pdf")
 
 
 def hash_filename(url: str, extension: str = ".md") -> str:

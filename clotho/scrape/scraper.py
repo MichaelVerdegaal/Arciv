@@ -4,14 +4,17 @@ Uses patchright (undetected Playwright fork) with Chrome in persistent-context
 mode for stealth. Each page goes through: fetch HTML → validate (block-page /
 size check) → convert to markdown via trafilatura → write HTML + MD to disk →
 record in DB. Raw text URLs (.md, .txt) skip HTML conversion entirely.
+PDF URLs are downloaded directly and parsed via liteparse.
 """
 
 import asyncio
 import tempfile
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
 import aiofiles
+from liteparse import LiteParse
 from loguru import logger
 from patchright.async_api import async_playwright
 from patchright.sync_api import sync_playwright
@@ -20,6 +23,7 @@ from clotho.db import Page, PageDatabase
 from clotho.parse import parse_html
 
 from .url_processor import (
+    is_pdf_url,
     is_raw_text_url,
     process_url,
     registered_domain,
@@ -40,6 +44,8 @@ _TRANSIENT_ERRORS = (
     "net::ERR_CONNECTION_RESET",
     "net::ERR_CONNECTION_TIMED_OUT",
 )
+
+_pdf_parser = LiteParse(ocr_enabled=False, quiet=True)
 
 
 class Scraper:
@@ -178,6 +184,83 @@ class Scraper:
         async with aiofiles.open(slug_dir / "page.md", "w", encoding="utf-8") as f:
             await f.write(markdown)
 
+    def _save_pdf_sync(self, slug: str, pdf_bytes: bytes, markdown: str) -> None:
+        """Write PDF and markdown files to the slug directory."""
+        slug_dir = self.saved_dir / slug
+        slug_dir.mkdir(parents=True, exist_ok=True)
+        (slug_dir / "page.pdf").write_bytes(pdf_bytes)
+        (slug_dir / "page.md").write_text(markdown, encoding="utf-8")
+
+    @staticmethod
+    async def _save_pdf_async(slug_dir: Path, pdf_bytes: bytes, markdown: str) -> None:
+        """Write PDF and markdown files to the slug directory (async)."""
+        slug_dir.mkdir(parents=True, exist_ok=True)
+        async with aiofiles.open(slug_dir / "page.pdf", "wb") as f:
+            await f.write(pdf_bytes)
+        async with aiofiles.open(slug_dir / "page.md", "w", encoding="utf-8") as f:
+            await f.write(markdown)
+
+    @staticmethod
+    def _download_pdf(url: str) -> bytes | None:
+        """Download a PDF file via HTTP.
+
+        Args:
+            url: Direct URL to a .pdf file.
+
+        Returns:
+            Raw PDF bytes, or None if the download failed.
+        """
+        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return response.read()
+        except Exception as e:
+            logger.warning(f"PDF download failed {url}: {e}")
+            return None
+
+    def _process_pdf(
+        self,
+        pdf_bytes: bytes,
+        processed_url: str,
+        original_url: str,
+        domain: str,
+        slug: str,
+    ) -> Page | None:
+        """Parse PDF bytes with liteparse, validate, and archive.
+
+        Returns a Page on success, None on failure (failure is recorded in DB).
+        """
+        try:
+            result = _pdf_parser.parse(pdf_bytes)
+        except Exception as e:
+            reason = f"PDF parse error: {e}"
+            self._store_failure(processed_url, original_url, domain, slug, reason)
+            logger.warning(f"Rejected {processed_url}: {reason}")
+            return None
+
+        text = result.text.strip()
+        word_count = len(text.split())
+
+        if word_count < self.min_words:
+            reason = f"too short ({word_count} words)"
+            self._store_failure(processed_url, original_url, domain, slug, reason)
+            logger.warning(f"Rejected {processed_url}: {reason}")
+            return None
+
+        self._save_pdf_sync(slug, pdf_bytes, text)
+
+        page = self._store_success(
+            processed_url,
+            original_url,
+            domain,
+            slug,
+            title=None,
+            author=None,
+            word_count=word_count,
+        )
+        logger.info(f"Archived {processed_url} (PDF, {word_count} words)")
+        return page
+
     def _process_html(
         self,
         html: str,
@@ -306,6 +389,14 @@ class Scraper:
         if not self._needs_fetch(processed_url, refetch):
             return self.db.get(processed_url)
 
+        # PDF URLs: download directly and parse with liteparse
+        if is_pdf_url(processed_url):
+            pdf_bytes = self._download_pdf(processed_url)
+            if pdf_bytes is None:
+                self._store_failure(processed_url, url, domain, slug, "PDF download failed")
+                return None
+            return self._process_pdf(pdf_bytes, processed_url, url, domain, slug)
+
         html = self._fetch_sync(processed_url)
         if html is None:
             self._store_failure(processed_url, url, domain, slug, "fetch failed")
@@ -377,8 +468,13 @@ class Scraper:
         urls: list[str],
         refetch: bool,
     ) -> list[Page]:
-        """Process URLs, skip cached, fetch the rest concurrently."""
-        to_fetch: list[tuple[str, str, str, str]] = []
+        """Process URLs, skip cached, fetch the rest concurrently.
+
+        PDF URLs are downloaded directly (no browser needed) and parsed
+        with liteparse. HTML URLs go through patchright.
+        """
+        to_fetch_html: list[tuple[str, str, str, str]] = []
+        to_fetch_pdf: list[tuple[str, str, str, str]] = []
         seen_processed: set[str] = set()
 
         for url in urls:
@@ -396,12 +492,34 @@ class Scraper:
 
             domain = registered_domain(processed_url) or split_url(processed_url)[0]
             slug = slug_for_url(processed_url)
-            to_fetch.append((processed_url, url, domain, slug))
+            entry = (processed_url, url, domain, slug)
 
-        if not to_fetch:
-            return []
+            if is_pdf_url(processed_url):
+                to_fetch_pdf.append(entry)
+            else:
+                to_fetch_html.append(entry)
 
-        return await self._fetch_all(to_fetch)
+        results: list[Page] = []
+
+        # Process PDFs (no browser needed, CPU-bound parsing)
+        for processed_url, original_url, domain, slug in to_fetch_pdf:
+            pdf_bytes = self._download_pdf(processed_url)
+            if pdf_bytes is None:
+                self._store_failure(
+                    processed_url, original_url, domain, slug, "PDF download failed"
+                )
+                continue
+            page = self._process_pdf(
+                pdf_bytes, processed_url, original_url, domain, slug
+            )
+            if page is not None:
+                results.append(page)
+
+        # Process HTML URLs with browser
+        if to_fetch_html:
+            results.extend(await self._fetch_all(to_fetch_html))
+
+        return results
 
     async def _fetch_all(
         self,
