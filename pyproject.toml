@@ -5,13 +5,13 @@ description = "Your personal knowledge toolkit."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "aiofiles>=25.1.0",          # Asynchronous file operations
-    "python-dotenv>=1.2.1",      # Environment variable management
-    "playwright-stealth>=2.0.2", # Stealth plugin for Playwright
-    "loguru>=0.7.3",             # Logging
-    "tldextract>=5.3.1",         # Extracting domain information from URLs
-    "trafilatura>=2.0.0",        # HTML to markdown conversion
-    "playwright>=1.60.0",        # Scraping and browser automation
+    "aiofiles>=25.1.0",     # Asynchronous file operations
+    "python-dotenv>=1.2.1", # Environment variable management
+    "loguru>=0.7.3",        # Logging
+    "tldextract>=5.3.1",    # Extracting domain information from URLs
+    "trafilatura>=2.0.0",   # HTML to markdown conversion
+    "playwright>=1.60.0",   # Scraping and browser automation
+    "patchright>=1.60.0",   # Stealth plugin for Playwright
 ]
 
 [dependency-groups]
