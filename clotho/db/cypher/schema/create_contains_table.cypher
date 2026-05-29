@@ -1,1 +1,0 @@
-CREATE REL TABLE IF NOT EXISTS Contains (FROM Source TO Document)

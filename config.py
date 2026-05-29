@@ -8,13 +8,12 @@ from loguru import logger
 ROOT_DIR = Path(__file__).parent
 DATA_DIR = ROOT_DIR / "data"
 HTML_DIR = DATA_DIR / "html"
-CYPHER_DIR = ROOT_DIR / "clotho" / "db" / "cypher"
 NOTES_PATH = Path(
     "C:/Users/Michael/Documents/DevVault/Daily notes"
 )  # TODO: will remove hardcoding later
 
 # File constants
-DB_PATH = DATA_DIR / "clotho.lbug"
+DB_PATH = DATA_DIR / "clotho.db"
 
 # Load environment variables
 load_dotenv(ROOT_DIR / ".env")
