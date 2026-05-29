@@ -3,7 +3,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
-import brotli
 from loguru import logger
 
 from clotho.db import Page, PageDatabase
@@ -16,7 +15,7 @@ DEFAULT_MIN_WORDS = 150
 class Parser:
     """Parses scraped HTML archives into markdown content.
 
-    Loads Brotli-compressed HTML from disk, converts to markdown via
+    Loads HTML from disk, converts to markdown via
     trafilatura, and stores results in the database. Runs independently
     from the scraper — use after fetching HTML with clotho.scrape.Scraper.
 
@@ -52,7 +51,7 @@ class Parser:
         path = self.html_dir / page.html_path
         if not path.exists():
             return None
-        return brotli.decompress(path.read_bytes()).decode("utf-8")
+        return path.read_text(encoding="utf-8")
 
     def _store_result(
         self,
