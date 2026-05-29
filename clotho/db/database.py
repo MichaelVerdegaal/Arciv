@@ -119,9 +119,7 @@ class PageDatabase:
         )
         self._conn.commit()
 
-    def ensure_pages(
-        self, url_entries: list[tuple[str, str, str, str]]
-    ) -> None:
+    def ensure_pages(self, url_entries: list[tuple[str, str, str, str]]) -> None:
         """Create pending page entries for URLs not yet in the database.
 
         Existing pages are left unchanged.
@@ -145,9 +143,7 @@ class PageDatabase:
         Returns:
             The Page if found, None otherwise.
         """
-        row = self._conn.execute(
-            "SELECT * FROM pages WHERE url = ?", (url,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM pages WHERE url = ?", (url,)).fetchone()
         return self._row_to_page(row) if row else None
 
     def get_unfetched(self) -> list[Page]:
@@ -168,9 +164,7 @@ class PageDatabase:
 
     def count(self) -> int:
         """Count total pages."""
-        row = self._conn.execute(
-            "SELECT COUNT(*) AS n FROM pages"
-        ).fetchone()
+        row = self._conn.execute("SELECT COUNT(*) AS n FROM pages").fetchone()
         return row["n"]
 
     def url_exists(self, url: str) -> bool:
@@ -216,11 +210,7 @@ class PageDatabase:
         self._conn.execute("DELETE FROM page_sources")
         self._conn.executemany(
             "INSERT OR IGNORE INTO page_sources (url, note_name) VALUES (?, ?)",
-            [
-                (url, note)
-                for url, notes in url_to_notes.items()
-                for note in notes
-            ],
+            [(url, note) for url, notes in url_to_notes.items() for note in notes],
         )
         self._conn.commit()
 

@@ -8,11 +8,23 @@ from loguru import logger
 
 from clotho.db import PageDatabase
 from clotho.notes import MarkdownNote
-from clotho.scrape import Scraper, process_url, registered_domain, slug_for_url, split_url
+from clotho.scrape import (
+    Scraper,
+    process_url,
+    registered_domain,
+    slug_for_url,
+    split_url,
+)
 from config import DB_PATH, NOTES_PATH, SAVED_DIR, configure_logger
 
 
-def main() -> None:
+def scrape_all(refetch: bool = False, reparse: bool = False) -> None:
+    """Run the full scrape pipeline.
+
+    Args:
+        refetch: Re-download all pages, even already fetched ones.
+        reparse: Re-parse already fetched HTML into markdown (without re-fetching).
+    """
     configure_logger()
 
     # Discover notes and extract URLs
@@ -49,9 +61,14 @@ def main() -> None:
         # Rebuild note → URL mapping
         db.rebuild_sources(url_sources)
 
-        # Fetch unfetched pages
+        # Fetch unfetched pages (or all if refetch)
         scraper = Scraper(db, saved_dir=SAVED_DIR)
-        fetched = scraper.scrape_batch(list(url_sources.keys()))
+        fetched = scraper.scrape_batch(list(url_sources.keys()), refetch=refetch)
+
+        # Re-parse existing HTML if requested
+        reparse_count = 0
+        if reparse:
+            reparse_count = scraper.reparse_existing()
 
         # Report
         total = db.count()
@@ -59,8 +76,9 @@ def main() -> None:
         failures = db.fail_summary()
 
         logger.info(
-            f"Done: {len(fetched)} new pages archived, "
-            f"{total} total in DB, {unfetched} pending"
+            f"Done: {len(fetched)} new pages archived"
+            + (f", {reparse_count} re-parsed" if reparse else "")
+            + f", {total} total in DB, {unfetched} pending"
         )
 
         if failures:
@@ -70,4 +88,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    scrape_all()

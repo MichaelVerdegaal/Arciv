@@ -82,16 +82,24 @@ class Note:
     def extract_urls(self) -> list[str]:
         """Extract all URLs from the note content.
 
+        Handles both markdown links ``[text](url)`` and bare URLs. Markdown
+        links are matched first to avoid capturing trailing junk after the
+        closing paren (e.g. ``[link](https://example.com)seasonalities``).
+
         Returns:
             List of extracted URLs
         """
-        URL_PATTERN_RE = r"https?://[^\s<>\[\]\"]+"
-        cleaned = []
+        urls: list[str] = []
 
-        for url in re.findall(URL_PATTERN_RE, self.text):
-            url = url.rstrip(".,;:!?'")
-            while url.endswith(")") and url.count(")") > url.count("("):
-                url = url[:-1]
-            cleaned.append(url)
+        # First pass: extract URLs from markdown links [text](url)
+        _MD_LINK_RE = r"\[(?:[^\[\]]|\[[^\]]*\])*\]\((https?://[^\s\)]+)\)"
+        for match in re.finditer(_MD_LINK_RE, self.text):
+            urls.append(match.group(1))
 
-        return cleaned
+        # Second pass: bare URLs not inside markdown link parens
+        _BARE_URL_RE = r"(?<!\]\()https?://[^\s<>\[\]\"\)]+"
+        for match in re.finditer(_BARE_URL_RE, self.text):
+            url = match.group(0).rstrip(".,;:!?'")
+            urls.append(url)
+
+        return urls

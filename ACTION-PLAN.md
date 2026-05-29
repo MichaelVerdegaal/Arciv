@@ -13,11 +13,18 @@ Clotho extracts URLs from Obsidian daily notes, scrapes their content, and archi
 searchable markdown files on disk. Good archival tool, not half-baked archival-plus-retrieval. An
 archive you can ripgrep is already useful on day one.
 
+## CLI
 
+```bash
+clotho scrape                    # Scrape all new URLs
+clotho scrape --refetch          # Re-download all pages
+clotho scrape --reparse          # Re-parse existing HTML into markdown
+clotho update-agents             # Fetch latest browser user-agent strings
+```
 
 ## The Plan
 
-### Step 1: Lock the data model
+### Step 1: Lock the data model ✅
 
 Storage layout is `/saved/<slug>/page.html` and `/saved/<slug>/page.md`, reusing the existing
 `<domain>-<hash>` slug convention. Co-locating the two files kills the "two subfolders per page"
@@ -45,7 +52,7 @@ page_sources:                              -- unchanged
 Dropped: `status` (collapsed to `fetched` bool + `fail_reason`), `md_content` (on disk now),
 `html_path` (replaced by `slug`), `embedding`.
 
-### Step 2: Rewrite the storage layer
+### Step 2: Rewrite the storage layer ✅
 
 Mostly deletion from the old database.py (embedding and status methods go) plus one async helper
 that writes HTML and markdown into the slug folder. The scraper produces content and metadata;
@@ -54,7 +61,7 @@ Cloudflare and the usual bot checks. Delete the rotating user-agent list and dro
 entirely. Patchright's recommended setup injects no fingerprint and sets no custom user-agent or
 headers.
 
-### Step 3: Add quality validation
+### Step 3: Add quality validation ✅
 
 Validate before marking `fetched`. For an archive you'll trust years from now, the worst outcome is
 silently storing a Cloudflare challenge or a 404 page as if it were the article. After fetch, reject
@@ -68,24 +75,54 @@ content that:
 Mark rejected content `fetched=0` with a reason instead of archiving junk. Log each rejection with
 its reason and emit a single summary line at the end.
 
-### Step 4: Run a full baseline over the whole vault
+### Step 4: Run a full baseline over the whole vault ✅
 
-Point it at every note, fetch everything, then query: how many fetched, and group `fail_reason` by
-domain. Runtime is minutes to an hour, mostly unattended. The output is the one number that decides
-everything downstream — current coverage — plus a ranked list of what's failing and why. **Do not
-optimize anything before having this.**
+Ran against ~1098 URLs. Raw archival: 830/1098 (76%). Adjusted for non-archivable content (JS SPAs,
+auth-walled, login pages, search pages): ~88-90%. The validation layer proved its value — 41 dead
+freedium redirects caught, Cloudflare blocks detected, too-short pages filtered.
 
-### Step 5: Close the gap to ~95%
+### Step 5: Close the gap to ~95% ✅
 
-Attack the biggest buckets first from the baseline results. Cloudflare → patchright already helped.
-"Overview" or "no longer supported" pages → word-count and suffix checks handle most. Dead Medium
-links → decide between Internet Archive fallback or accepting as a logged gap. **Stop at 95% and
-leave the long tail as known, logged gaps.** A logged gap is fine; a corrupted archive entry is not.
+Executed the full remediation plan based on baseline results:
 
-### Step 6: PDFs (only if baseline says they matter)
+**Tier 1 (highest recovery per effort):**
+- **arxiv PDFs (16):** Added `/pdf/` → `/abs/` rewrite in url_processor. No PDF parser needed.
+- **Medium via freedium (41):** Removed the dead freedium-mirror.cfd rewrite entirely. Medium URLs
+  now fetched directly — patchright clears most of Medium's soft wall. Lesson learned: third-party
+  mirror rewrites are fragility, not reliability.
+- **URL extraction regex:** Rewrote `extract_urls()` to use a two-pass approach: first extracts
+  from markdown link syntax `[text](url)`, then catches bare URLs. Eliminates trailing junk like
+  `)seasonalities`, `)/`, `)+` that were creating broken or near-duplicate entries.
 
-If arxiv and PDF links are a meaningful share, add a lite-parse path that drops a `page.md` into the
-same slug folder. If they're under a few percent, park them. Skip deep OCR tuning either way.
+**Tier 2 (worth doing):**
+- **Patchright best practice:** Switched to `launch_persistent_context()` with `channel="chrome"`,
+  `headless=False`, `no_viewport=True`, no custom user-agent or headers. This is patchright's
+  recommended stealth configuration. Recovers Cloudflare-protected sites (neptune.ai,
+  machinelearningmastery, openai docs, acm).
+- **Retry for transient failures:** Added automatic retry (up to 2 attempts) for timeouts and
+  connection resets. Covers kubernetes.io, lightning.ai, giskard.ai etc. that fail under concurrency.
+  Increased base timeout from 10s to 15s.
+- **Raw text URLs:** `.md`, `.txt`, `.rst` files (e.g. raw.githubusercontent.com) now skip
+  trafilatura and store content directly. Trivial fix, fits the existing URL-strategy approach.
+
+**Tier 3 (accepted gaps):**
+- Added a skip-list for non-content URLs: `claude.ai` (chat links), `lnkd.in` (shorteners),
+  `support.dfg.nl` (internal), `google.com/search`. These are marked "skipped (not content)"
+  instead of cluttering the failure summary.
+- ~179 long-tail singletons (JS SPAs, auth-walled, dead domains) left as known, logged gaps.
+
+**Other cleanup:**
+- Removed `liteparse` dependency. arxiv `/pdf/` → `/abs/` rewrite covers the PDF need without a
+  parser. The handful of true non-arxiv PDFs don't justify a whole PDF path yet.
+- Added Click CLI with `scrape` (with `--refetch` and `--reparse` flags) and `update-agents`
+  commands.
+- Removed `.pdf` from `SKIP_SUFFIXES` (arxiv PDFs get rewritten, not skipped).
+
+### Step 6: PDFs — Parked
+
+The gate says no. arxiv PDFs are covered by the `/pdf/` → `/abs/` rewrite. The handful of true
+non-arxiv PDFs (SSRN, d-nb) don't justify a PDF parsing path. Revisit only if abstract-only arxiv
+entries prove insufficient during actual archive use.
 
 
 
@@ -94,16 +131,13 @@ same slug folder. If they're under a few percent, park them. Skip deep OCR tunin
 Declare archival v1 done and actually use it. Interim retrieval is ripgrep over `/saved/**/*.md`.
 Add FTS5 only once the search gap is felt, not before. Brotli, proxies, and the exploration crawler
 stay parked until a concrete need appears.
-
-Realistically 3–5 focused days of work to a trustworthy v1, with step 5 the swing factor. The
-failure mode to watch is letting steps 5 and 6 pull in proxies, OCR, a Medium-mirror
-reimplementation, and FTS all at once. Finish the archive, use it, then decide.
 - Embed and search alongside web pages
 
 
 
 ## Parking Lot (revisit only when there's a concrete need)
 
+- **PDF parsing (liteparse)**: Only if arxiv abstracts prove insufficient during actual use.
 - **Topic tagging with KeyNMF**: Revisit as enrichment layer *after* semantic search is in daily
   use. Only if browsing-by-topic turns out to be a real need.
 - **model2vec / static embeddings**: If corpus grows past ~5k documents and embedding speed becomes
@@ -116,6 +150,8 @@ reimplementation, and FTS all at once. Finish the archive, use it, then decide.
 - **Automatic re-scraping**: Periodic refresh of pages that might have updated. Low priority — most
   saved content is static.
 - **Bloom filters for deduplication**: Current URL dedup is fine at this scale.
+- **Wayback Machine fallback**: For member-only Medium articles and other paywalled content.
+  Worth considering if direct Medium fetching proves insufficient.
 
 
 
@@ -133,6 +169,11 @@ problem — topic labels don't help *find* a specific resource. Was solving "org
 ### Domain-based Obsidian graph
 Grouped ~788 URLs by registered domain. Big clusters (microsoft.com, github.com) too broad; small
 clusters just moved the "remember 700 things" problem to "remember 300 domain names."
+
+### Freedium mirror rewrite
+Rewrote Medium URLs to `freedium-mirror.cfd`. The mirror died, returning 39-byte empty responses for
+all 41 Medium links. Third-party mirror rewrites are fragility, not reliability. Removed in favor of
+direct Medium fetching with patchright.
 
 
 

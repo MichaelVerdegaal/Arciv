@@ -1,29 +1,45 @@
 """Web scraper that fetches, validates, converts, and archives pages.
 
-Uses patchright (undetected Playwright fork) for fetching. Each page goes
-through: fetch HTML → validate (block-page / size check) → convert to
-markdown via trafilatura → write HTML + MD to disk → record in DB.
+Uses patchright (undetected Playwright fork) with Chrome in persistent-context
+mode for stealth. Each page goes through: fetch HTML → validate (block-page /
+size check) → convert to markdown via trafilatura → write HTML + MD to disk →
+record in DB. Raw text URLs (.md, .txt) skip HTML conversion entirely.
 """
 
 import asyncio
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 import aiofiles
 from loguru import logger
-from patchright.async_api import Browser as AsyncBrowser, async_playwright
+from patchright.async_api import async_playwright
 from patchright.sync_api import sync_playwright
 
 from clotho.db import Page, PageDatabase
 from clotho.parse import parse_html
 
-from .url_processor import process_url, registered_domain, slug_for_url, split_url
+from .url_processor import (
+    is_raw_text_url,
+    process_url,
+    registered_domain,
+    slug_for_url,
+    split_url,
+)
 from .validate import check_html
 
-TIMEOUT_MS = 10000
+TIMEOUT_MS = 15_000
 DEFAULT_CONCURRENCY = 5
 DEFAULT_MIN_WORDS = 150
+DEFAULT_MAX_RETRIES = 2
 BLOCKED_RESOURCE_TYPES = {"image", "stylesheet", "font"}
+
+# Transient error patterns worth retrying
+_TRANSIENT_ERRORS = (
+    "timeout",
+    "net::ERR_CONNECTION_RESET",
+    "net::ERR_CONNECTION_TIMED_OUT",
+)
 
 
 class Scraper:
@@ -39,6 +55,7 @@ class Scraper:
         page_timeout: Playwright page load timeout in milliseconds.
         max_concurrency: Maximum concurrent page fetches for batch operations.
         min_words: Minimum word count in markdown for a page to be accepted.
+        max_retries: Maximum retry attempts for transient failures.
     """
 
     def __init__(
@@ -48,12 +65,14 @@ class Scraper:
         page_timeout: int = TIMEOUT_MS,
         max_concurrency: int = DEFAULT_CONCURRENCY,
         min_words: int = DEFAULT_MIN_WORDS,
+        max_retries: int = DEFAULT_MAX_RETRIES,
     ):
         self.db = db
         self.saved_dir = saved_dir
         self.page_timeout = page_timeout
         self.max_concurrency = max_concurrency
         self.min_words = min_words
+        self.max_retries = max_retries
 
     # =========================================================================
     # INTERNAL HELPERS
@@ -138,6 +157,11 @@ class Scraper:
         else:
             return error_msg
 
+    @staticmethod
+    def _is_transient(reason: str) -> bool:
+        """Check if a failure reason indicates a transient/retryable error."""
+        return any(marker in reason for marker in _TRANSIENT_ERRORS)
+
     def _save_files_sync(self, slug: str, html: str, markdown: str) -> None:
         """Write HTML and markdown files to the slug directory."""
         slug_dir = self.saved_dir / slug
@@ -164,8 +188,34 @@ class Scraper:
     ) -> Page | None:
         """Validate HTML, convert to markdown, and archive.
 
+        For raw text URLs (.md, .txt), the content is stored directly
+        without HTML conversion.
+
         Returns a Page on success, None on failure (failure is recorded in DB).
         """
+        # Raw text URLs: store content directly, skip HTML validation/conversion
+        if is_raw_text_url(processed_url):
+            # The "html" is actually plain text from the browser's rendering
+            word_count = len(html.split())
+            if word_count < self.min_words:
+                reason = f"too short ({word_count} words)"
+                self._store_failure(processed_url, original_url, domain, slug, reason)
+                logger.warning(f"Rejected {processed_url}: {reason}")
+                return None
+
+            self._save_files_sync(slug, html, html)
+            page = self._store_success(
+                processed_url,
+                original_url,
+                domain,
+                slug,
+                title=None,
+                author=None,
+                word_count=word_count,
+            )
+            logger.info(f"Archived {processed_url} (raw text, {word_count} words)")
+            return page
+
         # Validate HTML
         block_reason = check_html(html)
         if block_reason:
@@ -204,6 +254,33 @@ class Scraper:
         logger.info(f"Archived {processed_url} ({result.word_count} words)")
         return page
 
+    def reparse_existing(self) -> int:
+        """Re-parse all successfully fetched pages from their archived HTML.
+
+        Reads page.html from disk and re-runs the conversion pipeline,
+        updating the markdown file and database record. Useful after
+        changing trafilatura settings or cleanup rules.
+
+        Returns:
+            Number of pages successfully re-parsed.
+        """
+        count = 0
+        for page in self.db.get_all():
+            if not page.fetched:
+                continue
+            html_path = self.saved_dir / page.slug / "page.html"
+            if not html_path.exists():
+                continue
+
+            html = html_path.read_text(encoding="utf-8")
+            result = self._process_html(
+                html, page.url, page.original_url, page.domain, page.slug
+            )
+            if result is not None:
+                count += 1
+        logger.info(f"Re-parsed {count} pages from existing HTML")
+        return count
+
     # =========================================================================
     # SYNCHRONOUS - Single page, debuggable
     # =========================================================================
@@ -239,36 +316,45 @@ class Scraper:
     def _fetch_sync(self, url: str) -> str | None:
         """Fetch HTML content synchronously using patchright.
 
+        Uses Chrome with a persistent context and no fingerprint injection
+        for maximum stealth.
+
         Args:
             url: The URL to fetch.
 
         Returns:
             Raw HTML string, or None if the fetch failed.
         """
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            pw_page = browser.new_page()
-            pw_page.route(
-                "**/*",
-                lambda route: (
-                    route.abort()
-                    if route.request.resource_type in BLOCKED_RESOURCE_TYPES
-                    else route.continue_()
-                ),
-            )
-            try:
-                pw_page.goto(
-                    url,
-                    wait_until="domcontentloaded",
-                    timeout=self.page_timeout,
+        with tempfile.TemporaryDirectory() as user_data_dir:
+            with sync_playwright() as p:
+                context = p.chromium.launch_persistent_context(
+                    user_data_dir=user_data_dir,
+                    channel="chrome",
+                    headless=False,
+                    no_viewport=True,
                 )
-                return pw_page.content()
-            except Exception as e:
-                logger.warning(f"Fetch error {url}: {self._format_fetch_error(e)}")
-                return None
-            finally:
-                pw_page.close()
-                browser.close()
+                pw_page = context.new_page()
+                pw_page.route(
+                    "**/*",
+                    lambda route: (
+                        route.abort()
+                        if route.request.resource_type in BLOCKED_RESOURCE_TYPES
+                        else route.continue_()
+                    ),
+                )
+                try:
+                    pw_page.goto(
+                        url,
+                        wait_until="domcontentloaded",
+                        timeout=self.page_timeout,
+                    )
+                    return pw_page.content()
+                except Exception as e:
+                    logger.warning(f"Fetch error {url}: {self._format_fetch_error(e)}")
+                    return None
+                finally:
+                    pw_page.close()
+                    context.close()
 
     # =========================================================================
     # ASYNC BATCH - Multiple pages with concurrency
@@ -321,23 +407,34 @@ class Scraper:
         self,
         to_fetch: list[tuple[str, str, str, str]],
     ) -> list[Page]:
-        """Fetch URLs concurrently with a shared browser instance."""
+        """Fetch URLs concurrently with a shared persistent browser context.
+
+        Uses Chrome with no fingerprint injection (patchright best practice).
+        Retries transient failures (timeouts, resets) up to max_retries.
+        """
         semaphore = asyncio.Semaphore(self.max_concurrency)
 
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            tasks = [
-                self._fetch_one_async(semaphore, browser, *item) for item in to_fetch
-            ]
-            fetched = await asyncio.gather(*tasks)
-            await browser.close()
+            with tempfile.TemporaryDirectory() as user_data_dir:
+                context = await p.chromium.launch_persistent_context(
+                    user_data_dir=user_data_dir,
+                    channel="chrome",
+                    headless=False,
+                    no_viewport=True,
+                )
+                tasks = [
+                    self._fetch_one_async(semaphore, context, *item)
+                    for item in to_fetch
+                ]
+                fetched = await asyncio.gather(*tasks)
+                await context.close()
 
         return [page for page in fetched if page is not None]
 
     async def _fetch_one_async(
         self,
         semaphore: asyncio.Semaphore,
-        browser: AsyncBrowser,
+        context: object,
         processed_url: str,
         original_url: str,
         domain: str,
@@ -345,9 +442,12 @@ class Scraper:
     ) -> Page | None:
         """Fetch, validate, convert, and archive a single URL (async).
 
+        Retries transient errors (timeouts, connection resets) up to
+        max_retries times before recording a failure.
+
         Args:
             semaphore: Concurrency limiter.
-            browser: Patchright browser instance.
+            context: Patchright browser context.
             processed_url: The processed/normalized URL.
             original_url: The original URL before rewriting.
             domain: Registered domain for the URL.
@@ -356,39 +456,73 @@ class Scraper:
         Returns:
             Page if archived successfully, None on failure.
         """
-        async with semaphore:
-            pw_page = await browser.new_page()
-            await pw_page.route(
-                "**/*",
-                lambda route: (
-                    route.abort()
-                    if route.request.resource_type in BLOCKED_RESOURCE_TYPES
-                    else route.continue_()
-                ),
-            )
-            try:
-                await pw_page.goto(
-                    processed_url,
-                    wait_until="domcontentloaded",
-                    timeout=self.page_timeout,
+        html: str | None = None
+        last_reason = ""
+
+        for attempt in range(1, self.max_retries + 1):
+            async with semaphore:
+                pw_page = await context.new_page()
+                await pw_page.route(
+                    "**/*",
+                    lambda route: (
+                        route.abort()
+                        if route.request.resource_type in BLOCKED_RESOURCE_TYPES
+                        else route.continue_()
+                    ),
                 )
-                html = await pw_page.content()
-            except Exception as e:
-                reason = self._format_fetch_error(e)
+                try:
+                    await pw_page.goto(
+                        processed_url,
+                        wait_until="domcontentloaded",
+                        timeout=self.page_timeout,
+                    )
+                    html = await pw_page.content()
+                except Exception as e:
+                    last_reason = self._format_fetch_error(e)
+                finally:
+                    await pw_page.close()
+
+            if html is not None:
+                break
+
+            if not self._is_transient(last_reason) or attempt == self.max_retries:
                 self._store_failure(
-                    processed_url, original_url, domain, slug, reason
+                    processed_url, original_url, domain, slug, last_reason
                 )
-                logger.warning(f"Fetch error {processed_url}: {reason}")
+                logger.warning(f"Fetch error {processed_url}: {last_reason}")
                 return None
-            finally:
-                await pw_page.close()
+
+            logger.debug(
+                f"Retry {attempt}/{self.max_retries} for {processed_url}: {last_reason}"
+            )
+            await asyncio.sleep(2 * attempt)
+
+        # Raw text URLs: store directly, skip HTML validation/conversion
+        if is_raw_text_url(processed_url):
+            word_count = len(html.split())
+            if word_count < self.min_words:
+                reason = f"too short ({word_count} words)"
+                self._store_failure(processed_url, original_url, domain, slug, reason)
+                logger.warning(f"Rejected {processed_url}: {reason}")
+                return None
+            slug_dir = self.saved_dir / slug
+            await self._save_files_async(slug_dir, html, html)
+            page = self._store_success(
+                processed_url,
+                original_url,
+                domain,
+                slug,
+                title=None,
+                author=None,
+                word_count=word_count,
+            )
+            logger.info(f"Archived {processed_url} (raw text, {word_count} words)")
+            return page
 
         # Validate, convert, and archive (CPU-bound, outside semaphore)
         block_reason = check_html(html)
         if block_reason:
-            self._store_failure(
-                processed_url, original_url, domain, slug, block_reason
-            )
+            self._store_failure(processed_url, original_url, domain, slug, block_reason)
             logger.warning(f"Rejected {processed_url}: {block_reason}")
             return None
 
