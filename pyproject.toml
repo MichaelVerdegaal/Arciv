@@ -11,6 +11,7 @@ dependencies = [
     "tldextract>=5.3.1",    # Extracting domain information from URLs
     "trafilatura>=2.0.0",   # HTML to markdown conversion
     "patchright>=1.60.0",   # Undetected Playwright fork for scraping
+    "liteparse>=2.0.3",
 ]
 
 [dependency-groups]
