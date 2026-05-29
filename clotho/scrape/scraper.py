@@ -1,10 +1,9 @@
-"""Web scraper that fetches HTML pages and stores them as compressed archives."""
+"""Web scraper that fetches HTML pages and stores them as HTML archives."""
 
 import asyncio
 from pathlib import Path
 
 import aiofiles
-import brotli
 from loguru import logger
 from playwright.async_api import Browser as AsyncBrowser, async_playwright
 from playwright.sync_api import sync_playwright
@@ -17,15 +16,14 @@ from .user_agents import random_user_agent
 
 TIMEOUT_MS = 10000
 DEFAULT_CONCURRENCY = 5
-BROTLI_QUALITY = 6
 BLOCKED_RESOURCE_TYPES = {"image", "stylesheet", "font"}
 
 
 class Scraper:
     """Web scraper that fetches HTML pages and stores compressed archives.
 
-    Handles URL processing, HTML fetching via Playwright, and Brotli-compressed
-    archival. Does NOT parse HTML to markdown — use clotho.parse.Parser for that.
+    Handles URL processing, HTML fetching via Playwright, and HTML archival.
+    Does NOT parse HTML to markdown — use clotho.parse.Parser for that.
 
     Supports both single-page fetching (sync, for debugging) and batch
     fetching (async with concurrency control).
@@ -63,17 +61,15 @@ class Scraper:
             Tuple of (absolute_path, relative_subpath for DB storage).
         """
         domain, _ = split_url(processed_url)
-        filename = hash_filename(processed_url, ".html.br")
+        filename = hash_filename(processed_url, ".html")
         subpath = f"{domain}/{filename}"
         return self.html_dir / domain / filename, subpath
 
     @staticmethod
-    def _save_compressed_html(html_content: str, path: Path) -> None:
-        """Compress HTML with Brotli and save to disk."""
+    def _save_html(html_content: str, path: Path) -> None:
+        """Save HTML to disk."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(
-            brotli.compress(html_content.encode("utf-8"), quality=BROTLI_QUALITY)
-        )
+        path.write_text(html_content, encoding="utf-8")
 
     def _needs_fetch(self, processed_url: str, refetch: bool) -> bool:
         """Check if a URL needs to be fetched.
@@ -153,7 +149,7 @@ class Scraper:
     def scrape(self, url: str, refetch: bool = False) -> Page | None:
         """Fetch a single URL synchronously.
 
-        Downloads the HTML, saves it as a Brotli-compressed archive, and
+        Downloads the HTML, saves it as an archive, and
         records the result in the database with status 'fetched'.
         Does NOT convert HTML to markdown.
 
@@ -181,7 +177,7 @@ class Scraper:
             self._store_fetch_failure(processed_url, url, domain, "fetch failed")
             return None
 
-        self._save_compressed_html(html_content, html_abs_path)
+        self._save_html(html_content, html_abs_path)
         return self._store_fetch_success(processed_url, url, domain, html_subpath)
 
     def _fetch_sync(self, url: str) -> str | None:
@@ -296,7 +292,7 @@ class Scraper:
         html_subpath: str,
         html_abs_path: Path,
     ) -> Page | None:
-        """Fetch a single URL and save the Brotli-compressed HTML archive.
+        """Fetch a single URL and save the HTML archive.
 
         Args:
             semaphore: Concurrency limiter.
@@ -326,14 +322,10 @@ class Scraper:
                 )
                 html_content = await pw_page.content()
 
-                # Save Brotli-compressed HTML archive
+                # Save HTML archive
                 html_abs_path.parent.mkdir(parents=True, exist_ok=True)
-                compressed = brotli.compress(
-                    html_content.encode("utf-8"),
-                    quality=BROTLI_QUALITY,
-                )
-                async with aiofiles.open(html_abs_path, "wb") as f:
-                    await f.write(compressed)
+                async with aiofiles.open(html_abs_path, "w", encoding="utf-8") as f:
+                    await f.write(html_content)
 
                 return self._store_fetch_success(
                     processed_url, original_url, domain, html_subpath

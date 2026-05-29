@@ -20,6 +20,3 @@ How to set up the Clotho project locally.
 ## Post-installation
 
 Run `clotho/update_user_agents.py`.
-
-
-

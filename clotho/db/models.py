@@ -14,7 +14,7 @@ class Page:
         status: One of 'pending', 'fetched', 'scraped', 'failed', 'too_short'.
         fail_reason: Why scraping/parsing failed, if applicable.
         md_content: Extracted markdown content.
-        html_path: Relative path to compressed .html.br archive file.
+        html_path: Relative path to .html archive file.
         title: HTML page title.
         author: Page author, if extractable.
         word_count: Number of words in markdown content.
