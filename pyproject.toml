@@ -6,18 +6,17 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "aiofiles>=25.1.0",          # Asynchronous file operations
-    "loguru>=0.7.3",             # Logging
-    "playwright>=1.56.0",        # Scraping and browser automation
-    "trafilatura>=2.0.0",        # HTML to markdown conversion
     "python-dotenv>=1.2.1",      # Environment variable management
-    "tldextract>=5.3.1",         # Extracting domain information from URLs
-    "brotli>=1.2.0",             # Compression for HTML files
     "playwright-stealth>=2.0.2", # Stealth plugin for Playwright
+    "loguru>=0.7.3",             # Logging
+    "tldextract>=5.3.1",         # Extracting domain information from URLs
+    "trafilatura>=2.0.0",        # HTML to markdown conversion
+    "playwright>=1.60.0",        # Scraping and browser automation
 ]
 
 [dependency-groups]
 dev = [
-    "ruff>=0.14.5", # Linting / formatting
+    "ruff>=0.15.15", # Linting / formatting
 ]
 
 [build-system]
