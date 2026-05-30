@@ -3,8 +3,8 @@ from pathlib import Path
 from typing import Self
 
 # Splits concatenated URLs on an embedded "https://" boundary.
-# E.g. "https://a.com/foobar7405dhttps://b.com/baz" → ["https://a.com/foobar7405d", "https://b.com/baz"]
-_CONCAT_SPLIT_RE = re.compile(r"(?=https?://)")
+# Only split when the boundary is not part of a query string value.
+_CONCAT_SPLIT_RE = re.compile(r"(?<=[^\s?=&])(?=https?://)")
 
 
 class Note:
