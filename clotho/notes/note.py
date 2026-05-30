@@ -2,6 +2,10 @@ import re
 from pathlib import Path
 from typing import Self
 
+# Splits concatenated URLs on an embedded "https://" boundary.
+# Only split when the boundary is not part of a query string value.
+_CONCAT_SPLIT_RE = re.compile(r"(?<=[^\s?=&])(?=https?://)")
+
 
 class Note:
     """Base class for a 'Note' object, containing metadata and text content."""
@@ -82,16 +86,38 @@ class Note:
     def extract_urls(self) -> list[str]:
         """Extract all URLs from the note content.
 
+        Handles both markdown links ``[text](url)`` and bare URLs. Markdown
+        links are matched first to avoid capturing trailing junk after the
+        closing paren (e.g. ``[link](https://example.com)seasonalities``).
+
+        Concatenated URLs (multiple ``https://`` in one match) are split.
+        Trailing parens are only stripped when unbalanced (more ``)`` than
+        ``(``) to preserve URLs like ``Leakage_(machine_learning)``.
+
         Returns:
             List of extracted URLs
         """
-        URL_PATTERN_RE = r"https?://[^\s<>\[\]\"]+"
-        cleaned = []
+        raw_urls: list[str] = []
 
-        for url in re.findall(URL_PATTERN_RE, self.text):
-            url = url.rstrip(".,;:!?'")
+        # First pass: extract URLs from markdown links [text](url)
+        # Balanced-paren group tried first so (machine_learning) stays intact
+        _MD_LINK_RE = r"\[(?:[^\[\]]|\[[^\]]*\])*\]\((https?://(?:\([^\s\)]*\)|[^\s\)])+)\)"
+        for match in re.finditer(_MD_LINK_RE, self.text):
+            raw_urls.append(match.group(1))
+
+        # Second pass: bare URLs not inside markdown link parens
+        _BARE_URL_RE = r"(?<!\]\()https?://[^\s<>\[\]\"]+"
+        for match in re.finditer(_BARE_URL_RE, self.text):
+            url = match.group(0).rstrip(".,;:!?'")
+            # Strip trailing parens only when unbalanced
             while url.endswith(")") and url.count(")") > url.count("("):
                 url = url[:-1]
-            cleaned.append(url)
+            raw_urls.append(url)
 
-        return cleaned
+        # Split concatenated URLs (e.g. "...7405d51cd839https://medium.com/...")
+        urls: list[str] = []
+        for url in raw_urls:
+            parts = _CONCAT_SPLIT_RE.split(url)
+            urls.extend(p for p in parts if p)
+
+        return urls

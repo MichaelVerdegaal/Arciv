@@ -11,15 +11,13 @@ CREATE TABLE IF NOT EXISTS pages (
     url             TEXT PRIMARY KEY,
     original_url    TEXT NOT NULL,
     domain          TEXT NOT NULL DEFAULT '',
-    status          TEXT NOT NULL DEFAULT 'pending',
+    slug            TEXT NOT NULL DEFAULT '',
+    fetched         INTEGER NOT NULL DEFAULT 0,
     fail_reason     TEXT,
-    md_content      TEXT,
-    html_path       TEXT,
     title           TEXT,
     author          TEXT,
     word_count      INTEGER NOT NULL DEFAULT 0,
-    scraped_at      TEXT,
-    embedding       BLOB
+    scraped_at      TEXT
 );
 
 CREATE TABLE IF NOT EXISTS page_sources (
@@ -31,22 +29,20 @@ CREATE TABLE IF NOT EXISTS page_sources (
 
 _UPSERT_SQL = """\
 INSERT INTO pages (
-    url, original_url, domain, status,
-    fail_reason, md_content, html_path, title, author,
-    word_count, scraped_at, embedding
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    url, original_url, domain, slug,
+    fetched, fail_reason, title, author,
+    word_count, scraped_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(url) DO UPDATE SET
     original_url = excluded.original_url,
     domain       = excluded.domain,
-    status       = excluded.status,
+    slug         = excluded.slug,
+    fetched      = excluded.fetched,
     fail_reason  = excluded.fail_reason,
-    md_content   = excluded.md_content,
-    html_path    = excluded.html_path,
     title        = excluded.title,
     author       = excluded.author,
     word_count   = excluded.word_count,
-    scraped_at   = excluded.scraped_at,
-    embedding    = excluded.embedding;
+    scraped_at   = excluded.scraped_at;
 """
 
 
@@ -89,15 +85,13 @@ class PageDatabase:
             url=row["url"],
             original_url=row["original_url"],
             domain=row["domain"],
-            status=row["status"],
+            slug=row["slug"],
+            fetched=bool(row["fetched"]),
             fail_reason=row["fail_reason"],
-            md_content=row["md_content"],
-            html_path=row["html_path"],
             title=row["title"],
             author=row["author"],
             word_count=row["word_count"],
             scraped_at=row["scraped_at"],
-            embedding=row["embedding"],
         )
 
     # -- page CRUD --
@@ -114,30 +108,29 @@ class PageDatabase:
                 page.url,
                 page.original_url,
                 page.domain,
-                page.status,
+                page.slug,
+                int(page.fetched),
                 page.fail_reason,
-                page.md_content,
-                page.html_path,
                 page.title,
                 page.author,
                 page.word_count,
                 page.scraped_at,
-                page.embedding,
             ),
         )
         self._conn.commit()
 
-    def ensure_pages(self, url_map: dict[str, tuple[str, str]]) -> None:
+    def ensure_pages(self, url_entries: list[tuple[str, str, str, str]]) -> None:
         """Create pending page entries for URLs not yet in the database.
 
         Existing pages are left unchanged.
 
         Args:
-            url_map: Mapping of processed_url -> (original_url, domain).
+            url_entries: List of (url, original_url, domain, slug) tuples.
         """
         self._conn.executemany(
-            "INSERT OR IGNORE INTO pages (url, original_url, domain) VALUES (?, ?, ?)",
-            [(url, orig, domain) for url, (orig, domain) in url_map.items()],
+            "INSERT OR IGNORE INTO pages (url, original_url, domain, slug) "
+            "VALUES (?, ?, ?, ?)",
+            url_entries,
         )
         self._conn.commit()
 
@@ -153,17 +146,14 @@ class PageDatabase:
         row = self._conn.execute("SELECT * FROM pages WHERE url = ?", (url,)).fetchone()
         return self._row_to_page(row) if row else None
 
-    def get_by_status(self, status: str) -> list[Page]:
-        """Get all pages with a given status.
-
-        Args:
-            status: One of 'pending', 'fetched', 'scraped', 'failed', 'too_short'.
+    def get_unfetched(self) -> list[Page]:
+        """Get all pages that haven't been attempted yet.
 
         Returns:
-            List of matching Pages.
+            Pages with fetched=0 and no fail_reason (pending).
         """
         rows = self._conn.execute(
-            "SELECT * FROM pages WHERE status = ?", (status,)
+            "SELECT * FROM pages WHERE fetched = 0 AND fail_reason IS NULL"
         ).fetchall()
         return [self._row_to_page(row) for row in rows]
 
@@ -172,49 +162,10 @@ class PageDatabase:
         rows = self._conn.execute("SELECT * FROM pages").fetchall()
         return [self._row_to_page(row) for row in rows]
 
-    def get_scraped(self) -> list[Page]:
-        """Get all successfully scraped pages (shortcut for status='scraped')."""
-        return self.get_by_status("scraped")
-
-    def count(self, status: str | None = None) -> int:
-        """Count pages, optionally filtered by status.
-
-        Args:
-            status: If provided, count only pages with this status.
-
-        Returns:
-            Number of matching pages.
-        """
-        if status:
-            row = self._conn.execute(
-                "SELECT COUNT(*) AS n FROM pages WHERE status = ?", (status,)
-            ).fetchone()
-        else:
-            row = self._conn.execute("SELECT COUNT(*) AS n FROM pages").fetchone()
+    def count(self) -> int:
+        """Count total pages."""
+        row = self._conn.execute("SELECT COUNT(*) AS n FROM pages").fetchone()
         return row["n"]
-
-    def update_embedding(self, url: str, embedding: bytes) -> None:
-        """Set the embedding blob for a single page.
-
-        Args:
-            url: The processed/normalized URL (primary key).
-            embedding: Embedding vector serialized as bytes.
-        """
-        self._conn.execute(
-            "UPDATE pages SET embedding = ? WHERE url = ?", (embedding, url)
-        )
-        self._conn.commit()
-
-    def update_embeddings_batch(self, pairs: list[tuple[bytes, str]]) -> None:
-        """Set embedding blobs for multiple pages in a single transaction.
-
-        Args:
-            pairs: List of (embedding_bytes, url) tuples.
-        """
-        self._conn.executemany(
-            "UPDATE pages SET embedding = ? WHERE url = ?", pairs
-        )
-        self._conn.commit()
 
     def url_exists(self, url: str) -> bool:
         """Check if a URL exists in the database.
@@ -229,6 +180,50 @@ class PageDatabase:
             "SELECT 1 FROM pages WHERE url = ? LIMIT 1", (url,)
         ).fetchone()
         return row is not None
+
+    def fail_summary(self) -> list[tuple[str | None, str, int]]:
+        """Summarize failures grouped by domain and reason.
+
+        Returns:
+            List of (domain, fail_reason, count) tuples, ordered by count
+            descending.
+        """
+        rows = self._conn.execute(
+            "SELECT domain, fail_reason, COUNT(*) AS n "
+            "FROM pages WHERE fetched = 0 AND fail_reason IS NOT NULL "
+            "GROUP BY domain, fail_reason ORDER BY n DESC"
+        ).fetchall()
+        return [(row["domain"], row["fail_reason"], row["n"]) for row in rows]
+
+    def prune_orphans(self, canonical_urls: set[str]) -> int:
+        """Delete failed rows whose URLs are no longer in the canonical set.
+
+        Only deletes rows where ``fetched = 0`` (never successfully archived)
+        AND the URL is absent from the freshly-extracted canonical set. This
+        clears stale rows from old rewrites or broken-URL extractions without
+        ever touching archived content.
+
+        Args:
+            canonical_urls: The current set of processed URLs from notes.
+
+        Returns:
+            Number of rows deleted.
+        """
+        # Fetch all failed URLs
+        rows = self._conn.execute(
+            "SELECT url FROM pages WHERE fetched = 0 AND fail_reason IS NOT NULL"
+        ).fetchall()
+
+        to_delete = [row["url"] for row in rows if row["url"] not in canonical_urls]
+
+        if to_delete:
+            self._conn.executemany(
+                "DELETE FROM pages WHERE url = ?",
+                [(url,) for url in to_delete],
+            )
+            self._conn.commit()
+
+        return len(to_delete)
 
     # -- source notes --
 

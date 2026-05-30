@@ -1,7 +1,7 @@
 """Fetch the latest desktop browser User-Agent strings and save to data/user_agents.txt.
 
 Usage:
-    uv run python -m clotho.scripts.update_user_agents
+    uv run python -m clotho.scripts.cli update-agents
 """
 
 import json
@@ -43,15 +43,19 @@ def save_user_agents(agents: list[str]) -> None:
 
     Args:
         agents: List of user-agent strings.
-        path: Output file path. Defaults to data/user_agents.txt.
     """
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text("\n".join(agents) + "\n", encoding="utf-8")
     logger.info(f"Saved {len(agents)} user-agents to {OUTPUT_PATH}")
 
 
-if __name__ == "__main__":
+def update_agents() -> None:
+    """Fetch and save latest user-agent strings."""
     configure_logger()
     agents = fetch_user_agents()
     save_user_agents(agents)
     logger.info(f"Sample: {agents[0]}")
+
+
+if __name__ == "__main__":
+    update_agents()

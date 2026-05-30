@@ -21,7 +21,6 @@ SKIP_SUFFIXES = (
     ".bmp",
     ".tiff",
     ".ico",
-    ".pdf",  # TODO: this contains readable text, but needs special conversion
     ".mp4",
     ".mp3",
     ".avi",
@@ -42,8 +41,19 @@ SKIP_DOMAIN_SUFFIXES = (
     "app.powerbi.com",
     "youtube.com",
     "youtu.be",
-    "azure.com"
+    "azure.com",
 )
+
+# Exact domain + path prefix combinations that are not archivable content.
+# These get marked "skipped (not content)" instead of cluttering failure logs.
+SKIP_DOMAINS: set[str] = {
+    "claude.ai",
+    "lnkd.in",
+    "support.dfg.nl",
+}
+SKIP_DOMAIN_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
+    "google.com": ("/search",),
+}
 
 # Matches IP addresses as domain (e.g., "192.168.2.13", "10.0.0.1:8080")
 _IP_DOMAIN_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}(:\d+)?$")
@@ -51,10 +61,12 @@ _IP_DOMAIN_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}(:\d+)?$")
 # File extensions that are human-readable (don't rewrite to repo root)
 READABLE_EXTENSIONS = frozenset({".md", ".txt", ".rst"})
 
+# Extensions served as plain text (skip trafilatura, store bytes directly)
+RAW_TEXT_EXTENSIONS = frozenset({".md", ".txt", ".rst", ".csv", ".tsv"})
+
 # GitHub path patterns
 _GITHUB_BLOB_TREE_RE = re.compile(r"^/([^/]+/[^/]+)/(?:blob|tree)/")
 _RAW_GITHUB_PATH_RE = re.compile(r"^/([^/]+/[^/]+)/")
-
 
 def _rewrite_github(url: str) -> str:
     """Normalize GitHub file URLs to repository root.
@@ -99,15 +111,6 @@ def _rewrite_raw_github(url: str) -> str:
     return f"https://github.com/{match.group(1)}"
 
 
-def _rewrite_medium(url: str) -> str:
-    """Rewrite Medium URLs to use Freedium mirror.
-
-    E.g. https://medium.com/data-science/topic-modeling-with-bert-779f7db187e6
-         -> https://freedium-mirror.cfd/https://medium.com/data-science/topic-modeling-with-bert-779f7db187e6
-    """
-    return f"https://freedium-mirror.cfd/{url}"
-
-
 def split_url(url: str) -> tuple[str, str]:
     """Split the registered domain and the path from a URL.
 
@@ -150,8 +153,41 @@ def registered_domain(url: str) -> str:
 DOMAIN_REWRITERS: dict[str, Callable[[str], str]] = {
     "github.com": _rewrite_github,
     "raw.githubusercontent.com": _rewrite_raw_github,
-    "medium.com": _rewrite_medium,
 }
+
+
+def is_raw_text_url(url: str) -> bool:
+    """Check if a URL points to a raw text file that should skip HTML conversion.
+
+    Args:
+        url: The URL to check.
+
+    Returns:
+        True if the URL ends with a known plain-text extension.
+    """
+    parsed = urlparse(url)
+    path_lower = parsed.path.lower()
+    return any(path_lower.endswith(ext) for ext in RAW_TEXT_EXTENSIONS)
+
+
+def is_pdf_url(url: str) -> bool:
+    """Check if a URL points to a PDF file.
+
+    Matches explicit ``.pdf`` extensions and known PDF-serving path patterns
+    (e.g. arxiv ``/pdf/`` routes that serve PDFs without a file extension).
+
+    Args:
+        url: The URL to check.
+
+    Returns:
+        True if the URL likely serves a PDF.
+    """
+    path = urlparse(url).path.lower()
+    if path.endswith(".pdf"):
+        return True
+    # Paths like /pdf/2305.14406 serve PDFs directly (arxiv, etc.)
+    segments = [s for s in path.split("/") if s]
+    return len(segments) >= 2 and segments[0] == "pdf"
 
 
 def hash_filename(url: str, extension: str = ".md") -> str:
@@ -167,6 +203,23 @@ def hash_filename(url: str, extension: str = ".md") -> str:
     domain, _ = split_url(url)
     url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
     return f"{domain}-{url_hash}{extension}"
+
+
+def slug_for_url(url: str) -> str:
+    """Generate a slug (folder name) for a URL.
+
+    The slug is used as the directory name under ``saved/`` where the
+    page's HTML and markdown files are stored.
+
+    Args:
+        url: The processed/normalized URL.
+
+    Returns:
+        Slug in format "{domain}-{hash}", e.g. "github.com-a1b2c3d4".
+    """
+    domain, _ = split_url(url)
+    url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+    return f"{domain}-{url_hash}"
 
 
 def process_url(url: str) -> tuple[str | None, str]:
@@ -186,8 +239,9 @@ def process_url(url: str) -> tuple[str | None, str]:
     if url.startswith(SKIP_PREFIXES):
         return None, "URL matches skip prefix"
 
-    # Skip specific suffixes
-    if url.lower().endswith(SKIP_SUFFIXES):
+    # Skip specific suffixes (but not .pdf — arxiv PDFs get rewritten)
+    path_lower = urlparse(url).path.lower()
+    if path_lower.endswith(SKIP_SUFFIXES):
         return None, "URL matches skip suffix"
 
     # Skip IP addresses (local network, etc.)
@@ -198,6 +252,17 @@ def process_url(url: str) -> tuple[str | None, str]:
     # Skip domains by suffix (handles subdomains)
     if domain.endswith(SKIP_DOMAIN_SUFFIXES):
         return None, "URL domain matches skip suffix"
+
+    # Skip non-content domains (chat links, shorteners, internal tools)
+    if domain in SKIP_DOMAINS:
+        return None, "skipped (not content)"
+
+    # Skip domain + path prefix combos (e.g. google.com/search)
+    if domain in SKIP_DOMAIN_PATH_PREFIXES:
+        parsed = urlparse(url)
+        for prefix in SKIP_DOMAIN_PATH_PREFIXES[domain]:
+            if parsed.path.startswith(prefix):
+                return None, "skipped (not content)"
 
     # Apply rewriters
     if domain in DOMAIN_REWRITERS:
