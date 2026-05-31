@@ -32,6 +32,11 @@ SKIP_SUFFIXES = (
     ".xml",
 )
 
+# Path substrings that identify image-proxy/optimizer endpoints. These serve
+# a (resized) image, not archivable content, and otherwise trigger a browser
+# download (e.g. Next.js "/_next/image?url=...jpg").
+SKIP_PATH_SUBSTRINGS = ("/_next/image",)
+
 # Domains ending with these suffixes are skipped (handles subdomains)
 SKIP_DOMAIN_SUFFIXES = (
     "sharepoint.com",
@@ -67,6 +72,7 @@ RAW_TEXT_EXTENSIONS = frozenset({".md", ".txt", ".rst", ".csv", ".tsv"})
 # GitHub path patterns
 _GITHUB_BLOB_TREE_RE = re.compile(r"^/([^/]+/[^/]+)/(?:blob|tree)/")
 _RAW_GITHUB_PATH_RE = re.compile(r"^/([^/]+/[^/]+)/")
+
 
 def _rewrite_github(url: str) -> str:
     """Normalize GitHub file URLs to repository root.
@@ -243,6 +249,10 @@ def process_url(url: str) -> tuple[str | None, str]:
     path_lower = urlparse(url).path.lower()
     if path_lower.endswith(SKIP_SUFFIXES):
         return None, "URL matches skip suffix"
+
+    # Skip image-proxy/optimizer endpoints (serve images, not content)
+    if any(sub in path_lower for sub in SKIP_PATH_SUBSTRINGS):
+        return None, "URL is an image proxy endpoint"
 
     # Skip IP addresses (local network, etc.)
     domain, _ = split_url(url)
