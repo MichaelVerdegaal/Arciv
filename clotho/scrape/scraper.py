@@ -32,7 +32,7 @@ from .url_processor import (
 )
 from .validate import check_html
 
-TIMEOUT_MS = 15_000
+TIMEOUT_MS = 30_000
 DEFAULT_CONCURRENCY = 5
 DEFAULT_MIN_WORDS = 150
 DEFAULT_MAX_RETRIES = 2
