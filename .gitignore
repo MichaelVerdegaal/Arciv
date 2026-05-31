@@ -42,6 +42,11 @@ venv.bak/
 # Ruff stuff:
 .ruff_cache/
 
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+
 # PyPI configuration file
 .pypirc
 target/
