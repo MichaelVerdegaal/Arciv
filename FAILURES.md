@@ -50,13 +50,13 @@ they simply were not stored.
 ### Applied
 - Image/stylesheet/font request blocking, `networkidle` wait, headless mode, `ignore_https_errors`
   (earlier phase). These already recovered borderline pages such as tsfresh (141 → 161).
-
-### Proposed — needs confirmation (pipeline / rewriter changes per AGENTS.md)
-1. **Length gate vs. code stripping.** Apply the `< 150` word gate to the *full* extraction (code
-   included) while continuing to store the code-stripped markdown. Removes the only systematic
-   false-negative without polluting stored content with code.
-2. **HuggingFace `/blob/` PDFs.** Rewrite `huggingface.co/<repo>/blob/<rev>/<file>.pdf` →
-   `.../resolve/<rev>/<file>.pdf` so the real PDF is downloaded.
+- **Length gate vs. code stripping.** The `< 150` word gate now runs on the *full* (code-inclusive)
+  extraction while still storing the code-stripped markdown. Removes the systematic false-negative
+  for code-heavy GitHub/docs pages (e.g. ml-sigma-reparam: 118 → 166).
+- **HuggingFace `/blob/` PDFs.** `huggingface.co/<repo>/blob/<rev>/<file>.pdf` is now rewritten to
+  `.../resolve/<rev>/<file>.pdf` so the real PDF is downloaded instead of the HTML viewer.
+- **Per-session User-Agent.** PDF downloads now use a User-Agent rotated once per scraping session
+  (was a hardcoded `Mozilla/5.0` that drew `403 Forbidden` from some hosts).
 
 ### Won't fix (out of scope / not recoverable)
 - Cloudflare challenge pages (ResearchGate), dynamic app shells (Power BI, Copilot Studio,
