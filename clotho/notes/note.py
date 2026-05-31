@@ -101,7 +101,9 @@ class Note:
 
         # First pass: extract URLs from markdown links [text](url)
         # Balanced-paren group tried first so (machine_learning) stays intact
-        _MD_LINK_RE = r"\[(?:[^\[\]]|\[[^\]]*\])*\]\((https?://(?:\([^\s\)]*\)|[^\s\)])+)\)"
+        _MD_LINK_RE = (
+            r"\[(?:[^\[\]]|\[[^\]]*\])*\]\((https?://(?:\([^\s\)]*\)|[^\s\)])+)\)"
+        )
         for match in re.finditer(_MD_LINK_RE, self.text):
             raw_urls.append(match.group(1))
 
