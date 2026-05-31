@@ -31,6 +31,7 @@ from .url_processor import (
     slug_for_url,
     split_url,
 )
+from .user_agents import random_user_agent
 from .validate import check_html
 
 TIMEOUT_MS = 30_000
@@ -90,6 +91,14 @@ class Scraper:
         self.min_words = min_words
         self.max_retries = max_retries
         self.headless = headless
+        # User-Agent for raw HTTP (PDF) downloads, refreshed per session.
+        # The browser uses real Chrome's own UA, so it isn't overridden here.
+        self._session_user_agent: str = random_user_agent()
+
+    def _start_session(self) -> None:
+        """Pick a fresh User-Agent for the upcoming scraping session."""
+        self._session_user_agent = random_user_agent()
+        logger.debug(f"Session User-Agent: {self._session_user_agent}")
 
     # =========================================================================
     # INTERNAL HELPERS
@@ -211,8 +220,7 @@ class Scraper:
         async with aiofiles.open(slug_dir / "page.md", "w", encoding="utf-8") as f:
             await f.write(markdown)
 
-    @staticmethod
-    def _download_pdf(url: str) -> bytes | None:
+    def _download_pdf(self, url: str) -> bytes | None:
         """Download a PDF file via HTTP.
 
         Args:
@@ -221,7 +229,9 @@ class Scraper:
         Returns:
             Raw PDF bytes, or None if the download failed.
         """
-        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        request = urllib.request.Request(
+            url, headers={"User-Agent": self._session_user_agent}
+        )
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
                 return response.read()
@@ -392,6 +402,7 @@ class Scraper:
         Returns:
             Page if archived successfully, None if skipped/failed.
         """
+        self._start_session()
         processed_url, skip_reason = process_url(url)
         if processed_url is None:
             logger.warning(f"Skipped {url}: {skip_reason}")
@@ -515,6 +526,7 @@ class Scraper:
         PDF URLs are downloaded directly (no browser needed) and parsed
         with liteparse. HTML URLs go through patchright.
         """
+        self._start_session()
         to_fetch_html: list[tuple[str, str, str, str]] = []
         to_fetch_pdf: list[tuple[str, str, str, str]] = []
         seen_processed: set[str] = set()
