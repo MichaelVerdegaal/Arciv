@@ -16,6 +16,7 @@ from pathlib import Path
 import aiofiles
 from liteparse import LiteParse
 from loguru import logger
+from patchright.async_api import TimeoutError as PlaywrightTimeoutError
 from patchright.async_api import async_playwright
 from patchright.sync_api import sync_playwright
 
@@ -33,6 +34,9 @@ from .url_processor import (
 from .validate import check_html
 
 TIMEOUT_MS = 30_000
+# Extra time to let JS-rendered pages (SPAs) finish loading after
+# domcontentloaded. Without it, content() can return an empty shell.
+NETWORKIDLE_MS = 5_000
 DEFAULT_CONCURRENCY = 5
 DEFAULT_MIN_WORDS = 150
 DEFAULT_MAX_RETRIES = 2
@@ -454,6 +458,14 @@ class Scraper:
                         wait_until="domcontentloaded",
                         timeout=self.page_timeout,
                     )
+                    # SPAs render content after domcontentloaded; let the
+                    # network settle so client-side content is present.
+                    try:
+                        pw_page.wait_for_load_state(
+                            "networkidle", timeout=NETWORKIDLE_MS
+                        )
+                    except PlaywrightTimeoutError:
+                        pass
                     return pw_page.content()
                 except Exception as e:
                     error_msg = self._format_fetch_error(e)
@@ -613,6 +625,14 @@ class Scraper:
                         wait_until="domcontentloaded",
                         timeout=self.page_timeout,
                     )
+                    # SPAs render content after domcontentloaded; let the
+                    # network settle so client-side content is present.
+                    try:
+                        await pw_page.wait_for_load_state(
+                            "networkidle", timeout=NETWORKIDLE_MS
+                        )
+                    except PlaywrightTimeoutError:
+                        pass
                     html = await pw_page.content()
                 except Exception as e:
                     last_reason = self._format_fetch_error(e)
