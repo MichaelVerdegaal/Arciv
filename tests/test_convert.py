@@ -108,6 +108,20 @@ class TestParseHtml:
         assert result.word_count > 0
         assert result.title == "Unique Title"
 
+    def test_full_word_count_includes_code(self):
+        # Code-heavy page: most words live in the code block. The stored
+        # word_count strips them, but full_word_count keeps them so the
+        # length gate doesn't wrongly reject the page as "too short".
+        html = (
+            "<html><head><title>Code Heavy</title></head><body><article>"
+            "<p>Short intro paragraph here.</p>"
+            "<pre><code>" + ("codetoken " * 200) + "</code></pre>"
+            "</article></body></html>"
+        )
+        result = parse_html(html)
+        assert result is not None
+        assert result.full_word_count > result.word_count
+
     def test_returns_none_on_failure(self):
         assert parse_html("") is None
 
