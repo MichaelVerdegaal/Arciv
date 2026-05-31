@@ -36,8 +36,8 @@ from .validate import check_html
 TIMEOUT_MS = 30_000
 # Extra time to let JS-rendered pages (SPAs) finish loading after
 # domcontentloaded. Without it, content() can return an empty shell.
-NETWORKIDLE_MS = 5_000
-DEFAULT_CONCURRENCY = 5
+NETWORKIDLE_MS = 3_000
+DEFAULT_CONCURRENCY = 8
 DEFAULT_MIN_WORDS = 150
 DEFAULT_MAX_RETRIES = 2
 BLOCKED_RESOURCE_TYPES = {"image", "stylesheet", "font"}
@@ -69,6 +69,8 @@ class Scraper:
         max_concurrency: Maximum concurrent page fetches for batch operations.
         min_words: Minimum word count in markdown for a page to be accepted.
         max_retries: Maximum retry attempts for transient failures.
+        headless: Run the browser without a visible window. Disable only when a
+            site needs the extra stealth of a headed browser.
     """
 
     def __init__(
@@ -79,6 +81,7 @@ class Scraper:
         max_concurrency: int = DEFAULT_CONCURRENCY,
         min_words: int = DEFAULT_MIN_WORDS,
         max_retries: int = DEFAULT_MAX_RETRIES,
+        headless: bool = True,
     ):
         self.db = db
         self.saved_dir = saved_dir
@@ -86,6 +89,7 @@ class Scraper:
         self.max_concurrency = max_concurrency
         self.min_words = min_words
         self.max_retries = max_retries
+        self.headless = headless
 
     # =========================================================================
     # INTERNAL HELPERS
@@ -400,7 +404,9 @@ class Scraper:
         if is_pdf_url(processed_url):
             pdf_bytes = self._download_pdf(processed_url)
             if pdf_bytes is None:
-                self._store_failure(processed_url, url, domain, slug, "PDF download failed")
+                self._store_failure(
+                    processed_url, url, domain, slug, "PDF download failed"
+                )
                 return None
             return self._process_pdf(pdf_bytes, processed_url, url, domain, slug)
 
@@ -414,7 +420,10 @@ class Scraper:
             pdf_bytes = self._download_pdf(processed_url)
             if pdf_bytes is None:
                 self._store_failure(
-                    processed_url, url, domain, slug,
+                    processed_url,
+                    url,
+                    domain,
+                    slug,
                     "download triggered but PDF fetch failed",
                 )
                 return None
@@ -439,7 +448,7 @@ class Scraper:
                 context = p.chromium.launch_persistent_context(
                     user_data_dir=user_data_dir,
                     channel="chrome",
-                    headless=False,
+                    headless=self.headless,
                     no_viewport=True,
                     ignore_https_errors=True,
                 )
@@ -567,7 +576,7 @@ class Scraper:
                 context = await p.chromium.launch_persistent_context(
                     user_data_dir=user_data_dir,
                     channel="chrome",
-                    headless=False,
+                    headless=self.headless,
                     no_viewport=True,
                     ignore_https_errors=True,
                 )
