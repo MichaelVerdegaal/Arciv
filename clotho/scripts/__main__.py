@@ -1,4 +1,4 @@
-"""Allow ``python -m chloris`` to invoke the CLI."""
+"""Allow ``python -m clotho`` to invoke the CLI."""
 
 from .cli import cli
 
