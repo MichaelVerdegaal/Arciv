@@ -73,6 +73,9 @@ RAW_TEXT_EXTENSIONS = frozenset({".md", ".txt", ".rst", ".csv", ".tsv"})
 _GITHUB_BLOB_TREE_RE = re.compile(r"^/([^/]+/[^/]+)/(?:blob|tree)/")
 _RAW_GITHUB_PATH_RE = re.compile(r"^/([^/]+/[^/]+)/")
 
+# HuggingFace /blob/ PDF viewer paths (serve HTML, not the file)
+_HF_BLOB_PDF_RE = re.compile(r"^(/[^/]+/[^/]+)/blob/(.+\.pdf)$", re.IGNORECASE)
+
 
 def _rewrite_github(url: str) -> str:
     """Normalize GitHub file URLs to repository root.
@@ -117,6 +120,25 @@ def _rewrite_raw_github(url: str) -> str:
     return f"https://github.com/{match.group(1)}"
 
 
+def _rewrite_huggingface(url: str) -> str:
+    """Rewrite HuggingFace /blob/ PDF links to the raw /resolve/ download URL.
+
+    The /blob/ path returns an HTML viewer page rather than the file itself,
+    which fails PDF parsing. E.g.
+    https://huggingface.co/org/model/blob/main/paper.pdf
+         -> https://huggingface.co/org/model/resolve/main/paper.pdf
+
+    Non-PDF URLs are passed through unchanged.
+    """
+    parsed = urlparse(url)
+    match = _HF_BLOB_PDF_RE.match(parsed.path)
+    if not match:
+        return url
+
+    new_path = f"{match.group(1)}/resolve/{match.group(2)}"
+    return urlunparse((parsed.scheme, parsed.netloc, new_path, "", "", ""))
+
+
 def split_url(url: str) -> tuple[str, str]:
     """Split the registered domain and the path from a URL.
 
@@ -159,6 +181,7 @@ def registered_domain(url: str) -> str:
 DOMAIN_REWRITERS: dict[str, Callable[[str], str]] = {
     "github.com": _rewrite_github,
     "raw.githubusercontent.com": _rewrite_raw_github,
+    "huggingface.co": _rewrite_huggingface,
 }
 
 

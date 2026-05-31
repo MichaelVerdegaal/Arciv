@@ -88,6 +88,24 @@ class TestProcessUrl:
         processed, _ = process_url(url)
         assert processed == url
 
+    def test_huggingface_blob_pdf_rewritten_to_resolve(self):
+        processed, status = process_url(
+            "https://huggingface.co/org/model/blob/main/paper.pdf"
+        )
+        assert processed == "https://huggingface.co/org/model/resolve/main/paper.pdf"
+        assert "rewritten" in status
+
+    def test_huggingface_non_pdf_blob_passes_through(self):
+        url = "https://huggingface.co/org/model/blob/main/config.json"
+        # .json is a skip suffix, so it never reaches the rewriter.
+        processed, _ = process_url(url)
+        assert processed is None
+
+    def test_huggingface_non_blob_passes_through(self):
+        url = "https://huggingface.co/org/model"
+        processed, _ = process_url(url)
+        assert processed == url
+
     @given(st.text(min_size=1).filter(lambda s: not s.startswith("https://")))
     def test_anything_not_https_returns_none(self, value):
         processed, _ = process_url(value)
