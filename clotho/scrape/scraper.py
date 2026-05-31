@@ -437,6 +437,7 @@ class Scraper:
                     channel="chrome",
                     headless=False,
                     no_viewport=True,
+                    ignore_https_errors=True,
                 )
                 pw_page = context.new_page()
                 pw_page.route(
@@ -556,6 +557,7 @@ class Scraper:
                     channel="chrome",
                     headless=False,
                     no_viewport=True,
+                    ignore_https_errors=True,
                 )
                 tasks = [
                     self._fetch_one_async(semaphore, context, *item)
