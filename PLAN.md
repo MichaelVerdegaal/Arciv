@@ -2,39 +2,35 @@
 
 Four changes, tackled in order. Each is independently committable.
 
-## 1. Run the browser headless
 
-**Problem:** The scraper launches Chrome with `headless=False`, so a visible browser window pops up
-on every run — annoying during normal use.
+## 1. Address link cleaning issues
 
-**Fix:** Add a `headless` flag to `Scraper` (default `True`) and pass it to both the sync and async
-`launch_persistent_context` calls.
+### Bookmarks introduce duplicates
+```shell
+08:42:27 | INFO     | clotho.scrape.scraper:_fetch_one_async:760 - Archived https://facebook.github.io/prophet/docs/seasonality,_holiday_effects,_and_regressors.html (1982 words)
+08:42:28 | INFO     | clotho.scrape.scraper:_fetch_one_async:760 - Archived https://facebook.github.io/prophet/docs/seasonality,_holiday_effects,_and_regressors.html#additional-regressors (1982 words)
+```
 
-**Tradeoff:** patchright (the undetected Playwright fork) is slightly more detectable in headless
-mode, so a few more pages may hit bot-challenge block pages. The flag makes it trivial to flip back
-to `headless=False` when scraping a stubborn site.
+### Medium block
+```shell
+Rejected https://medium.com/@cuongduong_35162/facebook-prophet-in-2023-and-beyond-c5086151c138: block page (title: 'Just a moment...')
+```
 
-## 2. Improve scraping speed
+### Cookie block?
+```shell
+ Rejected https://portal.gigaom.com/report/delivering-on-the-vision-of-mlops#Summary: too short (26 words)
+ ```
 
-The async batch is slower than expected. Two bottlenecks:
+ This is a long page
 
-- **`networkidle` wait (5s) held inside the semaphore.** Pages with ads, analytics, or websockets
-  never go idle, so every such page burns the full 5s while occupying a concurrency slot. Reduce the
-  budget to 3s — enough for SPAs to render, since images/CSS/fonts are already blocked.
-- **Low concurrency (5).** Bump the default to 8. Combined with headless mode (lower per-page
-  overhead), this raises throughput without hammering hosts.
+### Researchgate too short
+```shell
+ Rejected https://www.researchgate.net/publication/360644441_The_Impact_of_Artificial_Intelligence_on_Employment: too short (24 words)
+ ```
 
-## 3. Testing suite (pytest + pytest-cov + hypothesis)
+ This is rejected because the summary on the page is short, but there's a PDF URL to download easily
 
-Add a `dev` dependency group with `pytest`, `pytest-cov`, and `hypothesis`. Configure pytest +
-coverage in `pyproject.toml`. Tests target the pure, deterministic core (no browser, no network):
-
-- `tests/test_url_processor.py` — skip/rewrite/passthrough logic, slug/hash format, PDF + raw-text
-  detection. Hypothesis for invariants (slug shape, rewrite idempotency).
-- `tests/test_validate.py` — block-page detection and size guards.
-- `tests/test_database.py` — CRUD, source mapping, orphan pruning against a temp SQLite file.
-
-## 4. Tiny Astro frontend
+## 2. Tiny Astro frontend
 
 A minimal Astro site under `frontend/` that reads `data/clotho.db` at build time (via
 `better-sqlite3`) and renders the archive: one searchable, filterable list of archived pages (title,
