@@ -8,7 +8,6 @@ Usage:
 import click
 
 from .scrape_notes import scrape_all
-from clotho.scrape import update_agents
 
 
 @click.group()
@@ -31,7 +30,6 @@ def cli() -> None:
 )
 def scrape(refetch: bool, reparse: bool) -> None:
     """Scrape all URLs from Obsidian daily notes into the archive."""
-    update_agents()
     scrape_all(refetch=refetch, reparse=reparse)
 
 

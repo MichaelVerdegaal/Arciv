@@ -36,7 +36,7 @@ def scrape_all(refetch: bool = False, reparse: bool = False) -> None:
 
     for note in note_files:
         for link in note.extract_urls():
-            processed, skip_reason = process_url(link)
+            processed, _ = process_url(link)
             if processed is None:
                 continue
             url_sources.setdefault(processed, []).append(note.filename)

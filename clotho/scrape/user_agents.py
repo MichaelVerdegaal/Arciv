@@ -12,10 +12,8 @@ from pathlib import Path
 from config import DATA_DIR
 import json
 import urllib.request
-
+from functools import cache
 from loguru import logger
-
-from config import configure_logger
 
 
 _UA_FILE = DATA_DIR / "user_agents.txt"
@@ -57,14 +55,7 @@ def _save_user_agents(agents: list[str]) -> None:
     logger.info(f"Saved {len(agents)} user-agents to {OUTPUT_PATH}")
 
 
-def update_agents() -> None:
-    """Fetch and save latest user-agent strings."""
-    configure_logger()
-    agents = _fetch_user_agents()
-    _save_user_agents(agents)
-    logger.info(f"Sample: {agents[0]}")
-
-
+@cache
 def _load_user_agents(path: Path = _UA_FILE) -> list[str]:
     """Load user-agent strings from a text file (one per line).
 
@@ -75,18 +66,19 @@ def _load_user_agents(path: Path = _UA_FILE) -> list[str]:
         List of non-empty user-agent strings.
 
     Raises:
-        FileNotFoundError: If the UA file doesn't exist yet. Run
-            ``uv run python -m clotho.scripts.update_user_agents`` first.
+        ValueError: If the UA file creation went wrong
     """
     if not path.exists():
-        raise FileNotFoundError(
-            f"User-agent file not found: {path}. "
-            "Run 'uv run python -m clotho.scripts.update_user_agents' to create it."
-        )
-    lines = path.read_text(encoding="utf-8").splitlines()
-    agents = [line.strip() for line in lines if line.strip()]
+        agents = _fetch_user_agents()
+        _save_user_agents(agents)
+    else:
+        agents = path.read_text(encoding="utf-8").splitlines()
+
+    # File exists but contains no user agents
     if not agents:
         raise ValueError(f"User-agent file is empty: {path}")
+
+    # agents = [line.strip() for line in lines if line.strip()]
     return agents
 
 
