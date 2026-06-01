@@ -9,6 +9,7 @@ from .url_processor import (
     split_url,
 )
 from .validate import check_html
+from .user_agents import update_agents, random_user_agent
 
 __all__ = [
     "Scraper",
@@ -20,4 +21,6 @@ __all__ = [
     "registered_domain",
     "slug_for_url",
     "split_url",
+    "update_agents",
+    "random_user_agent",
 ]
