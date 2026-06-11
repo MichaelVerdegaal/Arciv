@@ -211,15 +211,6 @@ class Scraper:
         (slug_dir / "page.pdf").write_bytes(pdf_bytes)
         (slug_dir / "page.md").write_text(markdown, encoding="utf-8")
 
-    @staticmethod
-    async def _save_pdf_async(slug_dir: Path, pdf_bytes: bytes, markdown: str) -> None:
-        """Write PDF and markdown files to the slug directory (async)."""
-        slug_dir.mkdir(parents=True, exist_ok=True)
-        async with aiofiles.open(slug_dir / "page.pdf", "wb") as f:
-            await f.write(pdf_bytes)
-        async with aiofiles.open(slug_dir / "page.md", "w", encoding="utf-8") as f:
-            await f.write(markdown)
-
     def _download_pdf(self, url: str) -> bytes | None:
         """Download a PDF file via HTTP.
 
