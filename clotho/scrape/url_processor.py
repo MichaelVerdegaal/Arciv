@@ -219,21 +219,6 @@ def is_pdf_url(url: str) -> bool:
     return len(segments) >= 2 and segments[0] == "pdf"
 
 
-def hash_filename(url: str, extension: str = ".md") -> str:
-    """Generate a hashed filename from a URL.
-
-    Args:
-        url: The URL to hash.
-        extension: File extension including the dot.
-
-    Returns:
-        Filename in format "{domain}-{hash}{extension}".
-    """
-    domain, _ = split_url(url)
-    url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
-    return f"{domain}-{url_hash}{extension}"
-
-
 def slug_for_url(url: str) -> str:
     """Generate a slug (folder name) for a URL.
 
@@ -263,6 +248,10 @@ def process_url(url: str) -> tuple[str | None, str]:
     # Only process https URLs
     if not url.startswith("https://"):
         return None, "URL does not begin with HTTPS"
+
+    # Strip the #fragment: servers never see it, so URLs differing only by
+    # anchor are the same page and would otherwise be archived twice.
+    url = url.partition("#")[0]
 
     # Skip specific prefixes
     if url.startswith(SKIP_PREFIXES):
@@ -297,8 +286,12 @@ def process_url(url: str) -> tuple[str | None, str]:
             if parsed.path.startswith(prefix):
                 return None, "skipped (not content)"
 
-    # Apply rewriters
-    if domain in DOMAIN_REWRITERS:
-        return DOMAIN_REWRITERS[domain](url), "Success (rewritten)"
+    # Apply rewriters. Try the full host first (raw.githubusercontent.com),
+    # then the registered domain (github.com, huggingface.co) — tldextract
+    # collapses subdomains, so host-keyed rewriters never match on domain.
+    host = urlparse(url).netloc.lower()
+    rewriter = DOMAIN_REWRITERS.get(host) or DOMAIN_REWRITERS.get(domain)
+    if rewriter is not None:
+        return rewriter(url), "Success (rewritten)"
 
     return url, "Success"
