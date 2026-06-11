@@ -1,28 +1,48 @@
 # Clotho
 
 ## Project Description
-Clotho is a personal knowledge management system. It extracts URLs from Obsidian daily notes,
-scrapes their content, and makes it searchable through semantic embeddings. The goal: find
-previously saved technical resources using natural language queries instead of remembering exact
-keywords or filenames.
+Clotho is a personal archival tool for reading material — blog posts, research papers,
+documentation. Not books, not videos. It extracts URLs from Obsidian daily notes (or takes them
+directly on the CLI), scrapes their content, and archives it as markdown on disk. The goal: a
+trustworthy archive of everything worth reading again, retrievable years later. Retrieval today
+is ripgrep over the archive; a web UI for browsing it is the next step (see PLAN.md).
 
 ### Architecture
 
-1. **URL extraction** — Parse Obsidian markdown notes, extract all links, deduplicate, apply
-   filtering/rewrite rules
-2. **Web scraping** — Playwright (async, concurrency-controlled), HTML→Markdown via trafilatura
-3. **Storage** — SQLite database (markdown content inline, HTML archived as Brotli-compressed files)
+Three stages, no writeback into the notes:
+
+1. **Indexing** — Parse Obsidian markdown notes, extract all links, deduplicate, apply
+   filtering/rewrite rules, register in the database
+2. **Fetching** — Download pages with patchright (async, concurrency-controlled); PDFs via
+   direct HTTP
+3. **Parsing** — Validate HTML, convert to markdown via trafilatura, archive to
+   `data/saved/<slug>/page.html` + `page.md`; SQLite holds pointers and fetch state only
+
+### Storage Contract
+
+The planned web UI reads the data directory directly, so treat this layout as a public
+interface — changes to it ripple beyond the Python code:
+
+- `data/clotho.db` — SQLite (WAL mode). `pages` holds one row per URL: `url` (PK, normalized),
+  `original_url`, `domain`, `slug`, `fetched` (0/1), `fail_reason`, `title`, `author`,
+  `word_count`, `scraped_at`. `page_sources` maps `url` ↔ `note_name`.
+- `data/saved/<slug>/` — one folder per page: `page.html` (raw fetch) + `page.md` (parsed
+  markdown), or `page.pdf` + `page.md` for PDFs. Slug format is `<domain>-<hash8>`.
+- A missing `page.md` for a `fetched=1` row means the parse stage needs a re-run.
+- The data root is relocatable via `CLOTHO_DATA_DIR` (defaults to `data/` in the repo).
 
 ### Key Libraries
 
-- `playwright` — async web scraping
+- `patchright` — async web scraping (undetected Playwright fork)
 - `trafilatura` — HTML content extraction
+- `liteparse` — PDF text extraction
 - `tldextract` — domain parsing (registered domain grouping)
+- `click` — CLI framework
 - `loguru` — logging (one log statement per URL processed)
 
 ## Tech Stack
 
-**Python:** 3.13 **Tools:** UV (packages), Ruff (lint/format)
+**Python:** 3.13 **Tools:** UV (packages), Ruff (lint/format), pytest (tests), Docker (runtime)
 
 ## Commands
 
@@ -31,7 +51,22 @@ uv add <package>                 # Add dependency
 uv add --group dev <package>     # Add dev dependency
 uv run ruff check                # Lint
 uv run ruff format               # Format code
+uv run pytest                    # Run tests (with coverage)
+docker compose build             # Build the CLI image
+docker compose run --rm clotho   # Run the CLI in a container
 ```
+
+## Current Direction
+
+The scope is settled: Clotho is the main archival tool for all reading material. Fetching and
+parsing work well; the user experience around viewing the archive is what's being built next.
+PLAN.md is the live roadmap. Two standing constraints for that work:
+
+- A web UI under `frontend/` (likely Astro, reading the data directory at build time) is
+  planned but **not designed yet — do not scaffold any frontend code** until the page views
+  are decided.
+- "Collections" (Pinchflat-style libraries grouping pages) will need new tables. Schema
+  changes are ask-first; sketch designs in PLAN.md instead of implementing.
 
 ## Context
 

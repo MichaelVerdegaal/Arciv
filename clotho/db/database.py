@@ -167,20 +167,6 @@ class PageDatabase:
         row = self._conn.execute("SELECT COUNT(*) AS n FROM pages").fetchone()
         return row["n"]
 
-    def url_exists(self, url: str) -> bool:
-        """Check if a URL exists in the database.
-
-        Args:
-            url: The processed/normalized URL.
-
-        Returns:
-            True if the URL has a record in the database.
-        """
-        row = self._conn.execute(
-            "SELECT 1 FROM pages WHERE url = ? LIMIT 1", (url,)
-        ).fetchone()
-        return row is not None
-
     def fail_summary(self) -> list[tuple[str | None, str, int]]:
         """Summarize failures grouped by domain and reason.
 

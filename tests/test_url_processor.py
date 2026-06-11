@@ -6,7 +6,6 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from clotho.scrape.url_processor import (
-    hash_filename,
     is_pdf_url,
     is_raw_text_url,
     process_url,
@@ -26,6 +25,15 @@ class TestProcessUrl:
         processed, status = process_url(url)
         assert processed == url
         assert "Success" in status
+
+    def test_fragment_is_stripped(self):
+        processed, _ = process_url("https://example.com/docs/page.html#section-2")
+        assert processed == "https://example.com/docs/page.html"
+
+    def test_fragment_only_variants_dedupe_to_same_url(self):
+        plain, _ = process_url("https://example.com/page")
+        anchored, _ = process_url("https://example.com/page#additional-regressors")
+        assert plain == anchored
 
     def test_non_https_is_skipped(self):
         processed, status = process_url("http://example.com")
@@ -79,12 +87,15 @@ class TestProcessUrl:
         processed, _ = process_url(url)
         assert processed == url
 
-    def test_raw_github_currently_passes_through(self):
-        # KNOWN LIMITATION: the raw.githubusercontent.com rewriter is keyed by
-        # full host, but process_url dispatches on the *registered* domain
-        # (githubusercontent.com), so the rewriter never fires today. This test
-        # pins the current behaviour; flip it if the dispatch key is fixed.
-        url = "https://raw.githubusercontent.com/unit8co/darts/master/darts/x.py"
+    def test_raw_github_rewritten_to_repo_root(self):
+        processed, status = process_url(
+            "https://raw.githubusercontent.com/unit8co/darts/master/darts/x.py"
+        )
+        assert processed == "https://github.com/unit8co/darts"
+        assert "rewritten" in status
+
+    def test_raw_github_readable_file_kept(self):
+        url = "https://raw.githubusercontent.com/owner/repo/main/README.md"
         processed, _ = process_url(url)
         assert processed == url
 
@@ -144,15 +155,11 @@ class TestRawTextDetection:
         assert not is_raw_text_url("https://example.com/index.html")
 
 
-class TestSlugAndHash:
+class TestSlug:
     def test_slug_format(self):
         slug = slug_for_url("https://github.com/owner/repo")
         assert slug.startswith("github.com-")
         assert _SLUG_RE.match(slug)
-
-    def test_hash_filename_extension(self):
-        name = hash_filename("https://example.com/x", ".md")
-        assert name.endswith(".md")
 
     def test_same_url_same_slug(self):
         url = "https://example.com/a"

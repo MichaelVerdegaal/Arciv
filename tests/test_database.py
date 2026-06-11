@@ -47,11 +47,6 @@ class TestCrud:
         db.upsert(_page("https://example.com/b"))
         assert db.count() == 2
 
-    def test_url_exists(self, db):
-        db.upsert(_page("https://example.com/a"))
-        assert db.url_exists("https://example.com/a")
-        assert not db.url_exists("https://example.com/missing")
-
 
 class TestQueries:
     def test_get_unfetched(self, db):
@@ -119,14 +114,14 @@ class TestPruning:
         )
         pruned = db.prune_orphans({"https://example.com/kept"})
         assert pruned == 1
-        assert not db.url_exists("https://example.com/gone")
-        assert db.url_exists("https://example.com/kept")
+        assert db.get("https://example.com/gone") is None
+        assert db.get("https://example.com/kept") is not None
 
     def test_prune_never_touches_fetched_pages(self, db):
         db.upsert(_page("https://example.com/archived", fetched=True))
         pruned = db.prune_orphans(set())
         assert pruned == 0
-        assert db.url_exists("https://example.com/archived")
+        assert db.get("https://example.com/archived") is not None
 
     def test_ensure_pages_inserts_new(self, db):
         db.ensure_pages(
@@ -139,4 +134,4 @@ class TestPruning:
                 ),
             ]
         )
-        assert db.url_exists("https://example.com/a")
+        assert db.get("https://example.com/a") is not None
