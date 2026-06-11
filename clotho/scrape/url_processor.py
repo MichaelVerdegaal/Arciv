@@ -32,6 +32,11 @@ SKIP_SUFFIXES = (
     ".xml",
 )
 
+# Path substrings that identify image-proxy/optimizer endpoints. These serve
+# a (resized) image, not archivable content, and otherwise trigger a browser
+# download (e.g. Next.js "/_next/image?url=...jpg").
+SKIP_PATH_SUBSTRINGS = ("/_next/image",)
+
 # Domains ending with these suffixes are skipped (handles subdomains)
 SKIP_DOMAIN_SUFFIXES = (
     "sharepoint.com",
@@ -67,6 +72,10 @@ RAW_TEXT_EXTENSIONS = frozenset({".md", ".txt", ".rst", ".csv", ".tsv"})
 # GitHub path patterns
 _GITHUB_BLOB_TREE_RE = re.compile(r"^/([^/]+/[^/]+)/(?:blob|tree)/")
 _RAW_GITHUB_PATH_RE = re.compile(r"^/([^/]+/[^/]+)/")
+
+# HuggingFace /blob/ PDF viewer paths (serve HTML, not the file)
+_HF_BLOB_PDF_RE = re.compile(r"^(/[^/]+/[^/]+)/blob/(.+\.pdf)$", re.IGNORECASE)
+
 
 def _rewrite_github(url: str) -> str:
     """Normalize GitHub file URLs to repository root.
@@ -111,6 +120,25 @@ def _rewrite_raw_github(url: str) -> str:
     return f"https://github.com/{match.group(1)}"
 
 
+def _rewrite_huggingface(url: str) -> str:
+    """Rewrite HuggingFace /blob/ PDF links to the raw /resolve/ download URL.
+
+    The /blob/ path returns an HTML viewer page rather than the file itself,
+    which fails PDF parsing. E.g.
+    https://huggingface.co/org/model/blob/main/paper.pdf
+         -> https://huggingface.co/org/model/resolve/main/paper.pdf
+
+    Non-PDF URLs are passed through unchanged.
+    """
+    parsed = urlparse(url)
+    match = _HF_BLOB_PDF_RE.match(parsed.path)
+    if not match:
+        return url
+
+    new_path = f"{match.group(1)}/resolve/{match.group(2)}"
+    return urlunparse((parsed.scheme, parsed.netloc, new_path, "", "", ""))
+
+
 def split_url(url: str) -> tuple[str, str]:
     """Split the registered domain and the path from a URL.
 
@@ -153,6 +181,7 @@ def registered_domain(url: str) -> str:
 DOMAIN_REWRITERS: dict[str, Callable[[str], str]] = {
     "github.com": _rewrite_github,
     "raw.githubusercontent.com": _rewrite_raw_github,
+    "huggingface.co": _rewrite_huggingface,
 }
 
 
@@ -243,6 +272,10 @@ def process_url(url: str) -> tuple[str | None, str]:
     path_lower = urlparse(url).path.lower()
     if path_lower.endswith(SKIP_SUFFIXES):
         return None, "URL matches skip suffix"
+
+    # Skip image-proxy/optimizer endpoints (serve images, not content)
+    if any(sub in path_lower for sub in SKIP_PATH_SUBSTRINGS):
+        return None, "URL is an image proxy endpoint"
 
     # Skip IP addresses (local network, etc.)
     domain, _ = split_url(url)

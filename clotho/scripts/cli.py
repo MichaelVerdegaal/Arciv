@@ -8,7 +8,6 @@ Usage:
 import click
 
 from .scrape_notes import scrape_all
-from .update_user_agents import update_agents
 
 
 @click.group()
@@ -32,12 +31,6 @@ def cli() -> None:
 def scrape(refetch: bool, reparse: bool) -> None:
     """Scrape all URLs from Obsidian daily notes into the archive."""
     scrape_all(refetch=refetch, reparse=reparse)
-
-
-@cli.command("update-agents")
-def update_agents_cmd() -> None:
-    """Fetch latest desktop browser User-Agent strings."""
-    update_agents()
 
 
 if __name__ == "__main__":

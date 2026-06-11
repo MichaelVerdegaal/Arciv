@@ -26,14 +26,18 @@ class ConversionResult:
     """Result of HTML-to-markdown conversion.
 
     Attributes:
-        md_content: Extracted markdown content.
-        word_count: Number of words in markdown content.
+        md_content: Extracted markdown content (code blocks stripped).
+        word_count: Number of words in the stored markdown content.
+        full_word_count: Number of words in a code-inclusive extraction. Used
+            for the length gate so code-heavy pages (e.g. GitHub READMEs) with
+            real prose aren't rejected just because their code was stripped.
         title: HTML page title, if extractable.
         author: Page author, if extractable.
     """
 
     md_content: str
     word_count: int
+    full_word_count: int
     title: str | None = None
     author: str | None = None
 
@@ -155,6 +159,12 @@ def parse_html(html_content: str, clean: bool = True) -> ConversionResult | None
     if md_content is None:
         return None
 
+    # The length gate runs on a code-inclusive extraction so that code-heavy
+    # pages with real prose aren't rejected as "too short" just because their
+    # <pre>/<code> blocks were stripped from the stored markdown.
+    full_md = html_to_markdown(html_content, strip_code=False)
+    full_word_count = count_words(full_md) if full_md else 0
+
     if clean:
         md_content = clean_markdown(md_content)
 
@@ -162,6 +172,7 @@ def parse_html(html_content: str, clean: bool = True) -> ConversionResult | None
     return ConversionResult(
         md_content=md_content,
         word_count=count_words(md_content),
+        full_word_count=full_word_count,
         title=title,
         author=author,
     )

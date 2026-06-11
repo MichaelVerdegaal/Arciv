@@ -16,6 +16,7 @@ from pathlib import Path
 import aiofiles
 from liteparse import LiteParse
 from loguru import logger
+from patchright.async_api import TimeoutError as PlaywrightTimeoutError
 from patchright.async_api import async_playwright
 from patchright.sync_api import sync_playwright
 
@@ -30,10 +31,14 @@ from .url_processor import (
     slug_for_url,
     split_url,
 )
+from .user_agents import random_user_agent
 from .validate import check_html
 
-TIMEOUT_MS = 15_000
-DEFAULT_CONCURRENCY = 5
+TIMEOUT_MS = 30_000
+# Extra time to let JS-rendered pages (SPAs) finish loading after
+# domcontentloaded. Without it, content() can return an empty shell.
+NETWORKIDLE_MS = 3_000
+DEFAULT_CONCURRENCY = 8
 DEFAULT_MIN_WORDS = 150
 DEFAULT_MAX_RETRIES = 2
 BLOCKED_RESOURCE_TYPES = {"image", "stylesheet", "font"}
@@ -65,6 +70,8 @@ class Scraper:
         max_concurrency: Maximum concurrent page fetches for batch operations.
         min_words: Minimum word count in markdown for a page to be accepted.
         max_retries: Maximum retry attempts for transient failures.
+        headless: Run the browser without a visible window. Disable only when a
+            site needs the extra stealth of a headed browser.
     """
 
     def __init__(
@@ -75,6 +82,7 @@ class Scraper:
         max_concurrency: int = DEFAULT_CONCURRENCY,
         min_words: int = DEFAULT_MIN_WORDS,
         max_retries: int = DEFAULT_MAX_RETRIES,
+        headless: bool = True,
     ):
         self.db = db
         self.saved_dir = saved_dir
@@ -82,6 +90,15 @@ class Scraper:
         self.max_concurrency = max_concurrency
         self.min_words = min_words
         self.max_retries = max_retries
+        self.headless = headless
+        # User-Agent for raw HTTP (PDF) downloads, refreshed per session.
+        # The browser uses real Chrome's own UA, so it isn't overridden here.
+        self._session_user_agent: str = random_user_agent()
+
+    def _start_session(self) -> None:
+        """Pick a fresh User-Agent for the upcoming scraping session."""
+        self._session_user_agent = random_user_agent()
+        logger.debug(f"Session User-Agent: {self._session_user_agent}")
 
     # =========================================================================
     # INTERNAL HELPERS
@@ -203,8 +220,7 @@ class Scraper:
         async with aiofiles.open(slug_dir / "page.md", "w", encoding="utf-8") as f:
             await f.write(markdown)
 
-    @staticmethod
-    def _download_pdf(url: str) -> bytes | None:
+    def _download_pdf(self, url: str) -> bytes | None:
         """Download a PDF file via HTTP.
 
         Args:
@@ -213,7 +229,9 @@ class Scraper:
         Returns:
             Raw PDF bytes, or None if the download failed.
         """
-        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        request = urllib.request.Request(
+            url, headers={"User-Agent": self._session_user_agent}
+        )
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
                 return response.read()
@@ -318,8 +336,11 @@ class Scraper:
             logger.warning(f"Rejected {processed_url}: extraction failed")
             return None
 
-        if result.word_count < self.min_words:
-            reason = f"too short ({result.word_count} words)"
+        # Gate on the code-inclusive word count (max of stored vs. full) so
+        # code-heavy pages with real prose aren't rejected as "too short".
+        gate_count = max(result.word_count, result.full_word_count)
+        if gate_count < self.min_words:
+            reason = f"too short ({gate_count} words)"
             self._store_failure(processed_url, original_url, domain, slug, reason)
             logger.warning(f"Rejected {processed_url}: {reason}")
             return None
@@ -381,6 +402,7 @@ class Scraper:
         Returns:
             Page if archived successfully, None if skipped/failed.
         """
+        self._start_session()
         processed_url, skip_reason = process_url(url)
         if processed_url is None:
             logger.warning(f"Skipped {url}: {skip_reason}")
@@ -396,7 +418,9 @@ class Scraper:
         if is_pdf_url(processed_url):
             pdf_bytes = self._download_pdf(processed_url)
             if pdf_bytes is None:
-                self._store_failure(processed_url, url, domain, slug, "PDF download failed")
+                self._store_failure(
+                    processed_url, url, domain, slug, "PDF download failed"
+                )
                 return None
             return self._process_pdf(pdf_bytes, processed_url, url, domain, slug)
 
@@ -410,7 +434,10 @@ class Scraper:
             pdf_bytes = self._download_pdf(processed_url)
             if pdf_bytes is None:
                 self._store_failure(
-                    processed_url, url, domain, slug,
+                    processed_url,
+                    url,
+                    domain,
+                    slug,
                     "download triggered but PDF fetch failed",
                 )
                 return None
@@ -435,8 +462,9 @@ class Scraper:
                 context = p.chromium.launch_persistent_context(
                     user_data_dir=user_data_dir,
                     channel="chrome",
-                    headless=False,
+                    headless=self.headless,
                     no_viewport=True,
+                    ignore_https_errors=True,
                 )
                 pw_page = context.new_page()
                 pw_page.route(
@@ -453,6 +481,14 @@ class Scraper:
                         wait_until="domcontentloaded",
                         timeout=self.page_timeout,
                     )
+                    # SPAs render content after domcontentloaded; let the
+                    # network settle so client-side content is present.
+                    try:
+                        pw_page.wait_for_load_state(
+                            "networkidle", timeout=NETWORKIDLE_MS
+                        )
+                    except PlaywrightTimeoutError:
+                        pass
                     return pw_page.content()
                 except Exception as e:
                     error_msg = self._format_fetch_error(e)
@@ -490,6 +526,7 @@ class Scraper:
         PDF URLs are downloaded directly (no browser needed) and parsed
         with liteparse. HTML URLs go through patchright.
         """
+        self._start_session()
         to_fetch_html: list[tuple[str, str, str, str]] = []
         to_fetch_pdf: list[tuple[str, str, str, str]] = []
         seen_processed: set[str] = set()
@@ -554,8 +591,9 @@ class Scraper:
                 context = await p.chromium.launch_persistent_context(
                     user_data_dir=user_data_dir,
                     channel="chrome",
-                    headless=False,
+                    headless=self.headless,
                     no_viewport=True,
+                    ignore_https_errors=True,
                 )
                 tasks = [
                     self._fetch_one_async(semaphore, context, *item)
@@ -611,6 +649,14 @@ class Scraper:
                         wait_until="domcontentloaded",
                         timeout=self.page_timeout,
                     )
+                    # SPAs render content after domcontentloaded; let the
+                    # network settle so client-side content is present.
+                    try:
+                        await pw_page.wait_for_load_state(
+                            "networkidle", timeout=NETWORKIDLE_MS
+                        )
+                    except PlaywrightTimeoutError:
+                        pass
                     html = await pw_page.content()
                 except Exception as e:
                     last_reason = self._format_fetch_error(e)

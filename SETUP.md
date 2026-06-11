@@ -8,7 +8,6 @@ How to set up the Clotho project locally.
 
 - Python installed, of version as specified in `.python-version`.
 - [UV](https://docs.astral.sh/uv/) installed for package management
-- A residential proxy provider
 
 ## Steps
 1. Set up virtual environment
