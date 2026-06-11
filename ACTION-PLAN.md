@@ -16,11 +16,15 @@ archive you can ripgrep is already useful on day one.
 ## CLI
 
 ```bash
-clotho scrape                    # Scrape all new URLs
-clotho scrape --refetch          # Re-download all pages
-clotho scrape --reparse          # Re-parse existing HTML into markdown
-clotho update-agents             # Fetch latest browser user-agent strings
+clotho fetch                     # Index notes, fetch + parse all new URLs
+clotho fetch https://example.com # Fetch specific URLs directly
+clotho fetch --dir ~/notes       # Index a different notes directory
+clotho fetch --refetch           # Re-download all pages
+clotho parse                     # Re-parse existing HTML into markdown
 ```
+
+User-agent refresh happens automatically on the first Scraper init of each run — no separate
+command.
 
 ## The Plan
 

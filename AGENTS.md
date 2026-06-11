@@ -8,11 +8,14 @@ keywords or filenames.
 
 ### Architecture
 
-1. **URL extraction** — Parse Obsidian markdown notes, extract all links, deduplicate, apply
-   filtering/rewrite rules
-2. **Web scraping** — Playwright (async, concurrency-controlled), HTML→Markdown via trafilatura
-3. **Storage** — content on disk as `data/saved/<slug>/page.html` + `page.md`; SQLite database
-   holds pointers and fetch state only
+Three stages, no writeback into the notes:
+
+1. **Indexing** — Parse Obsidian markdown notes, extract all links, deduplicate, apply
+   filtering/rewrite rules, register in the database
+2. **Fetching** — Download pages with patchright (async, concurrency-controlled); PDFs via
+   direct HTTP
+3. **Parsing** — Validate HTML, convert to markdown via trafilatura, archive to
+   `data/saved/<slug>/page.html` + `page.md`; SQLite holds pointers and fetch state only
 
 ### Key Libraries
 

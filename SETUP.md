@@ -24,6 +24,5 @@ Create a `.env` file in the project root to point Clotho at your Obsidian daily 
 CLOTHO_NOTES_PATH=/path/to/your/vault/Daily notes
 ```
 
-## Post-installation
-
-Run `uv run clotho update-agents` to download a fresh pool of browser user-agent strings.
+Alternatively, pass `--dir` to `clotho fetch` per run. Everything else works out of the box —
+the browser user-agent pool refreshes itself on the first run.
