@@ -92,7 +92,8 @@ class Scraper:
         self.max_retries = max_retries
         self.headless = headless
         # User-Agent for raw HTTP (PDF) downloads, refreshed per session.
-        # The browser uses real Chrome's own UA, so it isn't overridden here.
+        # Drawing from the pool here triggers the once-per-process UA pool
+        # refresh. The browser uses real Chrome's own UA, not this one.
         self._session_user_agent: str = random_user_agent()
 
     def _start_session(self) -> None:
@@ -210,15 +211,6 @@ class Scraper:
         slug_dir.mkdir(parents=True, exist_ok=True)
         (slug_dir / "page.pdf").write_bytes(pdf_bytes)
         (slug_dir / "page.md").write_text(markdown, encoding="utf-8")
-
-    @staticmethod
-    async def _save_pdf_async(slug_dir: Path, pdf_bytes: bytes, markdown: str) -> None:
-        """Write PDF and markdown files to the slug directory (async)."""
-        slug_dir.mkdir(parents=True, exist_ok=True)
-        async with aiofiles.open(slug_dir / "page.pdf", "wb") as f:
-            await f.write(pdf_bytes)
-        async with aiofiles.open(slug_dir / "page.md", "w", encoding="utf-8") as f:
-            await f.write(markdown)
 
     def _download_pdf(self, url: str) -> bytes | None:
         """Download a PDF file via HTTP.
@@ -737,8 +729,12 @@ class Scraper:
             logger.warning(f"Rejected {processed_url}: extraction failed")
             return None
 
-        if result.word_count < self.min_words:
-            reason = f"too short ({result.word_count} words)"
+        # Gate on the code-inclusive word count (max of stored vs. full) so
+        # code-heavy pages with real prose aren't rejected as "too short".
+        # Keep in sync with the gate in _process_html.
+        gate_count = max(result.word_count, result.full_word_count)
+        if gate_count < self.min_words:
+            reason = f"too short ({gate_count} words)"
             self._store_failure(processed_url, original_url, domain, slug, reason)
             logger.warning(f"Rejected {processed_url}: {reason}")
             return None

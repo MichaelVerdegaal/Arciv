@@ -29,11 +29,7 @@ class Note:
         return f"{self.__class__.__name__}({self.filename}{self.extension})"
 
     def _read_content(self) -> None:
-        """Reads text content and strips YAML frontmatter.
-
-        Returns:
-            Text content from note file
-        """
+        """Read the note file and store its text with YAML frontmatter stripped."""
         try:
             note_text = self.note_path.read_text(encoding="utf-8")
         except Exception as e:
@@ -52,21 +48,22 @@ class Note:
             note_dir: Directory to search for markdown files
 
         Returns:
-            List of paths to markdown files found recursively
+            Note instances for every markdown file found recursively
         """
         return [cls(note_path) for note_path in note_dir.glob("**/*.md")]
 
     @staticmethod
     def _validate_path(note_path: str | Path) -> Path:
-        """Create a Note instance from a file path.
-
-        The creation and modification dates are returned as RFC3339 strings.
+        """Validate that a note path exists and normalize it to a Path.
 
         Args:
             note_path: Path to the note file
 
         Returns:
-            Note instance with filename, content, and dates
+            The note path as a pathlib Path
+
+        Raises:
+            FileNotFoundError: If the path does not exist.
         """
         # Convert to Pathlib Path
         if isinstance(note_path, str):

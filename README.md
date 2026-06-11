@@ -5,10 +5,17 @@ In ancient greek mythology, Clotho is one of the three Fates responsible for spi
 
 ## What It Does
 
-Not much yet, but the scraping to markdown conversion is getting quite good.
+Archives the web pages you link in your Obsidian daily notes as searchable markdown. Three stages:
+indexing (extract URLs from notes), fetching (download pages), parsing (convert to markdown).
 
-## Currently testing
+## Usage
 
-- Different way of representing collected links
-- How to store scraped data in a more long-term way, instead of all as files.
-- How to scrape related links (ToC and such)
+```bash
+clotho fetch                          # index your notes, fetch + parse all new URLs
+clotho fetch https://example.com/post # fetch specific URLs directly
+clotho fetch --dir path/to/notes      # index a different notes directory
+clotho fetch --refetch                # re-download already-fetched pages
+clotho parse                          # re-parse archived HTML into markdown
+```
+
+See [SETUP.md](SETUP.md) for installation and configuration.

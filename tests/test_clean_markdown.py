@@ -9,9 +9,6 @@ class TestInlineCode:
             "use pip install"
         )
 
-    def test_remove_drops_content(self):
-        assert MarkdownCleaner("use `pip install`").remove_inline_code().text == "use "
-
     def test_double_backticks_untouched(self):
         # Only single-backtick spans are targeted.
         text = "``not inline``"

@@ -109,10 +109,6 @@ class MarkdownCleaner:
         """Remove inline code formatting markers, keeping the code content."""
         return self._apply(INLINE_CODE_RE, keep_content=True)
 
-    def remove_inline_code(self) -> Self:
-        """Remove inline code entirely, including the content."""
-        return self._apply(INLINE_CODE_RE, keep_content=False)
-
     def strip_bold_italic(self) -> Self:
         """Remove bold and italic formatting markers, keeping the text content."""
         # Order matters: process combined formats before simple ones
