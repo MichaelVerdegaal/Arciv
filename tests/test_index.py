@@ -73,6 +73,18 @@ class TestIndexSource:
         urls = index_source(db, "notes")
         assert urls == ["https://example.com/a"]
 
+    def test_links_are_attributed_to_the_source(self, db, tmp_path):
+        _write_note(tmp_path, "a.md", "https://example.com/a")
+        db.add_source(Source(name="notes", path=str(tmp_path), added_at="t"))
+        index_source(db, "notes")
+        assert db.get_urls_for_source("notes") == ["https://example.com/a"]
+
+    def test_adhoc_directory_links_have_no_source(self, db, tmp_path):
+        _write_note(tmp_path, "a.md", "https://example.com/a")
+        db.add_source(Source(name="notes", path=str(tmp_path), added_at="t"))
+        index_directory(db, tmp_path)  # ad-hoc, not via the source
+        assert db.get_urls_for_source("notes") == []
+
     def test_unknown_source_raises(self, db):
         with pytest.raises(KeyError):
             index_source(db, "nope")

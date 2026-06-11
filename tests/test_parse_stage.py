@@ -30,13 +30,13 @@ def db(tmp_path):
         yield database
 
 
-def _fetched_page(url: str, slug: str) -> Page:
+def _fetched_page(url: str, slug: str, content_type: str = "html") -> Page:
     return Page(
         url=url,
         original_url=url,
         domain="example.com",
         slug=slug,
-        fetched=True,
+        content_type=content_type,
         fetched_at="2026-06-11T00:00:00+00:00",
     )
 
@@ -59,13 +59,15 @@ class TestParsePending:
         assert (saved / "example.com-aaaaaaaa" / "page.md").exists()
         page = db.get("https://example.com/a")
         assert page.word_count > 0
-        assert page.fetched is True
+        assert page.parsed is True
+        assert page.parsed_at is not None
 
     def test_skips_already_parsed_unless_reparse(self, db, tmp_path):
         saved = tmp_path / "saved"
-        db.upsert(_fetched_page("https://example.com/a", "example.com-aaaaaaaa"))
+        page = _fetched_page("https://example.com/a", "example.com-aaaaaaaa")
+        page.parsed_at = "2026-06-11T01:00:00+00:00"
+        db.upsert(page)
         _save_html(saved, "example.com-aaaaaaaa", _make_html("beta"))
-        (saved / "example.com-aaaaaaaa" / "page.md").write_text("old", "utf-8")
 
         assert parse_pending(db, saved_dir=saved, min_words=10) == 0
         assert parse_pending(db, saved_dir=saved, reparse=True, min_words=10) == 1
@@ -79,7 +81,9 @@ class TestParsePending:
 
         assert parsed == 0
         page = db.get("https://example.com/a")
-        assert page.fetched is False
+        # Raw content is still on disk: the page stays fetched, not parsed
+        assert page.fetched is True
+        assert page.parsed is False
         assert "too short" in page.fail_reason
 
     def test_rejects_missing_raw_content(self, db, tmp_path):
@@ -87,7 +91,7 @@ class TestParsePending:
         db.upsert(_fetched_page("https://example.com/a", "example.com-aaaaaaaa"))
 
         assert parse_pending(db, saved_dir=saved, min_words=10) == 0
-        assert db.get("https://example.com/a").fail_reason == "no raw content on disk"
+        assert "raw file missing" in db.get("https://example.com/a").fail_reason
 
     def test_raw_text_url_stored_directly(self, db, tmp_path):
         saved = tmp_path / "saved"
@@ -112,3 +116,15 @@ class TestParsePending:
             )
         )
         assert parse_pending(db, saved_dir=saved, min_words=10) == 0
+
+    def test_rejected_page_is_not_retried_without_reparse(self, db, tmp_path):
+        saved = tmp_path / "saved"
+        db.upsert(_fetched_page("https://example.com/a", "example.com-aaaaaaaa"))
+        _save_html(saved, "example.com-aaaaaaaa", _make_html("delta"))
+
+        # First run rejects (gate impossible to clear), second run skips it
+        assert parse_pending(db, saved_dir=saved, min_words=100_000) == 0
+        assert parse_pending(db, saved_dir=saved, min_words=10) == 0
+        # --reparse retries rejected pages and clears the failure
+        assert parse_pending(db, saved_dir=saved, reparse=True, min_words=10) == 1
+        assert db.get("https://example.com/a").fail_reason is None

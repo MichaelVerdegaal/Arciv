@@ -135,18 +135,19 @@ class Fetcher:
         original_url: str,
         domain: str,
         slug: str,
+        content_type: str,
     ) -> Page:
         """Record a successful fetch in the database.
 
-        Title, author, and word count stay empty — the parse stage fills
-        them in once the content has been converted.
+        Title, author, word count, and parsed_at are reset — the parse
+        stage fills them in once the fresh content has been converted.
         """
         page = Page(
             url=processed_url,
             original_url=original_url,
             domain=domain,
             slug=slug,
-            fetched=True,
+            content_type=content_type,
             fetched_at=datetime.now(timezone.utc).isoformat(),
         )
         self.db.upsert(page)
@@ -166,7 +167,6 @@ class Fetcher:
             original_url=original_url,
             domain=domain,
             slug=slug,
-            fetched=False,
             fail_reason=fail_reason,
         )
         self.db.upsert(page)
@@ -242,7 +242,7 @@ class Fetcher:
             self._store_failure(processed_url, original_url, domain, slug, fail_reason)
             return None
         self._save_pdf_sync(slug, pdf_bytes)
-        page = self._store_success(processed_url, original_url, domain, slug)
+        page = self._store_success(processed_url, original_url, domain, slug, "pdf")
         logger.info(f"Fetched {processed_url} (PDF, {len(pdf_bytes)} bytes)")
         return page
 
@@ -293,7 +293,7 @@ class Fetcher:
             )
 
         self._save_html_sync(slug, html)
-        page = self._store_success(processed_url, original_url, domain, slug)
+        page = self._store_success(processed_url, original_url, domain, slug, "html")
         logger.info(f"Fetched {processed_url}")
         return page
 
@@ -534,6 +534,6 @@ class Fetcher:
             await asyncio.sleep(2 * attempt)
 
         await self._save_html_async(slug, html)
-        page = self._store_success(processed_url, original_url, domain, slug)
+        page = self._store_success(processed_url, original_url, domain, slug, "html")
         logger.info(f"Fetched {processed_url}")
         return page

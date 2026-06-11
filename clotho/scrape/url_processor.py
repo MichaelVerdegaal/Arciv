@@ -150,9 +150,13 @@ def split_url(url: str) -> tuple[str, str]:
 
     Returns:
         A tuple of (domain, path) where domain is the registered domain
-        without subdomains.
+        without subdomains. ("", "") for URLs urlparse cannot handle
+        (e.g. unclosed IPv6 brackets).
     """
-    parsed = urlparse(url)
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return "", ""
     domain = tldextract.extract(url).top_domain_under_public_suffix
 
     # Fallback for edge cases where tldextract returns nothing useful
@@ -219,11 +223,17 @@ def is_pdf_url(url: str) -> bool:
     return len(segments) >= 2 and segments[0] == "pdf"
 
 
+# Characters allowed in a slug: anything else would be unsafe (or illegal on
+# Windows) in a directory name, e.g. ":" from a host with a port
+_UNSAFE_SLUG_CHARS_RE = re.compile(r"[^A-Za-z0-9.\-]")
+
+
 def slug_for_url(url: str) -> str:
     """Generate a slug (folder name) for a URL.
 
     The slug is used as the directory name under ``saved/`` where the
-    page's HTML and markdown files are stored.
+    page's HTML and markdown files are stored, so it must be a safe
+    directory name on both Linux and Windows.
 
     Args:
         url: The processed/normalized URL.
@@ -232,8 +242,9 @@ def slug_for_url(url: str) -> str:
         Slug in format "{domain}-{hash}", e.g. "github.com-a1b2c3d4".
     """
     domain, _ = split_url(url)
+    safe_domain = _UNSAFE_SLUG_CHARS_RE.sub("-", domain) or "unknown"
     url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
-    return f"{domain}-{url_hash}"
+    return f"{safe_domain}-{url_hash}"
 
 
 def process_url(url: str) -> tuple[str | None, str]:
@@ -253,12 +264,27 @@ def process_url(url: str) -> tuple[str | None, str]:
     # anchor are the same page and would otherwise be archived twice.
     url = url.partition("#")[0]
 
+    # Malformed URLs (e.g. unclosed IPv6 brackets) make urlparse raise
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return None, "URL could not be parsed"
+
+    host = parsed.netloc
+    if not host:
+        return None, "URL has no host"
+
+    # Hosts are case-insensitive: lowercase so case variants dedupe to one page
+    if not host.islower():
+        url = f"https://{host.lower()}{url[len('https://') + len(host) :]}"
+        host = host.lower()
+
     # Skip specific prefixes
     if url.startswith(SKIP_PREFIXES):
         return None, "URL matches skip prefix"
 
     # Skip specific suffixes (but not .pdf — arxiv PDFs get rewritten)
-    path_lower = urlparse(url).path.lower()
+    path_lower = parsed.path.lower()
     if path_lower.endswith(SKIP_SUFFIXES):
         return None, "URL matches skip suffix"
 
@@ -281,7 +307,6 @@ def process_url(url: str) -> tuple[str | None, str]:
 
     # Skip domain + path prefix combos (e.g. google.com/search)
     if domain in SKIP_DOMAIN_PATH_PREFIXES:
-        parsed = urlparse(url)
         for prefix in SKIP_DOMAIN_PATH_PREFIXES[domain]:
             if parsed.path.startswith(prefix):
                 return None, "skipped (not content)"
@@ -289,7 +314,6 @@ def process_url(url: str) -> tuple[str | None, str]:
     # Apply rewriters. Try the full host first (raw.githubusercontent.com),
     # then the registered domain (github.com, huggingface.co) — tldextract
     # collapses subdomains, so host-keyed rewriters never match on domain.
-    host = urlparse(url).netloc.lower()
     rewriter = DOMAIN_REWRITERS.get(host) or DOMAIN_REWRITERS.get(domain)
     if rewriter is not None:
         return rewriter(url), "Success (rewritten)"

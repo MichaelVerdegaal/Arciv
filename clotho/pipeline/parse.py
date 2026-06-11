@@ -3,19 +3,21 @@
 Reads the raw files the fetch stage archived under ``saved/<slug>/``,
 validates them (block pages, minimum length), converts them to markdown
 via trafilatura (HTML) or liteparse (PDF), writes ``page.md`` next to the
-raw file, and fills in title/author/word count on the page row. Rejected
-pages get ``fetched=0`` plus a ``fail_reason`` so they don't pose as valid
-archive entries; their raw files stay on disk for debugging.
+raw file, and stamps the page row with ``parsed_at`` plus title/author/word
+count. Rejected pages get a ``fail_reason`` (with ``parsed_at`` left empty)
+so they don't pose as valid archive entries; their raw files stay on disk
+for debugging.
 """
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
 
-from clotho.settings import SAVED_DIR
 from clotho.convert import check_html, parse_html, pdf_to_text
 from clotho.db import Page, PageDatabase
 from clotho.scrape import is_raw_text_url
+from clotho.settings import SAVED_DIR
 
 DEFAULT_MIN_WORDS = 150
 
@@ -36,14 +38,15 @@ def _accept(
     page.author = author
     page.word_count = word_count
     page.fail_reason = None
+    page.parsed_at = datetime.now(timezone.utc).isoformat()
     db.upsert(page)
     return page
 
 
 def _reject(db: PageDatabase, page: Page, reason: str) -> None:
     """Mark a page as rejected; the raw file stays on disk for debugging."""
-    page.fetched = False
     page.fail_reason = reason
+    page.parsed_at = None
     db.upsert(page)
     logger.warning(f"Rejected {page.url}: {reason}")
 
@@ -58,7 +61,7 @@ def parse_page(
 
     Args:
         db: Page database.
-        page: A page with ``fetched=True`` and raw content on disk.
+        page: A fetched page (``fetched_at`` set, raw content on disk).
         saved_dir: Root directory for archived page folders.
         min_words: Minimum word count for a page to be accepted.
 
@@ -67,16 +70,16 @@ def parse_page(
     """
     slug_dir = saved_dir / page.slug
     md_path = slug_dir / "page.md"
-    pdf_path = slug_dir / "page.pdf"
-    html_path = slug_dir / "page.html"
 
-    if pdf_path.exists():
-        return _parse_pdf(db, page, pdf_path, md_path, min_words)
-    if html_path.exists():
-        return _parse_html(db, page, html_path, md_path, min_words)
+    raw_name = "page.pdf" if page.content_type == "pdf" else "page.html"
+    raw_path = slug_dir / raw_name
+    if not raw_path.exists():
+        _reject(db, page, f"raw file missing on disk ({raw_name})")
+        return None
 
-    _reject(db, page, "no raw content on disk")
-    return None
+    if page.content_type == "pdf":
+        return _parse_pdf(db, page, raw_path, md_path, min_words)
+    return _parse_html(db, page, raw_path, md_path, min_words)
 
 
 def _parse_pdf(
@@ -167,20 +170,18 @@ def parse_pending(
     Args:
         db: Page database.
         saved_dir: Root directory for archived page folders.
-        reparse: Re-parse every fetched page, even ones with markdown.
-            Useful after changing trafilatura settings or cleanup rules —
-            no network traffic, everything is read from disk.
+        reparse: Re-parse every fetched page, including already-parsed and
+            previously rejected ones. Useful after changing trafilatura
+            settings or cleanup rules — no network traffic, everything is
+            read from disk.
         min_words: Minimum word count for a page to be accepted.
 
     Returns:
         Number of pages successfully parsed.
     """
+    pages = db.get_fetched() if reparse else db.get_unparsed()
     count = 0
-    for page in db.get_all():
-        if not page.fetched:
-            continue
-        if (saved_dir / page.slug / "page.md").exists() and not reparse:
-            continue
+    for page in pages:
         if parse_page(db, page, saved_dir, min_words) is not None:
             count += 1
     logger.info(f"Parsed {count} pages")

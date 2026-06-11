@@ -32,14 +32,17 @@ Three stages, no writeback into the notes. Each stage has a dedicated CLI comman
 The planned backend/frontend read the data directory directly, so treat this layout as a
 public interface — changes to it ripple beyond the Python code:
 
-- `data/clotho.db` — SQLite (WAL mode). `pages` holds one row per URL: `url` (PK, normalized),
-  `original_url`, `domain`, `slug`, `fetched` (0/1), `fail_reason`, `title`, `author`,
-  `word_count`, `fetched_at`. `links` holds one row per indexed link: `url`, `file_path`
-  (full normalized path), `indexed_at`. `sources` holds registered directories: `name` (PK),
-  `path`, `added_at`.
+- `data/clotho.db` — SQLite (WAL mode, foreign keys ON). `pages` holds one row per URL:
+  `url` (PK, normalized), `original_url`, `domain`, `slug`, `content_type` (`html`/`pdf`,
+  set at fetch), `title`, `author`, `word_count`, `fail_reason`, `added_at`, `fetched_at`,
+  `parsed_at`. Pipeline state is carried by the timestamps: pending (no `fetched_at`),
+  fetched (`fetched_at` set), parsed (`parsed_at` set); `fail_reason` marks a failure at
+  either stage. `links` holds one row per indexed link: `url`, `file_path` (full normalized
+  path), `source_name` (NULL for ad-hoc files; cleared when a source is removed),
+  `indexed_at`. `sources` holds registered directories: `name` (PK), `path`, `added_at`.
 - `data/saved/<slug>/` — one folder per page: `page.html` (raw fetch) or `page.pdf`, plus
-  `page.md` once parsed. Slug format is `<domain>-<hash8>`.
-- A missing `page.md` for a `fetched=1` row means the parse stage needs a re-run.
+  `page.md` once parsed. Slug format is `<domain>-<hash8>`, sanitized to be a safe directory
+  name on Linux and Windows.
 - The data root is relocatable via `CLOTHO_DATA_DIR` (defaults to `./data` relative to the
   working directory).
 

@@ -93,7 +93,8 @@ def get(
             urls = index_directory(db, dir_path)
 
         fetched = fetch_urls(db, urls, refetch=refetch)
-        parse_pending(db, reparse=refetch)
+        # A refetch resets parsed_at, so refetched pages re-parse here too
+        parse_pending(db)
         report(db, len(fetched))
 
 

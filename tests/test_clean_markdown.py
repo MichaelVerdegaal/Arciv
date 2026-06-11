@@ -46,10 +46,17 @@ class TestCleanupLists:
     def test_removes_empty_bullets(self):
         result = MarkdownCleaner("- \n- real item").cleanup_lists().text
         assert "real item" in result
+        # The empty bullet line itself must be gone
+        assert not any(line.strip() == "-" for line in result.splitlines())
 
     def test_removes_empty_numbered(self):
         result = MarkdownCleaner("1. \n2. real item").cleanup_lists().text
         assert "real item" in result
+        assert not any(line.strip() == "1." for line in result.splitlines())
+
+    def test_keeps_non_empty_items_intact(self):
+        text = "- first item\n- second item"
+        assert MarkdownCleaner(text).cleanup_lists().text == text
 
 
 class TestOrphanBrackets:
