@@ -737,8 +737,12 @@ class Scraper:
             logger.warning(f"Rejected {processed_url}: extraction failed")
             return None
 
-        if result.word_count < self.min_words:
-            reason = f"too short ({result.word_count} words)"
+        # Gate on the code-inclusive word count (max of stored vs. full) so
+        # code-heavy pages with real prose aren't rejected as "too short".
+        # Keep in sync with the gate in _process_html.
+        gate_count = max(result.word_count, result.full_word_count)
+        if gate_count < self.min_words:
+            reason = f"too short ({gate_count} words)"
             self._store_failure(processed_url, original_url, domain, slug, reason)
             logger.warning(f"Rejected {processed_url}: {reason}")
             return None
