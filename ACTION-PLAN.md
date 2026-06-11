@@ -1,5 +1,8 @@
 # Clotho: Action Plan v3 — Trustworthy Archive
 
+> **Status: complete.** Kept as the historical record of the v1 archival work — the live
+> roadmap is [PLAN.md](PLAN.md).
+
 ## The Problem
 
 I write daily notes in Obsidian and accumulate links to technical resources — documentation, blog
