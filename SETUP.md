@@ -18,7 +18,8 @@ How to set up the Clotho project locally.
 
 ## Configuration
 
-Create a `.env` file in the project root to point Clotho at your Obsidian daily notes:
+Create a `.env` file in the project root (see [.env.example](.env.example)) to point Clotho at
+your Obsidian daily notes:
 
 ```
 CLOTHO_NOTES_PATH=/path/to/your/vault/Daily notes
@@ -26,3 +27,9 @@ CLOTHO_NOTES_PATH=/path/to/your/vault/Daily notes
 
 Alternatively, pass `--dir` to `clotho fetch` per run. Everything else works out of the box —
 the browser user-agent pool refreshes itself on the first run.
+
+Optional overrides:
+
+- `CLOTHO_DATA_DIR` — where the SQLite database, archived pages, and logs live. Defaults to
+  `data/` in the repository root. Useful when the archive should live outside the repo (e.g. a
+  Docker volume or a synced drive).
