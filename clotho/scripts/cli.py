@@ -7,6 +7,8 @@ Usage:
 
 import click
 
+from clotho.scrape import update_user_agents
+
 from .scrape_notes import scrape_all
 
 
@@ -31,6 +33,13 @@ def cli() -> None:
 def scrape(refetch: bool, reparse: bool) -> None:
     """Scrape all URLs from Obsidian daily notes into the archive."""
     scrape_all(refetch=refetch, reparse=reparse)
+
+
+@cli.command(name="update-agents")
+def update_agents() -> None:
+    """Fetch the latest browser user-agent strings into data/user_agents.txt."""
+    count = update_user_agents()
+    click.echo(f"Saved {count} user-agent strings.")
 
 
 if __name__ == "__main__":

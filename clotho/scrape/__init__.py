@@ -8,8 +8,8 @@ from .url_processor import (
     slug_for_url,
     split_url,
 )
+from .user_agents import random_user_agent, update_user_agents
 from .validate import check_html
-from .user_agents import random_user_agent
 
 __all__ = [
     "Scraper",
@@ -18,8 +18,9 @@ __all__ = [
     "is_pdf_url",
     "is_raw_text_url",
     "process_url",
+    "random_user_agent",
     "registered_domain",
     "slug_for_url",
     "split_url",
-    "random_user_agent",
+    "update_user_agents",
 ]
