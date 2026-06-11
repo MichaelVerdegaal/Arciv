@@ -4,7 +4,7 @@ Each entry should look like a real, up-to-date browser. Outdated or exotic
 UAs are *more* suspicious than common ones — blend in, don't stand out.
 
 The pool is refreshed from the microlink API once per process (triggered by
-the first Scraper init) and cached in data/user_agents.txt. When the refresh
+the first Fetcher init) and cached in data/user_agents.txt. When the refresh
 fails (e.g. offline), the cached file is used; a small built-in list is the
 last resort. Loading never raises — scraping shouldn't die over a UA refresh.
 """
@@ -16,7 +16,7 @@ from functools import cache
 
 from loguru import logger
 
-from config import DATA_DIR
+from clotho.config import DATA_DIR
 
 UA_FILE = DATA_DIR / "user_agents.txt"
 MICROLINK_URL = "https://microlink.io/user-agents.json"

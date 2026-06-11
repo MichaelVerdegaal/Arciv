@@ -1,6 +1,6 @@
 """Tests for markdown cleaning (formatting-artifact removal)."""
 
-from clotho.parse.clean_markdown import MarkdownCleaner, clean_markdown
+from clotho.convert.clean_markdown import MarkdownCleaner, clean_markdown
 
 
 class TestInlineCode:

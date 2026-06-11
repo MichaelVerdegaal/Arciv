@@ -1,10 +1,10 @@
-"""SQLite database for storing scraped page data."""
+"""SQLite database for tracked pages, indexed links, and sources."""
 
 import sqlite3
 from pathlib import Path
 from typing import Self
 
-from .models import Page
+from .models import Page, Source
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS pages (
@@ -17,13 +17,20 @@ CREATE TABLE IF NOT EXISTS pages (
     title           TEXT,
     author          TEXT,
     word_count      INTEGER NOT NULL DEFAULT 0,
-    scraped_at      TEXT
+    fetched_at      TEXT
 );
 
-CREATE TABLE IF NOT EXISTS page_sources (
-    url       TEXT NOT NULL REFERENCES pages(url),
-    note_name TEXT NOT NULL,
-    PRIMARY KEY (url, note_name)
+CREATE TABLE IF NOT EXISTS links (
+    url        TEXT NOT NULL REFERENCES pages(url),
+    file_path  TEXT NOT NULL,
+    indexed_at TEXT NOT NULL,
+    PRIMARY KEY (url, file_path)
+);
+
+CREATE TABLE IF NOT EXISTS sources (
+    name     TEXT PRIMARY KEY,
+    path     TEXT NOT NULL,
+    added_at TEXT NOT NULL
 );
 """
 
@@ -31,7 +38,7 @@ _UPSERT_SQL = """\
 INSERT INTO pages (
     url, original_url, domain, slug,
     fetched, fail_reason, title, author,
-    word_count, scraped_at
+    word_count, fetched_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(url) DO UPDATE SET
     original_url = excluded.original_url,
@@ -42,12 +49,12 @@ ON CONFLICT(url) DO UPDATE SET
     title        = excluded.title,
     author       = excluded.author,
     word_count   = excluded.word_count,
-    scraped_at   = excluded.scraped_at;
+    fetched_at   = excluded.fetched_at;
 """
 
 
 class PageDatabase:
-    """SQLite-backed storage for scraped pages and their source notes.
+    """SQLite-backed storage for pages, indexed links, and sources.
 
     Use as a context manager to ensure the connection is closed:
 
@@ -64,7 +71,25 @@ class PageDatabase:
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._migrate()
         self._conn.executescript(_SCHEMA)
+
+    def _migrate(self) -> None:
+        """Upgrade a v1 database in place before applying the schema.
+
+        v1 named the fetch timestamp ``scraped_at`` and tracked note names
+        in ``page_sources``. Link rows are rebuilt by re-indexing, so
+        ``page_sources`` is simply dropped.
+        """
+        columns = {
+            row["name"] for row in self._conn.execute("PRAGMA table_info(pages)")
+        }
+        if "scraped_at" in columns:
+            self._conn.execute(
+                "ALTER TABLE pages RENAME COLUMN scraped_at TO fetched_at"
+            )
+        self._conn.execute("DROP TABLE IF EXISTS page_sources")
+        self._conn.commit()
 
     def close(self) -> None:
         """Close the database connection."""
@@ -91,7 +116,7 @@ class PageDatabase:
             title=row["title"],
             author=row["author"],
             word_count=row["word_count"],
-            scraped_at=row["scraped_at"],
+            fetched_at=row["fetched_at"],
         )
 
     # -- page CRUD --
@@ -114,7 +139,7 @@ class PageDatabase:
                 page.title,
                 page.author,
                 page.word_count,
-                page.scraped_at,
+                page.fetched_at,
             ),
         )
         self._conn.commit()
@@ -181,81 +206,121 @@ class PageDatabase:
         ).fetchall()
         return [(row["domain"], row["fail_reason"], row["n"]) for row in rows]
 
-    def prune_orphans(self, canonical_urls: set[str]) -> int:
-        """Delete failed rows whose URLs are no longer in the canonical set.
+    # -- indexed links --
 
-        Only deletes rows where ``fetched = 0`` (never successfully archived)
-        AND the URL is absent from the freshly-extracted canonical set. This
-        clears stale rows from old rewrites or broken-URL extractions without
-        ever touching archived content.
+    def replace_links_for_files(
+        self,
+        file_paths: list[str],
+        link_entries: list[tuple[str, str, str]],
+    ) -> None:
+        """Replace the link rows of re-indexed files with fresh entries.
 
-        Args:
-            canonical_urls: The current set of processed URLs from notes.
-
-        Returns:
-            Number of rows deleted.
-        """
-        # Fetch all failed URLs
-        rows = self._conn.execute(
-            "SELECT url FROM pages WHERE fetched = 0 AND fail_reason IS NOT NULL"
-        ).fetchall()
-
-        to_delete = [row["url"] for row in rows if row["url"] not in canonical_urls]
-
-        if to_delete:
-            self._conn.executemany(
-                "DELETE FROM pages WHERE url = ?",
-                [(url,) for url in to_delete],
-            )
-            self._conn.commit()
-
-        return len(to_delete)
-
-    # -- source notes --
-
-    def rebuild_sources(self, url_to_notes: dict[str, list[str]]) -> None:
-        """Replace all page_sources with the current note-to-URL mapping.
-
-        Clears the entire page_sources table and repopulates from the
-        provided mapping. This ensures removed links in notes are reflected
-        in the database.
+        Deletes every link row belonging to the given files, then inserts
+        the freshly extracted entries. Links found in files outside this
+        set are untouched, so indexing one source never clobbers another.
 
         Args:
-            url_to_notes: Mapping of processed_url -> list of note filenames.
+            file_paths: Full normalized paths of the files that were indexed.
+            link_entries: List of (url, file_path, indexed_at) tuples.
         """
-        self._conn.execute("DELETE FROM page_sources")
         self._conn.executemany(
-            "INSERT OR IGNORE INTO page_sources (url, note_name) VALUES (?, ?)",
-            [(url, note) for url, notes in url_to_notes.items() for note in notes],
+            "DELETE FROM links WHERE file_path = ?",
+            [(path,) for path in file_paths],
+        )
+        self._conn.executemany(
+            "INSERT OR REPLACE INTO links (url, file_path, indexed_at) "
+            "VALUES (?, ?, ?)",
+            link_entries,
         )
         self._conn.commit()
 
-    def get_sources(self, url: str) -> list[str]:
-        """Get source note filenames for a URL.
+    def get_files_for_url(self, url: str) -> list[str]:
+        """Get the files a URL was indexed from.
 
         Args:
             url: The processed/normalized URL.
 
         Returns:
-            Sorted list of note filenames that reference this URL.
+            Sorted list of full normalized file paths containing the URL.
         """
         rows = self._conn.execute(
-            "SELECT note_name FROM page_sources WHERE url = ? ORDER BY note_name",
+            "SELECT file_path FROM links WHERE url = ? ORDER BY file_path",
             (url,),
         ).fetchall()
-        return [row["note_name"] for row in rows]
+        return [row["file_path"] for row in rows]
 
-    def get_urls_for_note(self, note_name: str) -> list[str]:
-        """Get all URLs referenced by a specific note.
+    def get_urls_for_file(self, file_path: str) -> list[str]:
+        """Get all URLs indexed from a specific file.
 
         Args:
-            note_name: The note filename.
+            file_path: Full normalized path of the file.
 
         Returns:
-            List of processed URLs referenced by the note.
+            Sorted list of processed URLs found in the file.
         """
         rows = self._conn.execute(
-            "SELECT url FROM page_sources WHERE note_name = ? ORDER BY url",
-            (note_name,),
+            "SELECT url FROM links WHERE file_path = ? ORDER BY url",
+            (file_path,),
         ).fetchall()
         return [row["url"] for row in rows]
+
+    # -- sources --
+
+    def add_source(self, source: Source) -> bool:
+        """Register a source.
+
+        Args:
+            source: The source to register.
+
+        Returns:
+            True if added, False if a source with that name already exists.
+        """
+        try:
+            self._conn.execute(
+                "INSERT INTO sources (name, path, added_at) VALUES (?, ?, ?)",
+                (source.name, source.path, source.added_at),
+            )
+        except sqlite3.IntegrityError:
+            return False
+        self._conn.commit()
+        return True
+
+    def remove_source(self, name: str) -> bool:
+        """Remove a source by name.
+
+        Indexed links and pages are untouched — removing a source only
+        stops it from being indexed in the future.
+
+        Args:
+            name: The source name.
+
+        Returns:
+            True if a source was removed, False if the name was unknown.
+        """
+        cursor = self._conn.execute("DELETE FROM sources WHERE name = ?", (name,))
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def get_source(self, name: str) -> Source | None:
+        """Get a source by name.
+
+        Args:
+            name: The source name.
+
+        Returns:
+            The Source if found, None otherwise.
+        """
+        row = self._conn.execute(
+            "SELECT * FROM sources WHERE name = ?", (name,)
+        ).fetchone()
+        if row is None:
+            return None
+        return Source(name=row["name"], path=row["path"], added_at=row["added_at"])
+
+    def list_sources(self) -> list[Source]:
+        """List all registered sources, ordered by name."""
+        rows = self._conn.execute("SELECT * FROM sources ORDER BY name").fetchall()
+        return [
+            Source(name=row["name"], path=row["path"], added_at=row["added_at"])
+            for row in rows
+        ]

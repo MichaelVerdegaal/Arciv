@@ -1,8 +1,10 @@
 """Tests for the SQLite-backed PageDatabase."""
 
+import sqlite3
+
 import pytest
 
-from clotho.db import Page, PageDatabase
+from clotho.db import Page, PageDatabase, Source
 
 
 @pytest.fixture
@@ -22,6 +24,10 @@ def _page(url: str, **overrides) -> Page:
     )
     defaults.update(overrides)
     return Page(url=url, **defaults)
+
+
+def _source(name: str = "notes", path: str = "/vault/notes") -> Source:
+    return Source(name=name, path=path, added_at="2026-06-11T00:00:00+00:00")
 
 
 class TestCrud:
@@ -46,6 +52,33 @@ class TestCrud:
         db.upsert(_page("https://example.com/a"))
         db.upsert(_page("https://example.com/b"))
         assert db.count() == 2
+
+    def test_ensure_pages_inserts_new(self, db):
+        db.ensure_pages(
+            [
+                (
+                    "https://example.com/a",
+                    "https://example.com/a",
+                    "example.com",
+                    "example.com-aaaaaaaa",
+                ),
+            ]
+        )
+        assert db.get("https://example.com/a") is not None
+
+    def test_ensure_pages_keeps_existing(self, db):
+        db.upsert(_page("https://example.com/a", title="Kept"))
+        db.ensure_pages(
+            [
+                (
+                    "https://example.com/a",
+                    "https://example.com/a",
+                    "example.com",
+                    "example.com-aaaaaaaa",
+                ),
+            ]
+        )
+        assert db.get("https://example.com/a").title == "Kept"
 
 
 class TestQueries:
@@ -79,59 +112,125 @@ class TestQueries:
         assert ("a.com", "timeout", 2) in summary
 
 
-class TestSources:
-    def test_rebuild_and_get_sources(self, db):
+class TestLinks:
+    def test_replace_and_get_files_for_url(self, db):
         db.upsert(_page("https://example.com/a"))
-        db.rebuild_sources({"https://example.com/a": ["note1.md", "note2.md"]})
-        assert db.get_sources("https://example.com/a") == ["note1.md", "note2.md"]
+        db.replace_links_for_files(
+            ["/vault/note1.md", "/vault/note2.md"],
+            [
+                ("https://example.com/a", "/vault/note1.md", "2026-06-11T00:00:00"),
+                ("https://example.com/a", "/vault/note2.md", "2026-06-11T00:00:00"),
+            ],
+        )
+        assert db.get_files_for_url("https://example.com/a") == [
+            "/vault/note1.md",
+            "/vault/note2.md",
+        ]
 
-    def test_get_urls_for_note(self, db):
+    def test_get_urls_for_file(self, db):
         db.upsert(_page("https://example.com/a"))
         db.upsert(_page("https://example.com/b"))
-        db.rebuild_sources(
-            {
-                "https://example.com/a": ["daily.md"],
-                "https://example.com/b": ["daily.md"],
-            }
+        db.replace_links_for_files(
+            ["/vault/daily.md"],
+            [
+                ("https://example.com/a", "/vault/daily.md", "2026-06-11T00:00:00"),
+                ("https://example.com/b", "/vault/daily.md", "2026-06-11T00:00:00"),
+            ],
         )
-        urls = db.get_urls_for_note("daily.md")
+        urls = db.get_urls_for_file("/vault/daily.md")
         assert set(urls) == {"https://example.com/a", "https://example.com/b"}
 
-    def test_rebuild_replaces_old_sources(self, db):
+    def test_reindex_replaces_links_of_same_file(self, db):
+        db.upsert(_page("https://example.com/old"))
+        db.upsert(_page("https://example.com/new"))
+        db.replace_links_for_files(
+            ["/vault/daily.md"],
+            [("https://example.com/old", "/vault/daily.md", "t1")],
+        )
+        db.replace_links_for_files(
+            ["/vault/daily.md"],
+            [("https://example.com/new", "/vault/daily.md", "t2")],
+        )
+        assert db.get_urls_for_file("/vault/daily.md") == ["https://example.com/new"]
+
+    def test_reindex_leaves_other_files_alone(self, db):
         db.upsert(_page("https://example.com/a"))
-        db.rebuild_sources({"https://example.com/a": ["old.md"]})
-        db.rebuild_sources({"https://example.com/a": ["new.md"]})
-        assert db.get_sources("https://example.com/a") == ["new.md"]
-
-
-class TestPruning:
-    def test_prune_removes_stale_failures(self, db):
-        db.upsert(
-            _page("https://example.com/gone", fetched=False, fail_reason="timeout")
+        db.replace_links_for_files(
+            ["/vault/one.md"],
+            [("https://example.com/a", "/vault/one.md", "t1")],
         )
-        db.upsert(
-            _page("https://example.com/kept", fetched=False, fail_reason="timeout")
+        db.replace_links_for_files(
+            ["/vault/two.md"],
+            [("https://example.com/a", "/vault/two.md", "t2")],
         )
-        pruned = db.prune_orphans({"https://example.com/kept"})
-        assert pruned == 1
-        assert db.get("https://example.com/gone") is None
-        assert db.get("https://example.com/kept") is not None
+        assert db.get_files_for_url("https://example.com/a") == [
+            "/vault/one.md",
+            "/vault/two.md",
+        ]
 
-    def test_prune_never_touches_fetched_pages(self, db):
-        db.upsert(_page("https://example.com/archived", fetched=True))
-        pruned = db.prune_orphans(set())
-        assert pruned == 0
-        assert db.get("https://example.com/archived") is not None
 
-    def test_ensure_pages_inserts_new(self, db):
-        db.ensure_pages(
-            [
-                (
-                    "https://example.com/a",
-                    "https://example.com/a",
-                    "example.com",
-                    "example.com-aaaaaaaa",
-                ),
-            ]
+class TestSources:
+    def test_add_and_get(self, db):
+        assert db.add_source(_source()) is True
+        source = db.get_source("notes")
+        assert source is not None
+        assert source.path == "/vault/notes"
+
+    def test_add_duplicate_name_fails(self, db):
+        db.add_source(_source())
+        assert db.add_source(_source(path="/elsewhere")) is False
+        assert db.get_source("notes").path == "/vault/notes"
+
+    def test_remove(self, db):
+        db.add_source(_source())
+        assert db.remove_source("notes") is True
+        assert db.get_source("notes") is None
+
+    def test_remove_unknown_returns_false(self, db):
+        assert db.remove_source("nope") is False
+
+    def test_list_sources_ordered_by_name(self, db):
+        db.add_source(_source(name="zeta", path="/z"))
+        db.add_source(_source(name="alpha", path="/a"))
+        assert [s.name for s in db.list_sources()] == ["alpha", "zeta"]
+
+
+class TestMigration:
+    def test_v1_database_is_upgraded(self, tmp_path):
+        """A v1 DB (scraped_at column, page_sources table) opens cleanly."""
+        db_path = tmp_path / "old.db"
+        conn = sqlite3.connect(db_path)
+        conn.executescript(
+            """
+            CREATE TABLE pages (
+                url             TEXT PRIMARY KEY,
+                original_url    TEXT NOT NULL,
+                domain          TEXT NOT NULL DEFAULT '',
+                slug            TEXT NOT NULL DEFAULT '',
+                fetched         INTEGER NOT NULL DEFAULT 0,
+                fail_reason     TEXT,
+                title           TEXT,
+                author          TEXT,
+                word_count      INTEGER NOT NULL DEFAULT 0,
+                scraped_at      TEXT
+            );
+            CREATE TABLE page_sources (
+                url       TEXT NOT NULL,
+                note_name TEXT NOT NULL,
+                PRIMARY KEY (url, note_name)
+            );
+            INSERT INTO pages (url, original_url, fetched, scraped_at)
+            VALUES ('https://example.com/a', 'https://example.com/a',
+                    1, '2026-01-01T00:00:00');
+            """
         )
-        assert db.get("https://example.com/a") is not None
+        conn.commit()
+        conn.close()
+
+        with PageDatabase(db_path) as db:
+            page = db.get("https://example.com/a")
+            assert page is not None
+            assert page.fetched_at == "2026-01-01T00:00:00"
+            # v2 tables exist and v1 page_sources is gone
+            db.add_source(_source())
+            db.replace_links_for_files([], [])

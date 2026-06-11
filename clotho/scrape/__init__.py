@@ -1,4 +1,4 @@
-from .scraper import Scraper
+from .fetcher import Fetcher
 from .url_processor import (
     is_pdf_url,
     is_raw_text_url,
@@ -8,11 +8,9 @@ from .url_processor import (
     split_url,
 )
 from .user_agents import random_user_agent
-from .validate import check_html
 
 __all__ = [
-    "Scraper",
-    "check_html",
+    "Fetcher",
     "is_pdf_url",
     "is_raw_text_url",
     "process_url",
