@@ -11,11 +11,12 @@ keywords or filenames.
 1. **URL extraction** — Parse Obsidian markdown notes, extract all links, deduplicate, apply
    filtering/rewrite rules
 2. **Web scraping** — Playwright (async, concurrency-controlled), HTML→Markdown via trafilatura
-3. **Storage** — SQLite database (markdown content inline, HTML archived as Brotli-compressed files)
+3. **Storage** — content on disk as `data/saved/<slug>/page.html` + `page.md`; SQLite database
+   holds pointers and fetch state only
 
 ### Key Libraries
 
-- `playwright` — async web scraping
+- `patchright` — async web scraping (undetected Playwright fork)
 - `trafilatura` — HTML content extraction
 - `tldextract` — domain parsing (registered domain grouping)
 - `loguru` — logging (one log statement per URL processed)
