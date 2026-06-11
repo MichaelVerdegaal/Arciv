@@ -26,7 +26,7 @@ from pathlib import Path
 import click
 from loguru import logger
 
-from clotho.config import DB_PATH, configure_logger
+from clotho.settings import DB_PATH, configure_logger
 from clotho.db import PageDatabase, Source
 from clotho.pipeline import (
     fetch_pending,

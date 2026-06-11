@@ -71,25 +71,7 @@ class PageDatabase:
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
-        self._migrate()
         self._conn.executescript(_SCHEMA)
-
-    def _migrate(self) -> None:
-        """Upgrade a v1 database in place before applying the schema.
-
-        v1 named the fetch timestamp ``scraped_at`` and tracked note names
-        in ``page_sources``. Link rows are rebuilt by re-indexing, so
-        ``page_sources`` is simply dropped.
-        """
-        columns = {
-            row["name"] for row in self._conn.execute("PRAGMA table_info(pages)")
-        }
-        if "scraped_at" in columns:
-            self._conn.execute(
-                "ALTER TABLE pages RENAME COLUMN scraped_at TO fetched_at"
-            )
-        self._conn.execute("DROP TABLE IF EXISTS page_sources")
-        self._conn.commit()
 
     def close(self) -> None:
         """Close the database connection."""

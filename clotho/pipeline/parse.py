@@ -12,7 +12,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from clotho.config import SAVED_DIR
+from clotho.settings import SAVED_DIR
 from clotho.convert import check_html, parse_html, pdf_to_text
 from clotho.db import Page, PageDatabase
 from clotho.scrape import is_raw_text_url

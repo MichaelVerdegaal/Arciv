@@ -1,7 +1,5 @@
 """Tests for the SQLite-backed PageDatabase."""
 
-import sqlite3
-
 import pytest
 
 from clotho.db import Page, PageDatabase, Source
@@ -193,44 +191,3 @@ class TestSources:
         db.add_source(_source(name="zeta", path="/z"))
         db.add_source(_source(name="alpha", path="/a"))
         assert [s.name for s in db.list_sources()] == ["alpha", "zeta"]
-
-
-class TestMigration:
-    def test_v1_database_is_upgraded(self, tmp_path):
-        """A v1 DB (scraped_at column, page_sources table) opens cleanly."""
-        db_path = tmp_path / "old.db"
-        conn = sqlite3.connect(db_path)
-        conn.executescript(
-            """
-            CREATE TABLE pages (
-                url             TEXT PRIMARY KEY,
-                original_url    TEXT NOT NULL,
-                domain          TEXT NOT NULL DEFAULT '',
-                slug            TEXT NOT NULL DEFAULT '',
-                fetched         INTEGER NOT NULL DEFAULT 0,
-                fail_reason     TEXT,
-                title           TEXT,
-                author          TEXT,
-                word_count      INTEGER NOT NULL DEFAULT 0,
-                scraped_at      TEXT
-            );
-            CREATE TABLE page_sources (
-                url       TEXT NOT NULL,
-                note_name TEXT NOT NULL,
-                PRIMARY KEY (url, note_name)
-            );
-            INSERT INTO pages (url, original_url, fetched, scraped_at)
-            VALUES ('https://example.com/a', 'https://example.com/a',
-                    1, '2026-01-01T00:00:00');
-            """
-        )
-        conn.commit()
-        conn.close()
-
-        with PageDatabase(db_path) as db:
-            page = db.get("https://example.com/a")
-            assert page is not None
-            assert page.fetched_at == "2026-01-01T00:00:00"
-            # v2 tables exist and v1 page_sources is gone
-            db.add_source(_source())
-            db.replace_links_for_files([], [])

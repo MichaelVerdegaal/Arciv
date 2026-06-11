@@ -8,7 +8,7 @@ the parse stage's job (see ``clotho.pipeline.parse``).
 
 from loguru import logger
 
-from clotho.config import SAVED_DIR
+from clotho.settings import SAVED_DIR
 from clotho.db import Page, PageDatabase
 from clotho.scrape import Fetcher
 
