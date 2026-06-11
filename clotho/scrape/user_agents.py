@@ -3,15 +3,16 @@
 Each entry should look like a real, up-to-date browser. Outdated or exotic
 UAs are *more* suspicious than common ones — blend in, don't stand out.
 
-Reads from data/user_agents.txt (one UA per line), which is refreshed by
-running: clotho update-agents
+The pool is refreshed from the microlink API once per process (triggered by
+the first Scraper init) and cached in data/user_agents.txt. When the refresh
+fails (e.g. offline), the cached file is used; a small built-in list is the
+last resort. Loading never raises — scraping shouldn't die over a UA refresh.
 """
 
 import json
 import random
 import urllib.request
 from functools import cache
-from pathlib import Path
 
 from loguru import logger
 
@@ -19,6 +20,17 @@ from config import DATA_DIR
 
 UA_FILE = DATA_DIR / "user_agents.txt"
 MICROLINK_URL = "https://microlink.io/user-agents.json"
+
+# Last resort when the refresh fails and no cached file exists. Only raw
+# HTTP (PDF) downloads use this pool — the browser sends real Chrome's UA.
+_FALLBACK_USER_AGENTS = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+)
 
 
 def _fetch_user_agents(url: str = MICROLINK_URL) -> list[str]:
@@ -35,7 +47,7 @@ def _fetch_user_agents(url: str = MICROLINK_URL) -> list[str]:
         urllib.error.URLError: If the HTTP request fails.
     """
     request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(request) as response:
+    with urllib.request.urlopen(request, timeout=10) as response:
         data = json.loads(response.read().decode("utf-8"))
 
     agents: list[str] = data.get("user", [])
@@ -55,51 +67,37 @@ def _save_user_agents(agents: list[str]) -> None:
     logger.info(f"Saved {len(agents)} user-agents to {UA_FILE}")
 
 
-def update_user_agents() -> int:
-    """Fetch the latest user-agent strings and save them to disk.
-
-    Returns:
-        Number of user-agent strings saved.
-    """
-    agents = _fetch_user_agents()
-    _save_user_agents(agents)
-    _load_user_agents.cache_clear()
-    return len(agents)
-
-
 @cache
-def _load_user_agents(path: Path = UA_FILE) -> list[str]:
-    """Load user-agent strings from a text file (one per line).
+def load_user_agents() -> list[str]:
+    """Load the User-Agent pool, refreshing it from the network once.
 
-    Fetches and saves a fresh pool when the file doesn't exist yet. Loaded
-    lazily and cached, so importing this module never touches the network
-    or filesystem.
-
-    Args:
-        path: Path to the user_agents.txt file.
+    Tries a fresh fetch first so the pool stays current, then falls back to
+    the cached file, then to the built-in list. Cached, so the refresh runs
+    at most once per process.
 
     Returns:
-        List of non-empty user-agent strings.
-
-    Raises:
-        ValueError: If the UA file exists but contains no user agents.
+        List of user-agent strings (never empty).
     """
-    if not path.exists():
+    try:
         agents = _fetch_user_agents()
         _save_user_agents(agents)
-    else:
+        return agents
+    except (OSError, ValueError) as e:
+        logger.warning(f"User-agent refresh failed ({e}); falling back to cache")
+
+    if UA_FILE.exists():
         agents = [
             line.strip()
-            for line in path.read_text(encoding="utf-8").splitlines()
+            for line in UA_FILE.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
+        if agents:
+            return agents
 
-    if not agents:
-        raise ValueError(f"User-agent file is empty: {path}")
-
-    return agents
+    logger.warning("No cached user agents; using built-in fallback pool")
+    return list(_FALLBACK_USER_AGENTS)
 
 
 def random_user_agent() -> str:
     """Return a random User-Agent string from the pool."""
-    return random.choice(_load_user_agents())
+    return random.choice(load_user_agents())

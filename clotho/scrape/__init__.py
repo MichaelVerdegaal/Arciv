@@ -7,7 +7,7 @@ from .url_processor import (
     slug_for_url,
     split_url,
 )
-from .user_agents import random_user_agent, update_user_agents
+from .user_agents import random_user_agent
 from .validate import check_html
 
 __all__ = [
@@ -20,5 +20,4 @@ __all__ = [
     "registered_domain",
     "slug_for_url",
     "split_url",
-    "update_user_agents",
 ]

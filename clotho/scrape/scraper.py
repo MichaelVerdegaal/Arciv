@@ -92,7 +92,8 @@ class Scraper:
         self.max_retries = max_retries
         self.headless = headless
         # User-Agent for raw HTTP (PDF) downloads, refreshed per session.
-        # The browser uses real Chrome's own UA, so it isn't overridden here.
+        # Drawing from the pool here triggers the once-per-process UA pool
+        # refresh. The browser uses real Chrome's own UA, not this one.
         self._session_user_agent: str = random_user_agent()
 
     def _start_session(self) -> None:
