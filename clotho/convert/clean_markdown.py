@@ -1,8 +1,7 @@
 import re
 from typing import Self
 
-# === Compiled Regex Patterns for Markdown Cleaning ===
-# Most patterns use group 1 for the inner content.
+# Compiled patterns for markdown cleaning. Most use group 1 for the inner content.
 
 # Inline or fenced code blocks
 INLINE_CODE_RE = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
@@ -103,7 +102,7 @@ class MarkdownCleaner:
             self._apply(pattern, keep_content=keep_content)
         return self
 
-    # === Public API Methods ===
+    # -- public API --
 
     def strip_inline_code(self) -> Self:
         """Remove inline code formatting markers, keeping the code content."""

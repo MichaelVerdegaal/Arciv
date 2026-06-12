@@ -14,41 +14,21 @@ from clotho.scrape import Fetcher
 
 
 def fetch_urls(db: PageDatabase, urls: list[str], refetch: bool = False) -> list[Page]:
-    """Fetch specific URLs and archive their raw content.
-
-    Args:
-        db: Page database.
-        urls: URLs to fetch.
-        refetch: Re-download even if already fetched.
-
-    Returns:
-        List of successfully fetched Pages.
-    """
+    """Fetch the given URLs (re-downloading if refetch) and return the
+    successfully archived Pages."""
     fetcher = Fetcher(db, saved_dir=SAVED_DIR)
     return fetcher.fetch_batch(urls, refetch=refetch)
 
 
 def fetch_pending(db: PageDatabase, refetch: bool = False) -> list[Page]:
-    """Fetch every indexed URL that hasn't been downloaded yet.
-
-    Args:
-        db: Page database.
-        refetch: Re-download every known page, even fetched/failed ones.
-
-    Returns:
-        List of successfully fetched Pages.
-    """
+    """Fetch every indexed URL that hasn't been downloaded yet; with refetch,
+    re-download every known page, even fetched/failed ones."""
     pages = db.get_all() if refetch else db.get_unfetched()
     return fetch_urls(db, [page.url for page in pages], refetch=refetch)
 
 
 def report(db: PageDatabase, archived: int) -> None:
-    """Log totals and a failure summary after a run.
-
-    Args:
-        db: Page database.
-        archived: Number of pages archived in this run.
-    """
+    """Log totals and a failure summary after a run that archived `archived` pages."""
     total = db.count()
     pending = len(db.get_unfetched())
     logger.info(

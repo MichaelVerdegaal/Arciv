@@ -31,15 +31,8 @@ def _index_notes(
 
     Creates pending page rows for new URLs and replaces the link rows of
     each note file with the freshly extracted set, stamped with the
-    current time.
-
-    Args:
-        db: Page database.
-        notes: Notes to index.
-        source_name: Registered source the notes belong to, if any.
-
-    Returns:
-        All unique processed URLs found in the notes.
+    current time. Returns all unique processed URLs found in the notes.
+    source_name is the registered source the notes belong to, if any.
     """
     indexed_at = datetime.now(timezone.utc).isoformat()
     file_paths: list[str] = []
@@ -71,15 +64,8 @@ def _index_notes(
 
 
 def index_file(db: PageDatabase, file_path: Path) -> list[str]:
-    """Index all links within a single note file (.md, .txt, or .rst).
-
-    Args:
-        db: Page database.
-        file_path: Path to the note file.
-
-    Returns:
-        All unique processed URLs found in the file.
-    """
+    """Index all links within a single note file (.md, .txt, or .rst)
+    and return the unique processed URLs found."""
     return _index_notes(db, [load_note(file_path)])
 
 
@@ -88,34 +74,17 @@ def index_directory(
     dir_path: Path,
     source_name: str | None = None,
 ) -> list[str]:
-    """Index all links of all note files within a directory (recursive).
-
-    Args:
-        db: Page database.
-        dir_path: Directory containing note files (.md, .txt, .rst).
-        source_name: Registered source the directory belongs to, if any.
-
-    Returns:
-        All unique processed URLs found in the directory.
-    """
+    """Index all links of all note files within a directory (recursive)
+    and return the unique processed URLs found. source_name is the
+    registered source the directory belongs to, if any."""
     notes = load_notes(dir_path)
     logger.info(f"Found {len(notes)} notes in {dir_path}")
     return _index_notes(db, notes, source_name=source_name)
 
 
 def index_source(db: PageDatabase, name: str) -> list[str]:
-    """Index a registered source by name.
-
-    Args:
-        db: Page database.
-        name: Name of the registered source.
-
-    Returns:
-        All unique processed URLs found in the source directory.
-
-    Raises:
-        KeyError: If no source with that name is registered.
-    """
+    """Index a registered source by name and return the unique processed
+    URLs found. Raises KeyError if no source with that name is registered."""
     source = db.get_source(name)
     if source is None:
         raise KeyError(f"No source named '{name}'")
@@ -123,14 +92,8 @@ def index_source(db: PageDatabase, name: str) -> list[str]:
 
 
 def index_all(db: PageDatabase) -> list[str]:
-    """Index every registered source.
-
-    Args:
-        db: Page database.
-
-    Returns:
-        All unique processed URLs found across all sources.
-    """
+    """Index every registered source and return the unique processed URLs
+    found across all of them."""
     urls: dict[str, None] = {}
     for source in db.list_sources():
         logger.info(f"Indexing source '{source.name}' ({source.path})")
@@ -143,13 +106,7 @@ def register_urls(db: PageDatabase, urls: list[str]) -> list[str]:
     """Register directly-provided URLs (no source file, so no link rows).
 
     Used by ``clotho get <URL>``, where the URL doesn't come from a file.
-
-    Args:
-        db: Page database.
-        urls: Raw URLs as provided by the user.
-
-    Returns:
-        The processed URLs that were registered (skipped URLs excluded).
+    Returns the processed URLs that were registered; skipped URLs excluded.
     """
     registered: dict[str, None] = {}
     for url in urls:

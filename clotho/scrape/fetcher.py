@@ -92,23 +92,11 @@ class Fetcher:
         self._session_user_agent = random_user_agent()
         logger.debug(f"Session User-Agent: {self._session_user_agent}")
 
-    # =========================================================================
-    # INTERNAL HELPERS
-    # =========================================================================
+    # -- internal helpers --
 
     def _needs_fetch(self, processed_url: str, refetch: bool) -> bool:
-        """Check if a URL needs to be fetched.
-
-        Returns True for new URLs, pending URLs, and all URLs when refetch
-        is True. Already-fetched or failed URLs are skipped.
-
-        Args:
-            processed_url: The URL to check.
-            refetch: Force re-download regardless of status.
-
-        Returns:
-            True if the page should be fetched.
-        """
+        """True for new URLs, pending URLs, and all URLs when refetch is
+        set; already-fetched or failed URLs are skipped."""
         if refetch:
             return True
         existing = self.db.get(processed_url)
@@ -139,7 +127,7 @@ class Fetcher:
     ) -> Page:
         """Record a successful fetch in the database.
 
-        Title, author, word count, and parsed_at are reset — the parse
+        Title, author, word count, and parsed_at are reset; the parse
         stage fills them in once the fresh content has been converted.
         """
         page = Page(
@@ -210,14 +198,8 @@ class Fetcher:
         (slug_dir / "page.pdf").write_bytes(pdf_bytes)
 
     def _download_pdf(self, url: str) -> bytes | None:
-        """Download a PDF file via HTTP.
-
-        Args:
-            url: Direct URL to a .pdf file.
-
-        Returns:
-            Raw PDF bytes, or None if the download failed.
-        """
+        """Download a PDF via HTTP from a direct .pdf URL. Returns the raw
+        bytes, or None if the download failed."""
         request = urllib.request.Request(
             url, headers={"User-Agent": self._session_user_agent}
         )
@@ -246,20 +228,12 @@ class Fetcher:
         logger.info(f"Fetched {processed_url} (PDF, {len(pdf_bytes)} bytes)")
         return page
 
-    # =========================================================================
-    # SYNCHRONOUS - Single page, debuggable
-    # =========================================================================
+    # -- synchronous: single page, debuggable --
 
     def fetch(self, url: str, refetch: bool = False) -> Page | None:
-        """Fetch a single URL synchronously and archive its raw content.
-
-        Args:
-            url: The URL to fetch.
-            refetch: Re-download even if already fetched.
-
-        Returns:
-            Page if fetched successfully, None if skipped/failed.
-        """
+        """Fetch a single URL synchronously (re-downloading if refetch) and
+        archive its raw content. Returns the Page, or None if skipped or
+        failed."""
         self._start_session()
         processed_url, skip_reason = process_url(url)
         if processed_url is None:
@@ -282,7 +256,7 @@ class Fetcher:
             )
             return None
 
-        # Browser got a download trigger instead of HTML — try as PDF
+        # Browser got a download trigger instead of HTML, so try it as a PDF
         if html == _DOWNLOAD_SENTINEL:
             return self._fetch_pdf(
                 processed_url,
@@ -298,16 +272,11 @@ class Fetcher:
         return page
 
     def _fetch_sync(self, url: str) -> str | None:
-        """Fetch HTML content synchronously using patchright.
+        """Fetch HTML synchronously with patchright; returns the raw HTML,
+        or None if the fetch failed.
 
         Uses Chrome with a persistent context and no fingerprint injection
         for maximum stealth.
-
-        Args:
-            url: The URL to fetch.
-
-        Returns:
-            Raw HTML string, or None if the fetch failed.
         """
         with tempfile.TemporaryDirectory() as user_data_dir:
             with sync_playwright() as p:
@@ -352,20 +321,11 @@ class Fetcher:
                     pw_page.close()
                     context.close()
 
-    # =========================================================================
-    # ASYNC BATCH - Multiple pages with concurrency
-    # =========================================================================
+    # -- async batch: multiple pages with concurrency --
 
     def fetch_batch(self, urls: list[str], refetch: bool = False) -> list[Page]:
-        """Fetch multiple URLs concurrently and archive their raw content.
-
-        Args:
-            urls: List of URLs to fetch.
-            refetch: Re-download even if already fetched.
-
-        Returns:
-            List of successfully fetched Pages.
-        """
+        """Fetch multiple URLs concurrently (re-downloading if refetch) and
+        archive their raw content. Returns the successfully fetched Pages."""
         return asyncio.run(self._fetch_batch_async(urls, refetch))
 
     async def _fetch_batch_async(
@@ -456,22 +416,10 @@ class Fetcher:
         domain: str,
         slug: str,
     ) -> Page | None:
-        """Fetch a single URL (async) and archive its raw HTML.
-
-        Retries transient errors (timeouts, connection resets) up to
-        max_retries times before recording a failure.
-
-        Args:
-            semaphore: Concurrency limiter.
-            context: Patchright browser context.
-            processed_url: The processed/normalized URL.
-            original_url: The original URL before rewriting.
-            domain: Registered domain for the URL.
-            slug: Folder name for archival.
-
-        Returns:
-            Page if fetched successfully, None on failure.
-        """
+        """Fetch a single URL (async) inside the patchright context and
+        archive its raw HTML. Retries transient errors (timeouts, connection
+        resets) up to max_retries times before recording a failure. Returns
+        the Page, or None on failure."""
         html: str | None = None
         last_reason = ""
 
@@ -504,7 +452,7 @@ class Fetcher:
                 except Exception as e:
                     last_reason = self._format_fetch_error(e)
 
-                    # Browser triggered a file download — try the PDF path
+                    # Browser triggered a file download, so try the PDF path
                     if "Download is starting" in last_reason:
                         await pw_page.close()
                         return self._fetch_pdf(

@@ -2,7 +2,7 @@
 
 The data root defaults to the OS user data directory (Linux:
 ``~/.local/share/clotho``, Windows: ``%LOCALAPPDATA%\\clotho``), so the
-archive has one fixed home regardless of where the command runs — and
+archive has one fixed home regardless of where the command runs, and
 lives outside any repo checkout, so the future backend container can
 mount it directly. Set ``CLOTHO_DATA_DIR`` (in the environment or a
 ``.env`` file) to relocate it, e.g. to ``./data`` when developing from

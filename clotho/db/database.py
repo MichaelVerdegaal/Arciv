@@ -123,14 +123,8 @@ class PageDatabase:
     # -- page CRUD --
 
     def upsert(self, page: Page) -> None:
-        """Insert or update a page.
-
-        ``added_at`` is only written on first insert; updates keep the
-        original value.
-
-        Args:
-            page: The page to insert or update.
-        """
+        """Insert or update a page. ``added_at`` is only written on first
+        insert; updates keep the original value."""
         self._conn.execute(
             _UPSERT_SQL,
             (
@@ -151,14 +145,9 @@ class PageDatabase:
         self._conn.commit()
 
     def ensure_pages(self, url_entries: list[tuple[str, str, str, str]]) -> None:
-        """Create pending page entries for URLs not yet in the database.
-
-        Existing pages are left unchanged. New pages get ``added_at`` set
-        to the current time.
-
-        Args:
-            url_entries: List of (url, original_url, domain, slug) tuples.
-        """
+        """Create pending page entries for (url, original_url, domain, slug)
+        tuples not yet in the database. Existing pages are left unchanged;
+        new pages get ``added_at`` set to the current time."""
         added_at = _now()
         self._conn.executemany(
             "INSERT OR IGNORE INTO pages "
@@ -169,34 +158,20 @@ class PageDatabase:
         self._conn.commit()
 
     def get(self, url: str) -> Page | None:
-        """Get a page by its processed URL (primary key).
-
-        Args:
-            url: The processed/normalized URL.
-
-        Returns:
-            The Page if found, None otherwise.
-        """
+        """Get a page by its processed/normalized URL (primary key)."""
         row = self._conn.execute("SELECT * FROM pages WHERE url = ?", (url,)).fetchone()
         return self._row_to_page(row) if row else None
 
     def get_unfetched(self) -> list[Page]:
-        """Get all pages that haven't been fetch-attempted yet.
-
-        Returns:
-            Pages with no fetched_at and no fail_reason (pending).
-        """
+        """Get all pending pages: no fetched_at and no fail_reason."""
         rows = self._conn.execute(
             "SELECT * FROM pages WHERE fetched_at IS NULL AND fail_reason IS NULL"
         ).fetchall()
         return [self._row_to_page(row) for row in rows]
 
     def get_unparsed(self) -> list[Page]:
-        """Get all fetched pages that still need a parse attempt.
-
-        Returns:
-            Pages with fetched_at set, no parsed_at, and no fail_reason.
-        """
+        """Get pages awaiting parse: fetched_at set, no parsed_at, no
+        fail_reason."""
         rows = self._conn.execute(
             "SELECT * FROM pages WHERE fetched_at IS NOT NULL "
             "AND parsed_at IS NULL AND fail_reason IS NULL"
@@ -204,11 +179,8 @@ class PageDatabase:
         return [self._row_to_page(row) for row in rows]
 
     def get_fetched(self) -> list[Page]:
-        """Get all pages with raw content on disk (parse-rejected included).
-
-        Returns:
-            Pages with fetched_at set.
-        """
+        """Get all pages with raw content on disk (fetched_at set),
+        parse-rejected included."""
         rows = self._conn.execute(
             "SELECT * FROM pages WHERE fetched_at IS NOT NULL"
         ).fetchall()
@@ -225,12 +197,8 @@ class PageDatabase:
         return row["n"]
 
     def status_counts(self) -> dict[str, int]:
-        """Count pages per pipeline state (see Page docstring for states).
-
-        Returns:
-            Dict with keys ``total``, ``pending``, ``fetch_failed``,
-            ``awaiting_parse``, ``parse_rejected``, and ``parsed``.
-        """
+        """Count pages per pipeline state (see Page docstring for states):
+        total, pending, fetch_failed, awaiting_parse, parse_rejected, parsed."""
         row = self._conn.execute(
             "SELECT COUNT(*) AS total, "
             "COALESCE(SUM(fetched_at IS NULL AND fail_reason IS NULL), 0) "
@@ -247,14 +215,7 @@ class PageDatabase:
         return {key: row[key] for key in row.keys()}
 
     def recent_fetches(self, limit: int = 10) -> list[Page]:
-        """Get the most recently fetched pages.
-
-        Args:
-            limit: Maximum number of pages to return.
-
-        Returns:
-            Fetched pages ordered by fetched_at, newest first.
-        """
+        """Get up to `limit` fetched pages, newest first."""
         rows = self._conn.execute(
             "SELECT * FROM pages WHERE fetched_at IS NOT NULL "
             "ORDER BY fetched_at DESC LIMIT ?",
@@ -263,12 +224,8 @@ class PageDatabase:
         return [self._row_to_page(row) for row in rows]
 
     def fail_summary(self) -> list[tuple[str | None, str, int]]:
-        """Summarize fetch and parse failures grouped by domain and reason.
-
-        Returns:
-            List of (domain, fail_reason, count) tuples, ordered by count
-            descending.
-        """
+        """Summarize failures as (domain, fail_reason, count) tuples,
+        biggest groups first."""
         rows = self._conn.execute(
             "SELECT domain, fail_reason, COUNT(*) AS n "
             "FROM pages WHERE fail_reason IS NOT NULL "
@@ -286,14 +243,10 @@ class PageDatabase:
         """Replace the link rows of re-indexed files with fresh entries.
 
         Deletes every link row belonging to the given files, then inserts
-        the freshly extracted entries. Links found in files outside this
-        set are untouched, so indexing one source never clobbers another.
-
-        Args:
-            file_paths: Full normalized paths of the files that were indexed.
-            link_entries: List of (url, file_path, source_name, indexed_at)
-                tuples. source_name is None for ad-hoc files outside any
-                registered source.
+        the freshly extracted (url, file_path, source_name, indexed_at)
+        entries; source_name is None for ad-hoc files outside any registered
+        source. Links found in files outside this set are untouched, so
+        indexing one source never clobbers another.
         """
         self._conn.executemany(
             "DELETE FROM links WHERE file_path = ?",
@@ -308,14 +261,8 @@ class PageDatabase:
         self._conn.commit()
 
     def get_files_for_url(self, url: str) -> list[str]:
-        """Get the files a URL was indexed from.
-
-        Args:
-            url: The processed/normalized URL.
-
-        Returns:
-            Sorted list of full normalized file paths containing the URL.
-        """
+        """Get the sorted, full normalized paths of files the URL was
+        indexed from."""
         rows = self._conn.execute(
             "SELECT file_path FROM links WHERE url = ? ORDER BY file_path",
             (url,),
@@ -323,14 +270,8 @@ class PageDatabase:
         return [row["file_path"] for row in rows]
 
     def get_urls_for_file(self, file_path: str) -> list[str]:
-        """Get all URLs indexed from a specific file.
-
-        Args:
-            file_path: Full normalized path of the file.
-
-        Returns:
-            Sorted list of processed URLs found in the file.
-        """
+        """Get the sorted processed URLs indexed from a file (full
+        normalized path)."""
         rows = self._conn.execute(
             "SELECT url FROM links WHERE file_path = ? ORDER BY url",
             (file_path,),
@@ -338,14 +279,8 @@ class PageDatabase:
         return [row["url"] for row in rows]
 
     def get_urls_for_source(self, source_name: str) -> list[str]:
-        """Get all URLs indexed from a registered source.
-
-        Args:
-            source_name: Name of the registered source.
-
-        Returns:
-            Sorted list of distinct processed URLs indexed from the source.
-        """
+        """Get the sorted, distinct processed URLs indexed from a
+        registered source."""
         rows = self._conn.execute(
             "SELECT DISTINCT url FROM links WHERE source_name = ? ORDER BY url",
             (source_name,),
@@ -355,14 +290,7 @@ class PageDatabase:
     # -- sources --
 
     def add_source(self, source: Source) -> bool:
-        """Register a source.
-
-        Args:
-            source: The source to register.
-
-        Returns:
-            True if added, False if a source with that name already exists.
-        """
+        """Register a source. Returns False if the name is already taken."""
         try:
             self._conn.execute(
                 "INSERT INTO sources (name, path, added_at) VALUES (?, ?, ?)",
@@ -374,31 +302,18 @@ class PageDatabase:
         return True
 
     def remove_source(self, name: str) -> bool:
-        """Remove a source by name.
+        """Remove a source by name; returns False if the name was unknown.
 
         Indexed links and pages are kept; their ``source_name`` is set to
         NULL via the foreign key. Removing a source only stops it from
         being indexed in the future.
-
-        Args:
-            name: The source name.
-
-        Returns:
-            True if a source was removed, False if the name was unknown.
         """
         cursor = self._conn.execute("DELETE FROM sources WHERE name = ?", (name,))
         self._conn.commit()
         return cursor.rowcount > 0
 
     def get_source(self, name: str) -> Source | None:
-        """Get a source by name.
-
-        Args:
-            name: The source name.
-
-        Returns:
-            The Source if found, None otherwise.
-        """
+        """Get a source by name, or None if unknown."""
         row = self._conn.execute(
             "SELECT * FROM sources WHERE name = ?", (name,)
         ).fetchone()
