@@ -24,9 +24,11 @@ Configuration below), so no further setup is needed.
 1. `uv venv` to set up the virtual environment
 2. `source .venv/bin/activate` (Bash)
 3. `uv sync`
-4. `patchright install chrome` to install the browser engine for Playwright. Use `--force` flag on
-   existing install error. Use `chromium` instead if `chrome` is not supported on your platform.
-5. `uv run clotho --help`
+4. `patchright install chrome --force` to install the browser engine for Playwright.
+
+If you get an error like
+`'ERROR: cannot install on pop distribution - only Ubuntu and Debian are supported'`, you can bypass
+this by manually installing Chrome.
 
 ## Configuration
 
