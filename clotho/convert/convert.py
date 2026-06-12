@@ -20,6 +20,13 @@ WORD_RE = re.compile(r"\b\w+\b")
 # Fallback regex for extracting <title> when trafilatura doesn't find it
 TITLE_TAG_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.DOTALL | re.IGNORECASE)
 
+# MediaWiki section-edit links ("[edit]"). They sit next to the heading inside
+# a small wrapper div where they are the only link, so trafilatura's
+# link-density pruning judges the whole div boilerplate and deletes it,
+# heading included — every section heading vanished from Wikipedia pages.
+# Pruning the spans before extraction keeps the headings.
+MEDIAWIKI_EDIT_SECTION_XPATH = '//span[contains(@class, "mw-editsection")]'
+
 
 @dataclass
 class ConversionResult:
@@ -79,10 +86,10 @@ def html_to_markdown(
     # Remove malformed __NEXT_DATA__ scripts before DOM parsing
     html_content = NEXT_DATA_RE.sub("", html_content)
 
-    prune_xpath = None
+    prune_xpath = [MEDIAWIKI_EDIT_SECTION_XPATH]
     if strip_code:
         # Remove <pre> and <code> blocks to avoid extraction artifacts
-        prune_xpath = ["//pre", "//code"]
+        prune_xpath += ["//pre", "//code"]
 
     return extract(
         html_content,

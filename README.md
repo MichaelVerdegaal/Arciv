@@ -48,6 +48,16 @@ clotho parse                          # convert fetched pages to markdown
 clotho parse --reparse                # re-parse everything from disk
 ```
 
+Inspect the archive:
+
+```bash
+clotho status                         # pipeline counts + failure summary
+clotho list --n 50                    # fetched pages: time, domain, URL
+clotho cat https://example.com/post   # print a page's archived markdown
+clotho db dir                         # where the archive lives on disk
+clotho db remove                      # delete the database (asks first)
+```
+
 See [SETUP.md](SETUP.md) for installation and configuration.
 
 ## Where It's Going

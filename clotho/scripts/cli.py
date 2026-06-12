@@ -21,7 +21,11 @@ Individual pipeline stages, mainly for development:
 
 Inspection:
 
-    clotho status                    # counts, recent fetches, failures
+    clotho status                    # pipeline counts + failure summary
+    clotho list                      # fetched pages: time, domain, URL
+    clotho cat <URL>                 # print a page's archived markdown
+    clotho db dir                    # print the data directory path
+    clotho db remove                 # delete the database (asks first)
 """
 
 from datetime import datetime, timezone
@@ -30,8 +34,9 @@ from pathlib import Path
 import click
 from loguru import logger
 
-from clotho.settings import DB_PATH, configure_logger
+from clotho.settings import DATA_DIR, DB_PATH, SAVED_DIR, configure_logger
 from clotho.db import PageDatabase, Source
+from clotho.scrape import process_url
 from clotho.pipeline import (
     fetch_pending,
     fetch_urls,
@@ -197,10 +202,9 @@ def parse(reparse: bool) -> None:
 
 @cli.command()
 def status() -> None:
-    """Show pipeline-state counts, recent fetches, and failure summary."""
+    """Show pipeline-state counts and failure summary."""
     with PageDatabase(DB_PATH) as db:
         counts = db.status_counts()
-        recent = db.recent_fetches(limit=5)
         failures = db.fail_summary()
 
     click.echo(f"Archive: {DB_PATH}")
@@ -211,17 +215,98 @@ def status() -> None:
     click.echo(f"  parse rejected  {counts['parse_rejected']}")
     click.echo(f"  parsed          {counts['parsed']}")
 
-    if recent:
-        click.echo("\nRecent fetches:")
-        for page in recent:
-            # ISO timestamp trimmed to seconds for readability
-            fetched_at = (page.fetched_at or "")[:19]
-            click.echo(f"  {fetched_at}  {page.domain}  {page.title or page.url}")
-
     if failures:
         click.echo("\nFailures by domain:")
         for domain, reason, count in failures[:10]:
             click.echo(f"  {domain}: {reason} ({count})")
+
+
+@cli.command(name="list")
+@click.option(
+    "--n",
+    "limit",
+    type=click.IntRange(min=0),
+    default=20,
+    show_default=True,
+    help="Number of rows to show; 0 shows everything.",
+)
+@click.option(
+    "--reverse",
+    is_flag=True,
+    default=False,
+    help="Oldest first instead of newest first.",
+)
+def list_pages(limit: int, reverse: bool) -> None:
+    """List fetched pages, newest first: fetch time, domain, URL.
+
+    Columns are tab-separated so the output pipes cleanly into
+    grep/cut/awk, e.g.: clotho list --n 0 | grep medium.com
+    """
+    with PageDatabase(DB_PATH) as db:
+        pages = db.list_fetched(limit=limit or None, oldest_first=reverse)
+    for page in pages:
+        # ISO timestamp trimmed to seconds for readability
+        fetched_at = (page.fetched_at or "")[:19]
+        click.echo(f"{fetched_at}\t{page.domain}\t{page.url}")
+
+
+@cli.command()
+@click.argument("url")
+def cat(url: str) -> None:
+    """Print the archived markdown of URL to stdout."""
+    with PageDatabase(DB_PATH) as db:
+        page = db.get(url)
+        if page is None:
+            # The archive keys pages by processed URL; normalize the input
+            # the same way so e.g. #fragment variants still resolve
+            processed, _ = process_url(url)
+            if processed is not None and processed != url:
+                page = db.get(processed)
+    if page is None:
+        raise click.ClickException(f"Unknown URL: {url}")
+    if page.fail_reason:
+        raise click.ClickException(f"No markdown for {page.url}: {page.fail_reason}")
+    if not page.fetched:
+        raise click.ClickException(f"{page.url} is still pending. Run: clotho fetch")
+    if not page.parsed:
+        raise click.ClickException(
+            f"{page.url} is fetched but not parsed yet. Run: clotho parse"
+        )
+    md_path = SAVED_DIR / page.slug / "page.md"
+    if not md_path.exists():
+        raise click.ClickException(f"Markdown file missing on disk: {md_path}")
+    click.echo(md_path.read_text(encoding="utf-8"), nl=False)
+
+
+@cli.group(name="db")
+def db_group() -> None:
+    """Inspect or manage the database file."""
+
+
+@db_group.command(name="dir")
+def db_dir() -> None:
+    """Print the data directory that holds the database."""
+    click.echo(DATA_DIR)
+
+
+@db_group.command(name="remove")
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Delete without asking for confirmation.",
+)
+def db_remove(force: bool) -> None:
+    """Delete the SQLite database; archived files under saved/ are kept."""
+    if not DB_PATH.exists():
+        click.echo(f"No database at {DB_PATH}")
+        return
+    if not force:
+        click.confirm(f"Delete {DB_PATH}? All page/source tracking is lost", abort=True)
+    # The WAL sidecar files belong to the main file and must go with it
+    for suffix in ("", "-wal", "-shm"):
+        DB_PATH.with_name(DB_PATH.name + suffix).unlink(missing_ok=True)
+    click.echo(f"Deleted {DB_PATH}")
 
 
 if __name__ == "__main__":

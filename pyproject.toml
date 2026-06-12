@@ -3,7 +3,9 @@ name = "clotho"
 version = "0.1.0"
 description = "Your personal knowledge toolkit."
 readme = "README.md"
-requires-python = ">=3.13"
+# Capped below 3.13: zstandard fails to build there (no usable wheel),
+# breaking installs. Lift the cap once zstandard installs cleanly on 3.13.
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "aiofiles>=25.1.0", # Asynchronous file operations
     "click>=8.1.0", # CLI framework
@@ -14,7 +16,6 @@ dependencies = [
     "patchright>=1.60.0", # Undetected Playwright fork for scraping
     "liteparse>=2.0.3",
     "platformdirs>=4.10.0", # OS-appropriate user data directory
-    "zstandard>=0.23.0", # Ensure Python 3.13 compatibility
 ]
 
 [project.scripts]

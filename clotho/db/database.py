@@ -214,12 +214,19 @@ class PageDatabase:
         ).fetchone()
         return {key: row[key] for key in row.keys()}
 
-    def recent_fetches(self, limit: int = 10) -> list[Page]:
-        """Get up to `limit` fetched pages, newest first."""
+    def list_fetched(
+        self,
+        limit: int | None = None,
+        oldest_first: bool = False,
+    ) -> list[Page]:
+        """List fetched pages ordered by fetch time, newest first by
+        default. A limit of None returns every row."""
+        order = "ASC" if oldest_first else "DESC"
         rows = self._conn.execute(
             "SELECT * FROM pages WHERE fetched_at IS NOT NULL "
-            "ORDER BY fetched_at DESC LIMIT ?",
-            (limit,),
+            f"ORDER BY fetched_at {order} LIMIT ?",
+            # SQLite treats a negative LIMIT as "no limit"
+            (-1 if limit is None else limit,),
         ).fetchall()
         return [self._row_to_page(row) for row in rows]
 

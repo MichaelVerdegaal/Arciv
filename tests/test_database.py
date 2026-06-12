@@ -168,15 +168,36 @@ class TestStateQueries:
             "parsed": 0,
         }
 
-    def test_recent_fetches_newest_first_with_limit(self, db):
+    def test_list_fetched_newest_first_with_limit(self, db):
         db.upsert(_page("https://example.com/old", fetched_at="2026-06-01T00:00:00"))
         db.upsert(_page("https://example.com/mid", fetched_at="2026-06-05T00:00:00"))
         db.upsert(_page("https://example.com/new", fetched_at="2026-06-10T00:00:00"))
         db.upsert(_page("https://example.com/pending", fetched_at=None))
-        recent = db.recent_fetches(limit=2)
-        assert [p.url for p in recent] == [
+        fetched = db.list_fetched(limit=2)
+        assert [p.url for p in fetched] == [
             "https://example.com/new",
             "https://example.com/mid",
+        ]
+
+    def test_list_fetched_no_limit_returns_all_but_pending(self, db):
+        db.upsert(_page("https://example.com/old", fetched_at="2026-06-01T00:00:00"))
+        db.upsert(_page("https://example.com/new", fetched_at="2026-06-10T00:00:00"))
+        db.upsert(_page("https://example.com/pending", fetched_at=None))
+        fetched = db.list_fetched()
+        assert [p.url for p in fetched] == [
+            "https://example.com/new",
+            "https://example.com/old",
+        ]
+
+    def test_list_fetched_oldest_first(self, db):
+        db.upsert(_page("https://example.com/old", fetched_at="2026-06-01T00:00:00"))
+        db.upsert(_page("https://example.com/mid", fetched_at="2026-06-05T00:00:00"))
+        db.upsert(_page("https://example.com/new", fetched_at="2026-06-10T00:00:00"))
+        fetched = db.list_fetched(oldest_first=True)
+        assert [p.url for p in fetched] == [
+            "https://example.com/old",
+            "https://example.com/mid",
+            "https://example.com/new",
         ]
 
 
