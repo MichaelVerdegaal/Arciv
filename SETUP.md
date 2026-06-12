@@ -1,51 +1,46 @@
 # Setup
 
-How to set up the Clotho project locally.
+How to set up Clotho.
 
-
-## Installation
-### Requirements
+## Requirements
 
 - Python installed, of version as specified in `.python-version`.
 - [UV](https://docs.astral.sh/uv/) installed for package management
 
-## Steps
+## Install as a uv tool (recommended for usage)
+
+Clotho is a plain CLI tool — no container needed:
+
+```bash
+uv tool install git+https://github.com/MichaelVerdegaal/Clotho   # or: uv tool install . from a clone
+patchright install chrome   # browser engine used for fetching
+```
+
+After that `clotho` is on your PATH. Set `CLOTHO_DATA_DIR` (see below) so the archive has a
+fixed home regardless of where you run the command.
+
+## Develop from a clone
+
 1. `uv venv` to set up the virtual environment
 2. `source .venv/bin/activate` (Bash)
 3. `uv sync`
-4. `patchright install chrome` to install browser engine for Playwright. Use `--force` flag on
-   existing install error.
+4. `patchright install chrome` to install the browser engine for Playwright. Use `--force`
+   flag on existing install error.
+5. `uv run clotho --help`
 
 ## Configuration
 
-Create a `.env` file in the project root (see [.env.example](.env.example)) to point Clotho at
-your Obsidian daily notes:
-
-```
-CLOTHO_NOTES_PATH=/path/to/your/vault/Daily notes
-```
-
-Alternatively, pass `--dir` to `clotho fetch` per run. Everything else works out of the box —
-the browser user-agent pool refreshes itself on the first run.
-
-Optional overrides:
-
-- `CLOTHO_DATA_DIR` — where the SQLite database, archived pages, and logs live. Defaults to
-  `data/` in the repository root. Useful when the archive should live outside the repo (e.g. a
-  Docker volume or a synced drive).
-
-## Docker
-
-The image packages Python, UV, and the Chrome browser used for fetching. The archive itself
-stays on the host: `./data` is mounted into the container, and `CLOTHO_NOTES_PATH` from `.env`
-is mounted read-only at `/notes`.
+Everything works out of the box — the browser user-agent pool refreshes itself on the first
+run. Point Clotho at your notes by registering them as a source:
 
 ```bash
-docker compose build
-docker compose run --rm clotho fetch                          # full pipeline
-docker compose run --rm clotho fetch https://example.com/post # specific URLs
-docker compose run --rm clotho parse                          # re-parse archived HTML
+clotho add "/path/to/your/vault/Daily notes" notes
+clotho index notes
 ```
 
-The image targets `linux/amd64` because Google Chrome isn't published for ARM Linux; on Apple
-Silicon hosts Docker runs it under emulation.
+Optional override, via environment variable or a `.env` file (see
+[.env.example](.env.example)):
+
+- `CLOTHO_DATA_DIR` — where the SQLite database, archived pages, and logs live. Defaults to
+  `./data` relative to the working directory, which is fine when running from the repository
+  root; set it explicitly when Clotho is installed as a uv tool.

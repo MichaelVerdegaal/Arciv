@@ -1,10 +1,10 @@
-"""Web scraper that fetches, validates, converts, and archives pages.
+"""Fetch stage: download raw page content (HTML or PDF) to disk.
 
 Uses patchright (undetected Playwright fork) with Chrome in persistent-context
-mode for stealth. Each page goes through: fetch HTML → validate (block-page /
-size check) → convert to markdown via trafilatura → write HTML + MD to disk →
-record in DB. Raw text URLs (.md, .txt) skip HTML conversion entirely.
-PDF URLs are downloaded directly and parsed via liteparse.
+mode for stealth. Each page goes through: fetch HTML → write ``page.html`` to
+the slug folder → record in DB. PDF URLs are downloaded via direct HTTP and
+stored as ``page.pdf``. Validation and markdown conversion happen later, in
+the parse stage (see ``clotho.pipeline.parse``).
 """
 
 import asyncio
@@ -14,32 +14,27 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import aiofiles
-from liteparse import LiteParse
 from loguru import logger
 from patchright.async_api import TimeoutError as PlaywrightTimeoutError
 from patchright.async_api import async_playwright
 from patchright.sync_api import sync_playwright
 
 from clotho.db import Page, PageDatabase
-from clotho.parse import parse_html
 
 from .url_processor import (
     is_pdf_url,
-    is_raw_text_url,
     process_url,
     registered_domain,
     slug_for_url,
     split_url,
 )
 from .user_agents import random_user_agent
-from .validate import check_html
 
 TIMEOUT_MS = 30_000
 # Extra time to let JS-rendered pages (SPAs) finish loading after
 # domcontentloaded. Without it, content() can return an empty shell.
 NETWORKIDLE_MS = 3_000
 DEFAULT_CONCURRENCY = 8
-DEFAULT_MIN_WORDS = 150
 DEFAULT_MAX_RETRIES = 2
 BLOCKED_RESOURCE_TYPES = {"image", "stylesheet", "font"}
 
@@ -50,25 +45,23 @@ _TRANSIENT_ERRORS = (
     "net::ERR_CONNECTION_TIMED_OUT",
 )
 
-_pdf_parser = LiteParse(ocr_enabled=False, quiet=True)
-
 # Sentinel value returned by _fetch_sync when the browser triggers a download
 _DOWNLOAD_SENTINEL = "__DOWNLOAD__"
 
 
-class Scraper:
-    """Fetches web pages, validates content, and archives HTML + markdown.
+class Fetcher:
+    """Downloads web pages and archives the raw content on disk.
 
-    Combines fetching, validation, and conversion into a single pass.
-    Content is written to ``saved/<slug>/page.html`` and
-    ``saved/<slug>/page.md``.
+    HTML pages are written to ``saved/<slug>/page.html``, PDFs to
+    ``saved/<slug>/page.pdf``. Successful downloads are marked
+    ``fetched=1`` in the database; converting them to markdown is the
+    parse stage's job.
 
     Args:
         db: Database to store page records.
         saved_dir: Root directory for archived page folders.
         page_timeout: Playwright page load timeout in milliseconds.
         max_concurrency: Maximum concurrent page fetches for batch operations.
-        min_words: Minimum word count in markdown for a page to be accepted.
         max_retries: Maximum retry attempts for transient failures.
         headless: Run the browser without a visible window. Disable only when a
             site needs the extra stealth of a headed browser.
@@ -80,7 +73,6 @@ class Scraper:
         saved_dir: Path,
         page_timeout: int = TIMEOUT_MS,
         max_concurrency: int = DEFAULT_CONCURRENCY,
-        min_words: int = DEFAULT_MIN_WORDS,
         max_retries: int = DEFAULT_MAX_RETRIES,
         headless: bool = True,
     ):
@@ -88,7 +80,6 @@ class Scraper:
         self.saved_dir = saved_dir
         self.page_timeout = page_timeout
         self.max_concurrency = max_concurrency
-        self.min_words = min_words
         self.max_retries = max_retries
         self.headless = headless
         # User-Agent for raw HTTP (PDF) downloads, refreshed per session.
@@ -97,7 +88,7 @@ class Scraper:
         self._session_user_agent: str = random_user_agent()
 
     def _start_session(self) -> None:
-        """Pick a fresh User-Agent for the upcoming scraping session."""
+        """Pick a fresh User-Agent for the upcoming fetch session."""
         self._session_user_agent = random_user_agent()
         logger.debug(f"Session User-Agent: {self._session_user_agent}")
 
@@ -126,27 +117,38 @@ class Scraper:
         # Pending = not fetched AND no fail reason
         return not existing.fetched and existing.fail_reason is None
 
+    def _entry_for(self, processed_url: str, input_url: str) -> tuple[str, str, str]:
+        """Build the (original_url, domain, slug) triple for a URL.
+
+        Prefers the original_url already recorded by the index stage so a
+        fetch of an indexed page doesn't overwrite it with the processed URL.
+        """
+        existing = self.db.get(processed_url)
+        original_url = existing.original_url if existing else input_url
+        domain = registered_domain(processed_url) or split_url(processed_url)[0]
+        slug = slug_for_url(processed_url)
+        return original_url, domain, slug
+
     def _store_success(
         self,
         processed_url: str,
         original_url: str,
         domain: str,
         slug: str,
-        title: str | None,
-        author: str | None,
-        word_count: int,
+        content_type: str,
     ) -> Page:
-        """Record a successful fetch+parse in the database."""
+        """Record a successful fetch in the database.
+
+        Title, author, word count, and parsed_at are reset — the parse
+        stage fills them in once the fresh content has been converted.
+        """
         page = Page(
             url=processed_url,
             original_url=original_url,
             domain=domain,
             slug=slug,
-            fetched=True,
-            title=title,
-            author=author,
-            word_count=word_count,
-            scraped_at=datetime.now(timezone.utc).isoformat(),
+            content_type=content_type,
+            fetched_at=datetime.now(timezone.utc).isoformat(),
         )
         self.db.upsert(page)
         return page
@@ -159,13 +161,12 @@ class Scraper:
         slug: str,
         fail_reason: str,
     ) -> None:
-        """Record a fetch/validation failure in the database."""
+        """Record a fetch failure in the database."""
         page = Page(
             url=processed_url,
             original_url=original_url,
             domain=domain,
             slug=slug,
-            fetched=False,
             fail_reason=fail_reason,
         )
         self.db.upsert(page)
@@ -189,28 +190,24 @@ class Scraper:
         """Check if a failure reason indicates a transient/retryable error."""
         return any(marker in reason for marker in _TRANSIENT_ERRORS)
 
-    def _save_files_sync(self, slug: str, html: str, markdown: str) -> None:
-        """Write HTML and markdown files to the slug directory."""
+    def _save_html_sync(self, slug: str, html: str) -> None:
+        """Write the raw HTML file to the slug directory."""
         slug_dir = self.saved_dir / slug
         slug_dir.mkdir(parents=True, exist_ok=True)
         (slug_dir / "page.html").write_text(html, encoding="utf-8")
-        (slug_dir / "page.md").write_text(markdown, encoding="utf-8")
 
-    @staticmethod
-    async def _save_files_async(slug_dir: Path, html: str, markdown: str) -> None:
-        """Write HTML and markdown files to the slug directory (async)."""
+    async def _save_html_async(self, slug: str, html: str) -> None:
+        """Write the raw HTML file to the slug directory (async)."""
+        slug_dir = self.saved_dir / slug
         slug_dir.mkdir(parents=True, exist_ok=True)
         async with aiofiles.open(slug_dir / "page.html", "w", encoding="utf-8") as f:
             await f.write(html)
-        async with aiofiles.open(slug_dir / "page.md", "w", encoding="utf-8") as f:
-            await f.write(markdown)
 
-    def _save_pdf_sync(self, slug: str, pdf_bytes: bytes, markdown: str) -> None:
-        """Write PDF and markdown files to the slug directory."""
+    def _save_pdf_sync(self, slug: str, pdf_bytes: bytes) -> None:
+        """Write the raw PDF file to the slug directory."""
         slug_dir = self.saved_dir / slug
         slug_dir.mkdir(parents=True, exist_ok=True)
         (slug_dir / "page.pdf").write_bytes(pdf_bytes)
-        (slug_dir / "page.md").write_text(markdown, encoding="utf-8")
 
     def _download_pdf(self, url: str) -> bytes | None:
         """Download a PDF file via HTTP.
@@ -231,168 +228,37 @@ class Scraper:
             logger.warning(f"PDF download failed {url}: {e}")
             return None
 
-    def _process_pdf(
+    def _fetch_pdf(
         self,
-        pdf_bytes: bytes,
         processed_url: str,
         original_url: str,
         domain: str,
         slug: str,
+        fail_reason: str = "PDF download failed",
     ) -> Page | None:
-        """Parse PDF bytes with liteparse, validate, and archive.
-
-        Returns a Page on success, None on failure (failure is recorded in DB).
-        """
-        try:
-            result = _pdf_parser.parse(pdf_bytes)
-        except Exception as e:
-            reason = f"PDF parse error: {e}"
-            self._store_failure(processed_url, original_url, domain, slug, reason)
-            logger.warning(f"Rejected {processed_url}: {reason}")
+        """Download a PDF, save it to disk, and record the outcome."""
+        pdf_bytes = self._download_pdf(processed_url)
+        if pdf_bytes is None:
+            self._store_failure(processed_url, original_url, domain, slug, fail_reason)
             return None
-
-        text = result.text.strip()
-        word_count = len(text.split())
-
-        if word_count < self.min_words:
-            reason = f"too short ({word_count} words)"
-            self._store_failure(processed_url, original_url, domain, slug, reason)
-            logger.warning(f"Rejected {processed_url}: {reason}")
-            return None
-
-        self._save_pdf_sync(slug, pdf_bytes, text)
-
-        page = self._store_success(
-            processed_url,
-            original_url,
-            domain,
-            slug,
-            title=None,
-            author=None,
-            word_count=word_count,
-        )
-        logger.info(f"Archived {processed_url} (PDF, {word_count} words)")
+        self._save_pdf_sync(slug, pdf_bytes)
+        page = self._store_success(processed_url, original_url, domain, slug, "pdf")
+        logger.info(f"Fetched {processed_url} (PDF, {len(pdf_bytes)} bytes)")
         return page
-
-    def _process_html(
-        self,
-        html: str,
-        processed_url: str,
-        original_url: str,
-        domain: str,
-        slug: str,
-    ) -> Page | None:
-        """Validate HTML, convert to markdown, and archive.
-
-        For raw text URLs (.md, .txt), the content is stored directly
-        without HTML conversion.
-
-        Returns a Page on success, None on failure (failure is recorded in DB).
-        """
-        # Raw text URLs: store content directly, skip HTML validation/conversion
-        if is_raw_text_url(processed_url):
-            # The "html" is actually plain text from the browser's rendering
-            word_count = len(html.split())
-            if word_count < self.min_words:
-                reason = f"too short ({word_count} words)"
-                self._store_failure(processed_url, original_url, domain, slug, reason)
-                logger.warning(f"Rejected {processed_url}: {reason}")
-                return None
-
-            self._save_files_sync(slug, html, html)
-            page = self._store_success(
-                processed_url,
-                original_url,
-                domain,
-                slug,
-                title=None,
-                author=None,
-                word_count=word_count,
-            )
-            logger.info(f"Archived {processed_url} (raw text, {word_count} words)")
-            return page
-
-        # Validate HTML
-        block_reason = check_html(html)
-        if block_reason:
-            self._store_failure(processed_url, original_url, domain, slug, block_reason)
-            logger.warning(f"Rejected {processed_url}: {block_reason}")
-            return None
-
-        # Convert to markdown
-        result = parse_html(html, clean=True)
-        if result is None:
-            self._store_failure(
-                processed_url, original_url, domain, slug, "extraction failed"
-            )
-            logger.warning(f"Rejected {processed_url}: extraction failed")
-            return None
-
-        # Gate on the code-inclusive word count (max of stored vs. full) so
-        # code-heavy pages with real prose aren't rejected as "too short".
-        gate_count = max(result.word_count, result.full_word_count)
-        if gate_count < self.min_words:
-            reason = f"too short ({gate_count} words)"
-            self._store_failure(processed_url, original_url, domain, slug, reason)
-            logger.warning(f"Rejected {processed_url}: {reason}")
-            return None
-
-        # Write files to disk
-        self._save_files_sync(slug, html, result.md_content)
-
-        # Record success
-        page = self._store_success(
-            processed_url,
-            original_url,
-            domain,
-            slug,
-            result.title,
-            result.author,
-            result.word_count,
-        )
-        logger.info(f"Archived {processed_url} ({result.word_count} words)")
-        return page
-
-    def reparse_existing(self) -> int:
-        """Re-parse all successfully fetched pages from their archived HTML.
-
-        Reads page.html from disk and re-runs the conversion pipeline,
-        updating the markdown file and database record. Useful after
-        changing trafilatura settings or cleanup rules.
-
-        Returns:
-            Number of pages successfully re-parsed.
-        """
-        count = 0
-        for page in self.db.get_all():
-            if not page.fetched:
-                continue
-            html_path = self.saved_dir / page.slug / "page.html"
-            if not html_path.exists():
-                continue
-
-            html = html_path.read_text(encoding="utf-8")
-            result = self._process_html(
-                html, page.url, page.original_url, page.domain, page.slug
-            )
-            if result is not None:
-                count += 1
-        logger.info(f"Re-parsed {count} pages from existing HTML")
-        return count
 
     # =========================================================================
     # SYNCHRONOUS - Single page, debuggable
     # =========================================================================
 
-    def scrape(self, url: str, refetch: bool = False) -> Page | None:
-        """Fetch, validate, convert, and archive a single URL synchronously.
+    def fetch(self, url: str, refetch: bool = False) -> Page | None:
+        """Fetch a single URL synchronously and archive its raw content.
 
         Args:
             url: The URL to fetch.
             refetch: Re-download even if already fetched.
 
         Returns:
-            Page if archived successfully, None if skipped/failed.
+            Page if fetched successfully, None if skipped/failed.
         """
         self._start_session()
         processed_url, skip_reason = process_url(url)
@@ -400,42 +266,36 @@ class Scraper:
             logger.warning(f"Skipped {url}: {skip_reason}")
             return None
 
-        domain = registered_domain(processed_url) or split_url(processed_url)[0]
-        slug = slug_for_url(processed_url)
+        original_url, domain, slug = self._entry_for(processed_url, url)
 
         if not self._needs_fetch(processed_url, refetch):
             return self.db.get(processed_url)
 
-        # PDF URLs: download directly and parse with liteparse
+        # PDF URLs: download directly, no browser needed
         if is_pdf_url(processed_url):
-            pdf_bytes = self._download_pdf(processed_url)
-            if pdf_bytes is None:
-                self._store_failure(
-                    processed_url, url, domain, slug, "PDF download failed"
-                )
-                return None
-            return self._process_pdf(pdf_bytes, processed_url, url, domain, slug)
+            return self._fetch_pdf(processed_url, original_url, domain, slug)
 
         html = self._fetch_sync(processed_url)
         if html is None:
-            self._store_failure(processed_url, url, domain, slug, "fetch failed")
+            self._store_failure(
+                processed_url, original_url, domain, slug, "fetch failed"
+            )
             return None
 
         # Browser got a download trigger instead of HTML — try as PDF
         if html == _DOWNLOAD_SENTINEL:
-            pdf_bytes = self._download_pdf(processed_url)
-            if pdf_bytes is None:
-                self._store_failure(
-                    processed_url,
-                    url,
-                    domain,
-                    slug,
-                    "download triggered but PDF fetch failed",
-                )
-                return None
-            return self._process_pdf(pdf_bytes, processed_url, url, domain, slug)
+            return self._fetch_pdf(
+                processed_url,
+                original_url,
+                domain,
+                slug,
+                fail_reason="download triggered but PDF fetch failed",
+            )
 
-        return self._process_html(html, processed_url, url, domain, slug)
+        self._save_html_sync(slug, html)
+        page = self._store_success(processed_url, original_url, domain, slug, "html")
+        logger.info(f"Fetched {processed_url}")
+        return page
 
     def _fetch_sync(self, url: str) -> str | None:
         """Fetch HTML content synchronously using patchright.
@@ -496,27 +356,27 @@ class Scraper:
     # ASYNC BATCH - Multiple pages with concurrency
     # =========================================================================
 
-    def scrape_batch(self, urls: list[str], refetch: bool = False) -> list[Page]:
-        """Fetch, validate, convert, and archive multiple URLs concurrently.
+    def fetch_batch(self, urls: list[str], refetch: bool = False) -> list[Page]:
+        """Fetch multiple URLs concurrently and archive their raw content.
 
         Args:
             urls: List of URLs to fetch.
             refetch: Re-download even if already fetched.
 
         Returns:
-            List of successfully archived Pages.
+            List of successfully fetched Pages.
         """
-        return asyncio.run(self._scrape_batch_async(urls, refetch))
+        return asyncio.run(self._fetch_batch_async(urls, refetch))
 
-    async def _scrape_batch_async(
+    async def _fetch_batch_async(
         self,
         urls: list[str],
         refetch: bool,
     ) -> list[Page]:
         """Process URLs, skip cached, fetch the rest concurrently.
 
-        PDF URLs are downloaded directly (no browser needed) and parsed
-        with liteparse. HTML URLs go through patchright.
+        PDF URLs are downloaded directly (no browser needed). HTML URLs go
+        through patchright.
         """
         self._start_session()
         to_fetch_html: list[tuple[str, str, str, str]] = []
@@ -536,9 +396,8 @@ class Scraper:
             if not self._needs_fetch(processed_url, refetch):
                 continue
 
-            domain = registered_domain(processed_url) or split_url(processed_url)[0]
-            slug = slug_for_url(processed_url)
-            entry = (processed_url, url, domain, slug)
+            original_url, domain, slug = self._entry_for(processed_url, url)
+            entry = (processed_url, original_url, domain, slug)
 
             if is_pdf_url(processed_url):
                 to_fetch_pdf.append(entry)
@@ -547,17 +406,9 @@ class Scraper:
 
         results: list[Page] = []
 
-        # Process PDFs (no browser needed, CPU-bound parsing)
+        # Process PDFs (no browser needed)
         for processed_url, original_url, domain, slug in to_fetch_pdf:
-            pdf_bytes = self._download_pdf(processed_url)
-            if pdf_bytes is None:
-                self._store_failure(
-                    processed_url, original_url, domain, slug, "PDF download failed"
-                )
-                continue
-            page = self._process_pdf(
-                pdf_bytes, processed_url, original_url, domain, slug
-            )
+            page = self._fetch_pdf(processed_url, original_url, domain, slug)
             if page is not None:
                 results.append(page)
 
@@ -605,7 +456,7 @@ class Scraper:
         domain: str,
         slug: str,
     ) -> Page | None:
-        """Fetch, validate, convert, and archive a single URL (async).
+        """Fetch a single URL (async) and archive its raw HTML.
 
         Retries transient errors (timeouts, connection resets) up to
         max_retries times before recording a failure.
@@ -619,7 +470,7 @@ class Scraper:
             slug: Folder name for archival.
 
         Returns:
-            Page if archived successfully, None on failure.
+            Page if fetched successfully, None on failure.
         """
         html: str | None = None
         last_reason = ""
@@ -656,23 +507,13 @@ class Scraper:
                     # Browser triggered a file download — try the PDF path
                     if "Download is starting" in last_reason:
                         await pw_page.close()
-                        pdf_bytes = self._download_pdf(processed_url)
-                        if pdf_bytes is not None:
-                            return self._process_pdf(
-                                pdf_bytes, processed_url, original_url, domain, slug
-                            )
-                        self._store_failure(
+                        return self._fetch_pdf(
                             processed_url,
                             original_url,
                             domain,
                             slug,
-                            "download triggered but PDF fetch failed",
+                            fail_reason="download triggered but PDF fetch failed",
                         )
-                        logger.warning(
-                            f"Fetch error {processed_url}: download triggered "
-                            f"but PDF fetch failed"
-                        )
-                        return None
                 finally:
                     if not pw_page.is_closed():
                         await pw_page.close()
@@ -692,66 +533,7 @@ class Scraper:
             )
             await asyncio.sleep(2 * attempt)
 
-        # Raw text URLs: store directly, skip HTML validation/conversion
-        if is_raw_text_url(processed_url):
-            word_count = len(html.split())
-            if word_count < self.min_words:
-                reason = f"too short ({word_count} words)"
-                self._store_failure(processed_url, original_url, domain, slug, reason)
-                logger.warning(f"Rejected {processed_url}: {reason}")
-                return None
-            slug_dir = self.saved_dir / slug
-            await self._save_files_async(slug_dir, html, html)
-            page = self._store_success(
-                processed_url,
-                original_url,
-                domain,
-                slug,
-                title=None,
-                author=None,
-                word_count=word_count,
-            )
-            logger.info(f"Archived {processed_url} (raw text, {word_count} words)")
-            return page
-
-        # Validate, convert, and archive (CPU-bound, outside semaphore)
-        block_reason = check_html(html)
-        if block_reason:
-            self._store_failure(processed_url, original_url, domain, slug, block_reason)
-            logger.warning(f"Rejected {processed_url}: {block_reason}")
-            return None
-
-        result = parse_html(html, clean=True)
-        if result is None:
-            self._store_failure(
-                processed_url, original_url, domain, slug, "extraction failed"
-            )
-            logger.warning(f"Rejected {processed_url}: extraction failed")
-            return None
-
-        # Gate on the code-inclusive word count (max of stored vs. full) so
-        # code-heavy pages with real prose aren't rejected as "too short".
-        # Keep in sync with the gate in _process_html.
-        gate_count = max(result.word_count, result.full_word_count)
-        if gate_count < self.min_words:
-            reason = f"too short ({gate_count} words)"
-            self._store_failure(processed_url, original_url, domain, slug, reason)
-            logger.warning(f"Rejected {processed_url}: {reason}")
-            return None
-
-        # Write files to disk
-        slug_dir = self.saved_dir / slug
-        await self._save_files_async(slug_dir, html, result.md_content)
-
-        # Record success
-        page = self._store_success(
-            processed_url,
-            original_url,
-            domain,
-            slug,
-            result.title,
-            result.author,
-            result.word_count,
-        )
-        logger.info(f"Archived {processed_url} ({result.word_count} words)")
+        await self._save_html_async(slug, html)
+        page = self._store_success(processed_url, original_url, domain, slug, "html")
+        logger.info(f"Fetched {processed_url}")
         return page

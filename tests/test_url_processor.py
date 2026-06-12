@@ -16,6 +16,9 @@ from clotho.scrape.url_processor import (
 
 _SLUG_RE = re.compile(r"^.+-[0-9a-f]{8}$")
 
+# Characters that are path separators or illegal in Windows directory names
+_UNSAFE_FS_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f\s]')
+
 
 class TestProcessUrl:
     """Behaviour of the top-level process_url dispatcher."""
@@ -117,10 +120,37 @@ class TestProcessUrl:
         processed, _ = process_url(url)
         assert processed == url
 
+    def test_host_case_variants_dedupe_to_same_url(self):
+        lower, _ = process_url("https://example.com/Path")
+        upper, _ = process_url("https://EXAMPLE.com/Path")
+        assert lower == upper
+        # The path is case-sensitive and must survive untouched
+        assert "/Path" in lower
+
+    def test_empty_host_is_skipped(self):
+        processed, status = process_url("https://")
+        assert processed is None
+        assert "host" in status
+
+    def test_malformed_url_is_skipped_not_raised(self):
+        # urlparse raises ValueError on unclosed IPv6 brackets; one broken
+        # link in a note must not crash the whole index run
+        processed, _ = process_url("https://[")
+        assert processed is None
+
     @given(st.text(min_size=1).filter(lambda s: not s.startswith("https://")))
     def test_anything_not_https_returns_none(self, value):
         processed, _ = process_url(value)
         assert processed is None
+
+    @given(st.text())
+    def test_never_raises_and_output_is_https_or_none(self, value):
+        """process_url is total: any input (including https:// followed by
+        garbage) yields (None, reason) or a https URL — never an exception."""
+        processed, status = process_url(f"https://{value}")
+        assert isinstance(status, str)
+        if processed is not None:
+            assert processed.startswith("https://")
 
 
 class TestSplitUrl:
@@ -170,7 +200,24 @@ class TestSlug:
             "https://example.com/b"
         )
 
-    @given(st.text(min_size=1, max_size=200))
-    def test_slug_always_well_formed(self, path):
-        slug = slug_for_url(f"https://example.com/{path}")
+    def test_host_port_does_not_leak_into_slug(self):
+        # ":" is illegal in Windows directory names; hosts without a public
+        # suffix fall back to the raw netloc, which can carry a port
+        slug = slug_for_url("https://intranet:8080/page")
+        assert ":" not in slug
+
+    @given(
+        host=st.text(
+            alphabet=st.characters(blacklist_characters="/#?@", min_codepoint=33),
+            min_size=1,
+            max_size=40,
+        ),
+        path=st.text(max_size=200),
+    )
+    def test_slug_is_always_a_safe_directory_name(self, host, path):
+        """Slugs become directory names under saved/, so for ANY url they
+        must be non-empty, end in the 8-hex hash, and contain no characters
+        that are unsafe on Linux or Windows filesystems."""
+        slug = slug_for_url(f"https://{host}/{path}")
         assert _SLUG_RE.match(slug)
+        assert not _UNSAFE_FS_CHARS_RE.search(slug)

@@ -1,53 +1,74 @@
-"""SQLite database for storing scraped page data."""
+"""SQLite database for tracked pages, indexed links, and sources."""
 
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Self
 
-from .models import Page
+from .models import Page, Source
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS pages (
-    url             TEXT PRIMARY KEY,
-    original_url    TEXT NOT NULL,
-    domain          TEXT NOT NULL DEFAULT '',
-    slug            TEXT NOT NULL DEFAULT '',
-    fetched         INTEGER NOT NULL DEFAULT 0,
-    fail_reason     TEXT,
-    title           TEXT,
-    author          TEXT,
-    word_count      INTEGER NOT NULL DEFAULT 0,
-    scraped_at      TEXT
+    url          TEXT PRIMARY KEY,
+    original_url TEXT NOT NULL,
+    domain       TEXT NOT NULL DEFAULT '',
+    slug         TEXT NOT NULL DEFAULT '',
+    content_type TEXT,
+    title        TEXT,
+    author       TEXT,
+    word_count   INTEGER NOT NULL DEFAULT 0,
+    fail_reason  TEXT,
+    added_at     TEXT NOT NULL,
+    fetched_at   TEXT,
+    parsed_at    TEXT
 );
 
-CREATE TABLE IF NOT EXISTS page_sources (
-    url       TEXT NOT NULL REFERENCES pages(url),
-    note_name TEXT NOT NULL,
-    PRIMARY KEY (url, note_name)
+CREATE TABLE IF NOT EXISTS sources (
+    name     TEXT PRIMARY KEY,
+    path     TEXT NOT NULL,
+    added_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS links (
+    url         TEXT NOT NULL REFERENCES pages(url),
+    file_path   TEXT NOT NULL,
+    source_name TEXT REFERENCES sources(name) ON DELETE SET NULL,
+    indexed_at  TEXT NOT NULL,
+    PRIMARY KEY (url, file_path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_links_file_path ON links(file_path);
 """
 
+# added_at is deliberately absent from the update clause: it marks when the
+# URL first entered the database and must survive refetches.
 _UPSERT_SQL = """\
 INSERT INTO pages (
-    url, original_url, domain, slug,
-    fetched, fail_reason, title, author,
-    word_count, scraped_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    url, original_url, domain, slug, content_type,
+    title, author, word_count, fail_reason,
+    added_at, fetched_at, parsed_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(url) DO UPDATE SET
     original_url = excluded.original_url,
     domain       = excluded.domain,
     slug         = excluded.slug,
-    fetched      = excluded.fetched,
-    fail_reason  = excluded.fail_reason,
+    content_type = excluded.content_type,
     title        = excluded.title,
     author       = excluded.author,
     word_count   = excluded.word_count,
-    scraped_at   = excluded.scraped_at;
+    fail_reason  = excluded.fail_reason,
+    fetched_at   = excluded.fetched_at,
+    parsed_at    = excluded.parsed_at;
 """
 
 
+def _now() -> str:
+    """Current UTC time as an ISO string."""
+    return datetime.now(timezone.utc).isoformat()
+
+
 class PageDatabase:
-    """SQLite-backed storage for scraped pages and their source notes.
+    """SQLite-backed storage for pages, indexed links, and sources.
 
     Use as a context manager to ensure the connection is closed:
 
@@ -64,7 +85,10 @@ class PageDatabase:
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(_SCHEMA)
+        # executescript commits and resets pragmas set before it
+        self._conn.execute("PRAGMA foreign_keys=ON")
 
     def close(self) -> None:
         """Close the database connection."""
@@ -86,18 +110,23 @@ class PageDatabase:
             original_url=row["original_url"],
             domain=row["domain"],
             slug=row["slug"],
-            fetched=bool(row["fetched"]),
-            fail_reason=row["fail_reason"],
+            content_type=row["content_type"],
             title=row["title"],
             author=row["author"],
             word_count=row["word_count"],
-            scraped_at=row["scraped_at"],
+            fail_reason=row["fail_reason"],
+            added_at=row["added_at"],
+            fetched_at=row["fetched_at"],
+            parsed_at=row["parsed_at"],
         )
 
     # -- page CRUD --
 
     def upsert(self, page: Page) -> None:
         """Insert or update a page.
+
+        ``added_at`` is only written on first insert; updates keep the
+        original value.
 
         Args:
             page: The page to insert or update.
@@ -109,12 +138,14 @@ class PageDatabase:
                 page.original_url,
                 page.domain,
                 page.slug,
-                int(page.fetched),
-                page.fail_reason,
+                page.content_type,
                 page.title,
                 page.author,
                 page.word_count,
-                page.scraped_at,
+                page.fail_reason,
+                page.added_at or _now(),
+                page.fetched_at,
+                page.parsed_at,
             ),
         )
         self._conn.commit()
@@ -122,15 +153,18 @@ class PageDatabase:
     def ensure_pages(self, url_entries: list[tuple[str, str, str, str]]) -> None:
         """Create pending page entries for URLs not yet in the database.
 
-        Existing pages are left unchanged.
+        Existing pages are left unchanged. New pages get ``added_at`` set
+        to the current time.
 
         Args:
             url_entries: List of (url, original_url, domain, slug) tuples.
         """
+        added_at = _now()
         self._conn.executemany(
-            "INSERT OR IGNORE INTO pages (url, original_url, domain, slug) "
-            "VALUES (?, ?, ?, ?)",
-            url_entries,
+            "INSERT OR IGNORE INTO pages "
+            "(url, original_url, domain, slug, added_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [entry + (added_at,) for entry in url_entries],
         )
         self._conn.commit()
 
@@ -147,13 +181,36 @@ class PageDatabase:
         return self._row_to_page(row) if row else None
 
     def get_unfetched(self) -> list[Page]:
-        """Get all pages that haven't been attempted yet.
+        """Get all pages that haven't been fetch-attempted yet.
 
         Returns:
-            Pages with fetched=0 and no fail_reason (pending).
+            Pages with no fetched_at and no fail_reason (pending).
         """
         rows = self._conn.execute(
-            "SELECT * FROM pages WHERE fetched = 0 AND fail_reason IS NULL"
+            "SELECT * FROM pages WHERE fetched_at IS NULL AND fail_reason IS NULL"
+        ).fetchall()
+        return [self._row_to_page(row) for row in rows]
+
+    def get_unparsed(self) -> list[Page]:
+        """Get all fetched pages that still need a parse attempt.
+
+        Returns:
+            Pages with fetched_at set, no parsed_at, and no fail_reason.
+        """
+        rows = self._conn.execute(
+            "SELECT * FROM pages WHERE fetched_at IS NOT NULL "
+            "AND parsed_at IS NULL AND fail_reason IS NULL"
+        ).fetchall()
+        return [self._row_to_page(row) for row in rows]
+
+    def get_fetched(self) -> list[Page]:
+        """Get all pages with raw content on disk (parse-rejected included).
+
+        Returns:
+            Pages with fetched_at set.
+        """
+        rows = self._conn.execute(
+            "SELECT * FROM pages WHERE fetched_at IS NOT NULL"
         ).fetchall()
         return [self._row_to_page(row) for row in rows]
 
@@ -168,7 +225,7 @@ class PageDatabase:
         return row["n"]
 
     def fail_summary(self) -> list[tuple[str | None, str, int]]:
-        """Summarize failures grouped by domain and reason.
+        """Summarize fetch and parse failures grouped by domain and reason.
 
         Returns:
             List of (domain, fail_reason, count) tuples, ordered by count
@@ -176,86 +233,145 @@ class PageDatabase:
         """
         rows = self._conn.execute(
             "SELECT domain, fail_reason, COUNT(*) AS n "
-            "FROM pages WHERE fetched = 0 AND fail_reason IS NOT NULL "
+            "FROM pages WHERE fail_reason IS NOT NULL "
             "GROUP BY domain, fail_reason ORDER BY n DESC"
         ).fetchall()
         return [(row["domain"], row["fail_reason"], row["n"]) for row in rows]
 
-    def prune_orphans(self, canonical_urls: set[str]) -> int:
-        """Delete failed rows whose URLs are no longer in the canonical set.
+    # -- indexed links --
 
-        Only deletes rows where ``fetched = 0`` (never successfully archived)
-        AND the URL is absent from the freshly-extracted canonical set. This
-        clears stale rows from old rewrites or broken-URL extractions without
-        ever touching archived content.
+    def replace_links_for_files(
+        self,
+        file_paths: list[str],
+        link_entries: list[tuple[str, str, str | None, str]],
+    ) -> None:
+        """Replace the link rows of re-indexed files with fresh entries.
 
-        Args:
-            canonical_urls: The current set of processed URLs from notes.
-
-        Returns:
-            Number of rows deleted.
-        """
-        # Fetch all failed URLs
-        rows = self._conn.execute(
-            "SELECT url FROM pages WHERE fetched = 0 AND fail_reason IS NOT NULL"
-        ).fetchall()
-
-        to_delete = [row["url"] for row in rows if row["url"] not in canonical_urls]
-
-        if to_delete:
-            self._conn.executemany(
-                "DELETE FROM pages WHERE url = ?",
-                [(url,) for url in to_delete],
-            )
-            self._conn.commit()
-
-        return len(to_delete)
-
-    # -- source notes --
-
-    def rebuild_sources(self, url_to_notes: dict[str, list[str]]) -> None:
-        """Replace all page_sources with the current note-to-URL mapping.
-
-        Clears the entire page_sources table and repopulates from the
-        provided mapping. This ensures removed links in notes are reflected
-        in the database.
+        Deletes every link row belonging to the given files, then inserts
+        the freshly extracted entries. Links found in files outside this
+        set are untouched, so indexing one source never clobbers another.
 
         Args:
-            url_to_notes: Mapping of processed_url -> list of note filenames.
+            file_paths: Full normalized paths of the files that were indexed.
+            link_entries: List of (url, file_path, source_name, indexed_at)
+                tuples. source_name is None for ad-hoc files outside any
+                registered source.
         """
-        self._conn.execute("DELETE FROM page_sources")
         self._conn.executemany(
-            "INSERT OR IGNORE INTO page_sources (url, note_name) VALUES (?, ?)",
-            [(url, note) for url, notes in url_to_notes.items() for note in notes],
+            "DELETE FROM links WHERE file_path = ?",
+            [(path,) for path in file_paths],
+        )
+        self._conn.executemany(
+            "INSERT OR REPLACE INTO links "
+            "(url, file_path, source_name, indexed_at) "
+            "VALUES (?, ?, ?, ?)",
+            link_entries,
         )
         self._conn.commit()
 
-    def get_sources(self, url: str) -> list[str]:
-        """Get source note filenames for a URL.
+    def get_files_for_url(self, url: str) -> list[str]:
+        """Get the files a URL was indexed from.
 
         Args:
             url: The processed/normalized URL.
 
         Returns:
-            Sorted list of note filenames that reference this URL.
+            Sorted list of full normalized file paths containing the URL.
         """
         rows = self._conn.execute(
-            "SELECT note_name FROM page_sources WHERE url = ? ORDER BY note_name",
+            "SELECT file_path FROM links WHERE url = ? ORDER BY file_path",
             (url,),
         ).fetchall()
-        return [row["note_name"] for row in rows]
+        return [row["file_path"] for row in rows]
 
-    def get_urls_for_note(self, note_name: str) -> list[str]:
-        """Get all URLs referenced by a specific note.
+    def get_urls_for_file(self, file_path: str) -> list[str]:
+        """Get all URLs indexed from a specific file.
 
         Args:
-            note_name: The note filename.
+            file_path: Full normalized path of the file.
 
         Returns:
-            List of processed URLs referenced by the note.
+            Sorted list of processed URLs found in the file.
         """
         rows = self._conn.execute(
-            "SELECT url FROM page_sources WHERE note_name = ? ORDER BY url",
-            (note_name,),
+            "SELECT url FROM links WHERE file_path = ? ORDER BY url",
+            (file_path,),
         ).fetchall()
         return [row["url"] for row in rows]
+
+    def get_urls_for_source(self, source_name: str) -> list[str]:
+        """Get all URLs indexed from a registered source.
+
+        Args:
+            source_name: Name of the registered source.
+
+        Returns:
+            Sorted list of distinct processed URLs indexed from the source.
+        """
+        rows = self._conn.execute(
+            "SELECT DISTINCT url FROM links WHERE source_name = ? ORDER BY url",
+            (source_name,),
+        ).fetchall()
+        return [row["url"] for row in rows]
+
+    # -- sources --
+
+    def add_source(self, source: Source) -> bool:
+        """Register a source.
+
+        Args:
+            source: The source to register.
+
+        Returns:
+            True if added, False if a source with that name already exists.
+        """
+        try:
+            self._conn.execute(
+                "INSERT INTO sources (name, path, added_at) VALUES (?, ?, ?)",
+                (source.name, source.path, source.added_at),
+            )
+        except sqlite3.IntegrityError:
+            return False
+        self._conn.commit()
+        return True
+
+    def remove_source(self, name: str) -> bool:
+        """Remove a source by name.
+
+        Indexed links and pages are kept; their ``source_name`` is set to
+        NULL via the foreign key. Removing a source only stops it from
+        being indexed in the future.
+
+        Args:
+            name: The source name.
+
+        Returns:
+            True if a source was removed, False if the name was unknown.
+        """
+        cursor = self._conn.execute("DELETE FROM sources WHERE name = ?", (name,))
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def get_source(self, name: str) -> Source | None:
+        """Get a source by name.
+
+        Args:
+            name: The source name.
+
+        Returns:
+            The Source if found, None otherwise.
+        """
+        row = self._conn.execute(
+            "SELECT * FROM sources WHERE name = ?", (name,)
+        ).fetchone()
+        if row is None:
+            return None
+        return Source(name=row["name"], path=row["path"], added_at=row["added_at"])
+
+    def list_sources(self) -> list[Source]:
+        """List all registered sources, ordered by name."""
+        rows = self._conn.execute("SELECT * FROM sources ORDER BY name").fetchall()
+        return [
+            Source(name=row["name"], path=row["path"], added_at=row["added_at"])
+            for row in rows
+        ]

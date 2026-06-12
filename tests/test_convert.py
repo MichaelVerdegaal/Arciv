@@ -2,7 +2,7 @@
 
 import itertools
 
-from clotho.parse.convert import (
+from clotho.convert.convert import (
     ConversionResult,
     count_words,
     extract_metadata,

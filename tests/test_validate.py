@@ -1,6 +1,6 @@
 """Tests for HTML content validation (block pages, size guards)."""
 
-from clotho.scrape.validate import (
+from clotho.convert.validate import (
     MAX_HTML_BYTES,
     MIN_HTML_BYTES,
     check_html,

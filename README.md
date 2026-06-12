@@ -3,9 +3,9 @@
 [![CI](https://github.com/MichaelVerdegaal/Clotho/actions/workflows/ci.yml/badge.svg)](https://github.com/MichaelVerdegaal/Clotho/actions/workflows/ci.yml)
 
 Clotho is your personal archive for reading material. The blog posts, research papers, and
-documentation you collect — linked in your Obsidian daily notes or fed in directly — are fetched
-and stored as clean, searchable markdown you can trust years from now. Reading material only: not
-books, not videos.
+documentation you collect — linked in your notes or fed in directly — are fetched and stored
+as clean, searchable markdown you can trust years from now. Reading material only: not books,
+not videos.
 
 In ancient greek mythology, Clotho is one of the three Fates responsible for spinning the thread
 of life. And what is a knowledge archive, if not a web of interconnected threads of knowledge?
@@ -14,24 +14,43 @@ of life. And what is a knowledge archive, if not a web of interconnected threads
 
 Three stages, no writeback into your notes:
 
-1. **Indexing** — extract URLs from your notes
-2. **Fetching** — download pages (browser for HTML, direct HTTP for PDFs)
+1. **Indexing** — extract links from your files; every link is recorded with the file it came
+   from and when it was indexed
+2. **Fetching** — download raw pages (browser for HTML, direct HTTP for PDFs)
 3. **Parsing** — validate and convert to markdown, archived on disk with SQLite tracking state
 
 ## Usage
 
+Archive things directly — a single URL, a single file, or a whole directory:
+
 ```bash
-clotho fetch                          # index your notes, fetch + parse all new URLs
-clotho fetch https://example.com/post # fetch specific URLs directly
-clotho fetch --dir path/to/notes      # index a different notes directory
-clotho fetch --refetch                # re-download already-fetched pages
-clotho parse                          # re-parse archived HTML into markdown
+clotho get https://example.com/post   # archive one URL
+clotho get --file note.md             # archive all links in one file
+clotho get --dir path/to/notes        # archive all links in a directory
 ```
 
-See [SETUP.md](SETUP.md) for installation, configuration, and the Docker setup.
+Register directories you index repeatedly as named sources:
+
+```bash
+clotho add ~/vault/daily-notes notes  # register a source
+clotho sources                        # list registered sources
+clotho index notes                    # index one source
+clotho index --all                    # index every source
+clotho remove notes                   # unregister (archived pages are kept)
+```
+
+Run individual pipeline stages:
+
+```bash
+clotho fetch                          # download indexed URLs still pending
+clotho fetch --refetch                # re-download every known page
+clotho parse                          # convert fetched pages to markdown
+clotho parse --reparse                # re-parse everything from disk
+```
+
+See [SETUP.md](SETUP.md) for installation and configuration.
 
 ## Where It's Going
 
-Fetching and parsing are in good shape; the focus now is on getting insight into what's stored —
-a web UI for browsing the archive, and collections for grouping related material. See
-[PLAN.md](PLAN.md) for the roadmap.
+The CLI foundation is in place; the focus now is on getting insight into what's stored — a web
+UI for browsing the archive, backed by this CLI. See [PLAN.md](PLAN.md) for the roadmap.

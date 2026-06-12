@@ -6,13 +6,17 @@ from .convert import (
     html_to_markdown,
     parse_html,
 )
+from .pdf import pdf_to_text
+from .validate import check_html
 
 __all__ = [
     "ConversionResult",
     "MarkdownCleaner",
+    "check_html",
     "clean_markdown",
     "count_words",
     "extract_metadata",
     "html_to_markdown",
     "parse_html",
+    "pdf_to_text",
 ]
