@@ -23,7 +23,7 @@ Inspection:
 
     clotho status                    # pipeline counts + failure summary
     clotho list                      # fetched pages: time, domain, URL
-    clotho cat <URL>                 # print a page's archived markdown
+    clotho path <URL>                # filepath of a page's markdown
     clotho db dir                    # print the data directory path
     clotho db remove                 # delete the database (asks first)
 """
@@ -252,8 +252,11 @@ def list_pages(limit: int, reverse: bool) -> None:
 
 @cli.command()
 @click.argument("url")
-def cat(url: str) -> None:
-    """Print the archived markdown of URL to stdout."""
+def path(url: str) -> None:
+    """Print the filepath of URL's archived markdown.
+
+    Composes with standard tools: cat/less/grep $(clotho path <URL>).
+    """
     with PageDatabase(DB_PATH) as db:
         page = db.get(url)
         if page is None:
@@ -275,7 +278,7 @@ def cat(url: str) -> None:
     md_path = SAVED_DIR / page.slug / "page.md"
     if not md_path.exists():
         raise click.ClickException(f"Markdown file missing on disk: {md_path}")
-    click.echo(md_path.read_text(encoding="utf-8"), nl=False)
+    click.echo(md_path)
 
 
 @cli.group(name="db")

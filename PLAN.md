@@ -91,9 +91,10 @@ Only what real usage demands.
   first. `--n` caps the row count (0 = everything), `--reverse` flips to oldest first.
   Tab-separated on purpose: filtering is `clotho list --n 0 | grep <domain>`, so the
   once-parked `--domain` flag is not needed.
-- `clotho cat <URL>` — ✅ implemented: prints a page's archived markdown to stdout (pipe
-  into less/grep). The URL is normalized the same way as at index time, so e.g. fragment
-  variants resolve to the same page.
+- `clotho path <URL>` — ✅ implemented: prints the filepath of a page's archived markdown,
+  composing with standard tools (`less $(clotho path <URL>)`, `grep ... $(clotho path ...)`)
+  instead of reimplementing them. The URL is normalized the same way as at index time, so
+  e.g. fragment variants resolve to the same page.
 - `clotho db` — ✅ implemented: `db dir` prints the data directory (answers "where does
   my archive live", also without `CLOTHO_DATA_DIR` set); `db remove` deletes the SQLite
   DB after confirmation (`--force` skips asking; archived files under `saved/` are kept).

@@ -100,8 +100,8 @@ class TestList:
         assert result.output == ""
 
 
-class TestCat:
-    def _seed_parsed(self, data_dir, content: str = "# Hello\n\nArchived text.\n"):
+class TestPath:
+    def _seed_parsed(self, data_dir):
         page = _page(
             "https://example.com/post",
             parsed_at="2026-06-11T01:00:00+00:00",
@@ -109,38 +109,38 @@ class TestCat:
         _seed(data_dir, [page])
         md_path = data_dir / "saved" / page.slug / "page.md"
         md_path.parent.mkdir(parents=True)
-        md_path.write_text(content, encoding="utf-8")
-        return content
+        md_path.write_text("# Hello\n\nArchived text.\n", encoding="utf-8")
+        return md_path
 
-    def test_prints_archived_markdown(self, runner, data_dir):
-        content = self._seed_parsed(data_dir)
-        result = runner.invoke(cli_module.cli, ["cat", "https://example.com/post"])
+    def test_prints_markdown_filepath(self, runner, data_dir):
+        md_path = self._seed_parsed(data_dir)
+        result = runner.invoke(cli_module.cli, ["path", "https://example.com/post"])
         assert result.exit_code == 0
-        assert result.output == content
+        assert result.output == f"{md_path}\n"
 
     def test_url_is_normalized_for_lookup(self, runner, data_dir):
-        # Fragments are stripped at index time; cat must match that
-        content = self._seed_parsed(data_dir)
+        # Fragments are stripped at index time; path must match that
+        md_path = self._seed_parsed(data_dir)
         result = runner.invoke(
-            cli_module.cli, ["cat", "https://example.com/post#section-2"]
+            cli_module.cli, ["path", "https://example.com/post#section-2"]
         )
         assert result.exit_code == 0
-        assert result.output == content
+        assert result.output == f"{md_path}\n"
 
     def test_unknown_url_fails(self, runner, data_dir):
-        result = runner.invoke(cli_module.cli, ["cat", "https://example.com/nope"])
+        result = runner.invoke(cli_module.cli, ["path", "https://example.com/nope"])
         assert result.exit_code != 0
         assert "Unknown URL" in result.output
 
     def test_pending_url_fails_with_hint(self, runner, data_dir):
         _seed(data_dir, [_page("https://example.com/post", fetched_at=None)])
-        result = runner.invoke(cli_module.cli, ["cat", "https://example.com/post"])
+        result = runner.invoke(cli_module.cli, ["path", "https://example.com/post"])
         assert result.exit_code != 0
         assert "clotho fetch" in result.output
 
     def test_unparsed_url_fails_with_hint(self, runner, data_dir):
         _seed(data_dir, [_page("https://example.com/post")])
-        result = runner.invoke(cli_module.cli, ["cat", "https://example.com/post"])
+        result = runner.invoke(cli_module.cli, ["path", "https://example.com/post"])
         assert result.exit_code != 0
         assert "clotho parse" in result.output
 
@@ -155,9 +155,25 @@ class TestCat:
                 )
             ],
         )
-        result = runner.invoke(cli_module.cli, ["cat", "https://example.com/post"])
+        result = runner.invoke(cli_module.cli, ["path", "https://example.com/post"])
         assert result.exit_code != 0
         assert "timeout" in result.output
+
+    def test_missing_file_on_disk_fails(self, runner, data_dir):
+        # Row says parsed, but the markdown file is gone: don't print a
+        # path that doesn't exist
+        _seed(
+            data_dir,
+            [
+                _page(
+                    "https://example.com/post",
+                    parsed_at="2026-06-11T01:00:00+00:00",
+                )
+            ],
+        )
+        result = runner.invoke(cli_module.cli, ["path", "https://example.com/post"])
+        assert result.exit_code != 0
+        assert "missing" in result.output
 
 
 class TestStatus:

@@ -53,7 +53,7 @@ Inspect the archive:
 ```bash
 clotho status                         # pipeline counts + failure summary
 clotho list --n 50                    # fetched pages: time, domain, URL
-clotho cat https://example.com/post   # print a page's archived markdown
+clotho path https://example.com/post  # filepath of its archived markdown
 clotho db dir                         # where the archive lives on disk
 clotho db remove                      # delete the database (asks first)
 ```

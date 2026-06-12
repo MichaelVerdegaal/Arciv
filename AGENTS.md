@@ -5,7 +5,7 @@ Clotho is a personal archival tool for reading material — blog posts, research
 documentation. Not books, not videos. It extracts URLs from markdown files (or takes them
 directly on the CLI), scrapes their content, and archives it as markdown on disk. The goal: a
 trustworthy archive of everything worth reading again, retrievable years later. Retrieval today
-is the inspection commands (`clotho list`, `clotho cat`) plus ripgrep over the archive; a web
+is the inspection commands (`clotho list`, `clotho path`) plus ripgrep over the archive; a web
 UI for browsing it is the next step (see PLAN.md).
 
 The project splits into three isolated parts: the **CLI tool** (this package — all archival
@@ -61,9 +61,8 @@ public interface — changes to it ripple beyond the Python code:
 
 ## Tech Stack
 
-**Python:** 3.12 (3.13 is blocked by a zstandard build failure — see the
-`requires-python` comment in pyproject.toml) **Tools:** UV (packages), Ruff (lint/format),
-pytest (tests)
+**Python:** 3.12+ (CI runs the test suite on 3.12, 3.13, and 3.14; `.python-version` pins
+the development default) **Tools:** UV (packages), Ruff (lint/format), pytest (tests)
 
 ## Commands
 

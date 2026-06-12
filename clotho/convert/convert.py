@@ -6,26 +6,12 @@ from dataclasses import dataclass
 from trafilatura import bare_extraction, extract
 
 from .clean_markdown import clean_markdown
-
-# Next.js __NEXT_DATA__ scripts can contain literal "</script>" inside JSON strings,
-# causing the script to prematurely close and leak JSON into the document body.
-# The lookahead ensures we capture until the real end.
-NEXT_DATA_RE = re.compile(
-    r"<script\s+id=[\"']__NEXT_DATA__[\"'][^>]*>.*?</script>(?=\s*<(?:script|/body|/html))",
-    re.DOTALL | re.IGNORECASE,
-)
+from .html_fixes import PRUNE_XPATHS, fix_html
 
 WORD_RE = re.compile(r"\b\w+\b")
 
 # Fallback regex for extracting <title> when trafilatura doesn't find it
 TITLE_TAG_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.DOTALL | re.IGNORECASE)
-
-# MediaWiki section-edit links ("[edit]"). They sit next to the heading inside
-# a small wrapper div where they are the only link, so trafilatura's
-# link-density pruning judges the whole div boilerplate and deletes it,
-# heading included — every section heading vanished from Wikipedia pages.
-# Pruning the spans before extraction keeps the headings.
-MEDIAWIKI_EDIT_SECTION_XPATH = '//span[contains(@class, "mw-editsection")]'
 
 
 @dataclass
@@ -83,10 +69,11 @@ def html_to_markdown(
     Returns:
         Extracted Markdown content, or None if extraction failed.
     """
-    # Remove malformed __NEXT_DATA__ scripts before DOM parsing
-    html_content = NEXT_DATA_RE.sub("", html_content)
+    # Site-specific cleanup: broken markup and extraction-hostile chrome
+    # (see html_fixes.py for the rules and why each exists)
+    html_content = fix_html(html_content)
 
-    prune_xpath = [MEDIAWIKI_EDIT_SECTION_XPATH]
+    prune_xpath = [*PRUNE_XPATHS]
     if strip_code:
         # Remove <pre> and <code> blocks to avoid extraction artifacts
         prune_xpath += ["//pre", "//code"]

@@ -4,7 +4,7 @@ How to set up Clotho.
 
 ## Requirements
 
-- Python installed, of version as specified in `.python-version`.
+- Python 3.12 or newer (`.python-version` pins the development default).
 - [UV](https://docs.astral.sh/uv/) installed for package management
 
 ## Install as a uv tool (recommended for usage)
