@@ -283,7 +283,7 @@ def process_url(url: str) -> tuple[str | None, str]:
     if url.startswith(SKIP_PREFIXES):
         return None, "URL matches skip prefix"
 
-    # Skip specific suffixes (but not .pdf — arxiv PDFs get rewritten)
+    # Skip specific suffixes (but not .pdf; arxiv PDFs get rewritten)
     path_lower = parsed.path.lower()
     if path_lower.endswith(SKIP_SUFFIXES):
         return None, "URL matches skip suffix"
@@ -312,7 +312,7 @@ def process_url(url: str) -> tuple[str | None, str]:
                 return None, "skipped (not content)"
 
     # Apply rewriters. Try the full host first (raw.githubusercontent.com),
-    # then the registered domain (github.com, huggingface.co) — tldextract
+    # then the registered domain (github.com, huggingface.co); tldextract
     # collapses subdomains, so host-keyed rewriters never match on domain.
     rewriter = DOMAIN_REWRITERS.get(host) or DOMAIN_REWRITERS.get(domain)
     if rewriter is not None:

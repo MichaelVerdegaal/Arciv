@@ -1,12 +1,12 @@
 """Pool of recent desktop browser User-Agent strings for rotation.
 
 Each entry should look like a real, up-to-date browser. Outdated or exotic
-UAs are *more* suspicious than common ones — blend in, don't stand out.
+UAs are *more* suspicious than common ones; blend in, don't stand out.
 
 The pool is refreshed from the microlink API once per process (triggered by
 the first Fetcher init) and cached in data/user_agents.txt. When the refresh
 fails (e.g. offline), the cached file is used; a small built-in list is the
-last resort. Loading never raises — scraping shouldn't die over a UA refresh.
+last resort. Loading never raises; scraping shouldn't die over a UA refresh.
 """
 
 import json
@@ -22,7 +22,7 @@ UA_FILE = DATA_DIR / "user_agents.txt"
 MICROLINK_URL = "https://microlink.io/user-agents.json"
 
 # Last resort when the refresh fails and no cached file exists. Only raw
-# HTTP (PDF) downloads use this pool — the browser sends real Chrome's UA.
+# HTTP (PDF) downloads use this pool; the browser sends real Chrome's UA.
 _FALLBACK_USER_AGENTS = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",

@@ -57,17 +57,9 @@ def parse_page(
     saved_dir: Path = SAVED_DIR,
     min_words: int = DEFAULT_MIN_WORDS,
 ) -> Page | None:
-    """Parse one fetched page from its raw file on disk.
-
-    Args:
-        db: Page database.
-        page: A fetched page (``fetched_at`` set, raw content on disk).
-        saved_dir: Root directory for archived page folders.
-        min_words: Minimum word count for a page to be accepted.
-
-    Returns:
-        The updated Page on success, None if the page was rejected.
-    """
+    """Parse one fetched page (``fetched_at`` set, raw content on disk)
+    from its raw file. Returns the updated Page on success, or None if the
+    page was rejected (e.g. fewer than min_words words)."""
     slug_dir = saved_dir / page.slug
     md_path = slug_dir / "page.md"
 
@@ -115,7 +107,7 @@ def _parse_html(
 ) -> Page | None:
     """Validate archived HTML, convert it to markdown, and record the result.
 
-    Raw text URLs (.md, .txt, .rst) skip validation and conversion — the
+    Raw text URLs (.md, .txt, .rst) skip validation and conversion; the
     fetched content is stored as markdown directly.
     """
     html = html_path.read_text(encoding="utf-8")
@@ -165,19 +157,12 @@ def parse_pending(
     reparse: bool = False,
     min_words: int = DEFAULT_MIN_WORDS,
 ) -> int:
-    """Parse every fetched page that doesn't have markdown yet.
+    """Parse every fetched page that doesn't have markdown yet and return
+    how many parsed successfully.
 
-    Args:
-        db: Page database.
-        saved_dir: Root directory for archived page folders.
-        reparse: Re-parse every fetched page, including already-parsed and
-            previously rejected ones. Useful after changing trafilatura
-            settings or cleanup rules — no network traffic, everything is
-            read from disk.
-        min_words: Minimum word count for a page to be accepted.
-
-    Returns:
-        Number of pages successfully parsed.
+    With reparse, every fetched page is re-parsed, including already-parsed
+    and previously rejected ones. Useful after changing trafilatura settings
+    or cleanup rules; no network traffic, everything is read from disk.
     """
     pages = db.get_fetched() if reparse else db.get_unparsed()
     count = 0

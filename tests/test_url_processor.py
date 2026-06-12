@@ -146,7 +146,7 @@ class TestProcessUrl:
     @given(st.text())
     def test_never_raises_and_output_is_https_or_none(self, value):
         """process_url is total: any input (including https:// followed by
-        garbage) yields (None, reason) or a https URL — never an exception."""
+        garbage) yields (None, reason) or a https URL, never an exception."""
         processed, status = process_url(f"https://{value}")
         assert isinstance(status, str)
         if processed is not None:

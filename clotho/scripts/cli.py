@@ -1,4 +1,4 @@
-"""Clotho CLI — archive management commands.
+"""Clotho CLI: archive management commands.
 
 Layered archiving with ``get`` (index → fetch → parse in one go):
 
@@ -47,7 +47,7 @@ from clotho.pipeline import (
 
 @click.group()
 def cli() -> None:
-    """Clotho — personal knowledge archive."""
+    """Clotho: personal knowledge archive."""
     configure_logger()
 
 
