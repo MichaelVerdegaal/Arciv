@@ -30,9 +30,9 @@ clotho get --dir <path>     # archive all links of all files within a directory
 `get` runs the full pipeline — index, then fetch, then parse — under a single command. Each
 stage also has a dedicated command, which makes developing the library easier:
 
-- **`clotho index`** — extracts all links from wherever specified. For each link a row is
-  stored with the link value itself, the full normalized filepath where it was found, and
-  the time it was indexed.
+- **`clotho index`** — extracts all links from wherever specified (`.md`, `.txt`, and
+  `.rst` files). For each link a row is stored with the link value itself, the full
+  normalized filepath where it was found, and the time it was indexed.
 - **`clotho fetch`** — the patchright/playwright magic: downloads pending URLs (browser for
   HTML, direct HTTP for PDFs) and archives the raw content on disk.
 - **`clotho parse`** — looks at the fetched HTML pages / PDFs and parses them to markdown.
@@ -49,6 +49,14 @@ clotho index <name>             # index a single source
 clotho index --all              # index every registered source
 ```
 
+### Data directory — ✅ implemented
+
+The data root defaults to the OS user data dir via platformdirs (Linux:
+`~/.local/share/clotho`, Windows: `%LOCALAPPDATA%\clotho`). Chosen with the Docker backend
+in mind: it lives outside any repo checkout, so the backend container can mount it directly.
+`CLOTHO_DATA_DIR` still overrides it (e.g. `CLOTHO_DATA_DIR=data` in `.env` when developing
+from a clone).
+
 ## 1. Backend + Frontend (next phase)
 
 A web UI is a must-have: the CLI alone is too annoying for viewing stored results, and
@@ -58,8 +66,8 @@ the frontend, otherwise a blazingly-fast plain HTML site. References:
 - https://news.ycombinator.com/item?id=48475483
 - https://news.ycombinator.com/item?id=48437609
 
-The backend mostly shells out to the CLI or reads `data/clotho.db` / `data/saved/<slug>/`
-directly — the storage contract it builds against is documented in AGENTS.md. Backend and
+The backend mostly shells out to the CLI or reads `clotho.db` / `saved/<slug>/` under the
+data dir directly — the storage contract it builds against is documented in AGENTS.md. Backend and
 frontend each get a dedicated container (the CLI does not).
 
 Page views to design before writing any code (ideas, not decisions):
@@ -75,16 +83,21 @@ it should open it read-only and may need a checkpoint first (or copy the file).
 
 ## 2. CLI polish (ongoing)
 
-Only what real usage demands. Candidates:
+Only what real usage demands.
 
-- `clotho status` — counts, recent fetches, failure summary without opening the DB
-- `clotho list --domain <d>`
-- Stale-row pruning (`clotho prune`?) — v1 pruned failed rows whose URLs vanished from the
-  notes during indexing; that behavior was dropped in the stage split because partial
-  (per-source) indexing made it unsafe. Revisit if dead rows actually accumulate.
+- `clotho status` — ✅ implemented: pipeline-state counts, recent fetches, failure summary
+- Parked until the implementation picture is certain:
+  - `clotho list --domain <d>`
+  - Stale-row pruning (`clotho prune`?) — v1 pruned failed rows whose URLs vanished from
+    the notes during indexing; that behavior was dropped in the stage split because partial
+    (per-source) indexing made it unsafe. Revisit if dead rows actually accumulate.
+- Logging cleanup (later) — prune noisy statements and add a `--verbose` flag, so default
+  runs stay quiet and the detail lives behind the flag.
 
 ## Known fetch gaps
 
+- medium.com is paywalled. Research how the freedium.cfd mirror works (its source code is
+  fully available) — could inform a rewrite rule or fetch fallback.
 - Cookie-consent walls eat some pages (e.g. gigaom rejected as "too short")
 - researchgate.net abstract pages are too short, but link a downloadable PDF
 - ~179 long-tail singletons accepted as gaps (JS SPAs, auth-walled, dead domains)
@@ -94,11 +107,12 @@ Only what real usage demands. Candidates:
 - FTS5 / semantic search — only once the search gap is actually felt
 - RAG over the archive — retrieval first, generation maybe never
 - Wayback Machine fallback for paywalled content
-- Obsidian plugin — only if the CLI + web UI path proves insufficient
 - Automatic re-scraping of updated pages
-- Indexing `.txt`/`.rst` files (not just `.md`) — small change in `Note.get_note_files`
-- A fixed default data dir (e.g. platformdirs) for the uv-tool install; today it's
-  `./data` relative to the working directory unless `CLOTHO_DATA_DIR` is set
+
+## Rejected
+
+- Obsidian plugin — Clotho is not Obsidian-specific (and is moving further away from that);
+  the CLI + web UI path is the direction.
 
 ## Principles
 
