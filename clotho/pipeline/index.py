@@ -12,7 +12,7 @@ from pathlib import Path
 from loguru import logger
 
 from clotho.db import PageDatabase
-from clotho.notes import MarkdownNote
+from clotho.notes import Note, load_note, load_notes
 from clotho.scrape import process_url, registered_domain, slug_for_url, split_url
 
 
@@ -24,7 +24,7 @@ def _page_entry(processed_url: str, original_url: str) -> tuple[str, str, str, s
 
 def _index_notes(
     db: PageDatabase,
-    notes: list[MarkdownNote],
+    notes: list[Note],
     source_name: str | None = None,
 ) -> list[str]:
     """Extract, normalize, and register the links of the given notes.
@@ -71,16 +71,16 @@ def _index_notes(
 
 
 def index_file(db: PageDatabase, file_path: Path) -> list[str]:
-    """Index all links within a single markdown file.
+    """Index all links within a single note file (.md, .txt, or .rst).
 
     Args:
         db: Page database.
-        file_path: Path to the markdown file.
+        file_path: Path to the note file.
 
     Returns:
         All unique processed URLs found in the file.
     """
-    return _index_notes(db, [MarkdownNote(file_path)])
+    return _index_notes(db, [load_note(file_path)])
 
 
 def index_directory(
@@ -88,17 +88,17 @@ def index_directory(
     dir_path: Path,
     source_name: str | None = None,
 ) -> list[str]:
-    """Index all links of all markdown files within a directory (recursive).
+    """Index all links of all note files within a directory (recursive).
 
     Args:
         db: Page database.
-        dir_path: Directory containing markdown files.
+        dir_path: Directory containing note files (.md, .txt, .rst).
         source_name: Registered source the directory belongs to, if any.
 
     Returns:
         All unique processed URLs found in the directory.
     """
-    notes = MarkdownNote.get_note_files(dir_path)
+    notes = load_notes(dir_path)
     logger.info(f"Found {len(notes)} notes in {dir_path}")
     return _index_notes(db, notes, source_name=source_name)
 

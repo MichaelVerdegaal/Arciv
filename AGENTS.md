@@ -16,8 +16,9 @@ which each get a dedicated container.
 Three stages, no writeback into the notes. Each stage has a dedicated CLI command;
 `clotho get` runs all three in order on a URL, a file (`--file`), or a directory (`--dir`).
 
-1. **Indexing** (`clotho index`, `clotho/pipeline/index.py`) — Parse markdown files, extract
-   all links, deduplicate, apply filtering/rewrite rules, register pending pages. Each link
+1. **Indexing** (`clotho index`, `clotho/pipeline/index.py`) — Parse note files (`.md`,
+   `.txt`, `.rst`), extract all links, deduplicate, apply filtering/rewrite rules, register
+   pending pages. Each link
    gets a row with the URL, the full normalized filepath it was found in, and an indexed-at
    timestamp. Indexing operates on registered sources (`clotho add <dir> <name>`).
 2. **Fetching** (`clotho fetch`, `clotho/pipeline/fetch.py` + `clotho/scrape/`) — Download raw
@@ -32,7 +33,7 @@ Three stages, no writeback into the notes. Each stage has a dedicated CLI comman
 The planned backend/frontend read the data directory directly, so treat this layout as a
 public interface — changes to it ripple beyond the Python code:
 
-- `data/clotho.db` — SQLite (WAL mode, foreign keys ON). `pages` holds one row per URL:
+- `<data dir>/clotho.db` — SQLite (WAL mode, foreign keys ON). `pages` holds one row per URL:
   `url` (PK, normalized), `original_url`, `domain`, `slug`, `content_type` (`html`/`pdf`,
   set at fetch), `title`, `author`, `word_count`, `fail_reason`, `added_at`, `fetched_at`,
   `parsed_at`. Pipeline state is carried by the timestamps: pending (no `fetched_at`),
@@ -40,11 +41,12 @@ public interface — changes to it ripple beyond the Python code:
   either stage. `links` holds one row per indexed link: `url`, `file_path` (full normalized
   path), `source_name` (NULL for ad-hoc files; cleared when a source is removed),
   `indexed_at`. `sources` holds registered directories: `name` (PK), `path`, `added_at`.
-- `data/saved/<slug>/` — one folder per page: `page.html` (raw fetch) or `page.pdf`, plus
+- `<data dir>/saved/<slug>/` — one folder per page: `page.html` (raw fetch) or `page.pdf`, plus
   `page.md` once parsed. Slug format is `<domain>-<hash8>`, sanitized to be a safe directory
   name on Linux and Windows.
-- The data root is relocatable via `CLOTHO_DATA_DIR` (defaults to `./data` relative to the
-  working directory).
+- The data root defaults to the OS user data dir via platformdirs (Linux:
+  `~/.local/share/clotho`, Windows: `%LOCALAPPDATA%\clotho`) and is relocatable via
+  `CLOTHO_DATA_DIR` (e.g. `CLOTHO_DATA_DIR=data` in `.env` when developing from a clone).
 
 ### Key Libraries
 
@@ -54,6 +56,7 @@ public interface — changes to it ripple beyond the Python code:
 - `tldextract` — domain parsing (registered domain grouping)
 - `click` — CLI framework
 - `loguru` — logging (one log statement per URL processed)
+- `platformdirs` — OS-appropriate default data directory
 
 ## Tech Stack
 

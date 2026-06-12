@@ -18,6 +18,10 @@ Individual pipeline stages, mainly for development:
     clotho index --all               # index every source
     clotho fetch                     # download pending indexed URLs
     clotho parse                     # convert fetched pages to markdown
+
+Inspection:
+
+    clotho status                    # counts, recent fetches, failures
 """
 
 from datetime import datetime, timezone
@@ -189,6 +193,35 @@ def parse(reparse: bool) -> None:
     """Parse stage: convert fetched HTML/PDFs into markdown."""
     with PageDatabase(DB_PATH) as db:
         parse_pending(db, reparse=reparse)
+
+
+@cli.command()
+def status() -> None:
+    """Show pipeline-state counts, recent fetches, and failure summary."""
+    with PageDatabase(DB_PATH) as db:
+        counts = db.status_counts()
+        recent = db.recent_fetches(limit=5)
+        failures = db.fail_summary()
+
+    click.echo(f"Archive: {DB_PATH}")
+    click.echo(f"Pages: {counts['total']} total")
+    click.echo(f"  pending         {counts['pending']}")
+    click.echo(f"  fetch failed    {counts['fetch_failed']}")
+    click.echo(f"  awaiting parse  {counts['awaiting_parse']}")
+    click.echo(f"  parse rejected  {counts['parse_rejected']}")
+    click.echo(f"  parsed          {counts['parsed']}")
+
+    if recent:
+        click.echo("\nRecent fetches:")
+        for page in recent:
+            # ISO timestamp trimmed to seconds for readability
+            fetched_at = (page.fetched_at or "")[:19]
+            click.echo(f"  {fetched_at}  {page.domain}  {page.title or page.url}")
+
+    if failures:
+        click.echo("\nFailures by domain:")
+        for domain, reason, count in failures[:10]:
+            click.echo(f"  {domain}: {reason} ({count})")
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 
 import pytest
 
-from clotho.notes import MarkdownNote
+from clotho.notes import MarkdownNote, Note, load_note, load_notes
 
 
 @pytest.fixture
@@ -71,3 +71,42 @@ class TestNoteContent:
         path.write_text("text", encoding="utf-8")
         with pytest.raises(ValueError):
             MarkdownNote(path)
+
+
+class TestLoadNotes:
+    def test_load_note_dispatches_by_extension(self, tmp_path):
+        md = tmp_path / "note.md"
+        md.write_text("# Title\ntext", encoding="utf-8")
+        txt = tmp_path / "note.txt"
+        txt.write_text("text", encoding="utf-8")
+
+        assert isinstance(load_note(md), MarkdownNote)
+        assert type(load_note(txt)) is Note
+
+    def test_txt_note_extracts_urls(self, tmp_path):
+        path = tmp_path / "note.txt"
+        path.write_text("See https://example.com/article today.", encoding="utf-8")
+        assert load_note(path).extract_urls() == ["https://example.com/article"]
+
+    def test_rst_note_extracts_urls(self, tmp_path):
+        path = tmp_path / "note.rst"
+        path.write_text(
+            "Heading\n=======\n\nSee https://example.com/docs here.",
+            encoding="utf-8",
+        )
+        assert load_note(path).extract_urls() == ["https://example.com/docs"]
+
+    def test_load_notes_finds_supported_files_recursively(self, tmp_path):
+        (tmp_path / "a.md").write_text("# A", encoding="utf-8")
+        (tmp_path / "b.txt").write_text("b", encoding="utf-8")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "c.rst").write_text("c", encoding="utf-8")
+        (tmp_path / "ignored.pdf").write_text("nope", encoding="utf-8")
+
+        notes = load_notes(tmp_path)
+        assert sorted(n.filename + n.extension for n in notes) == [
+            "a.md",
+            "b.txt",
+            "c.rst",
+        ]

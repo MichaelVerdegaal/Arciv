@@ -1,10 +1,12 @@
 import re
 from pathlib import Path
-from typing import Self
 
 # Splits concatenated URLs on an embedded "https://" boundary.
 # Only split when the boundary is not part of a query string value.
 _CONCAT_SPLIT_RE = re.compile(r"(?<=[^\s?=&])(?=https?://)")
+
+# File extensions treated as notes when indexing a directory
+NOTE_EXTENSIONS = (".md", ".txt", ".rst")
 
 
 class Note:
@@ -39,18 +41,6 @@ class Note:
         frontmatter_pattern_re = r"^---\s*\n.*?\n---\s*\n"
         content = re.sub(frontmatter_pattern_re, "", note_text, flags=re.DOTALL)
         self.text = content.strip()
-
-    @classmethod
-    def get_note_files(cls, note_dir: Path) -> list[Self]:
-        """Get all markdown files in the given directory.
-
-        Args:
-            note_dir: Directory to search for markdown files
-
-        Returns:
-            Note instances for every markdown file found recursively
-        """
-        return [cls(note_path) for note_path in note_dir.glob("**/*.md")]
 
     @staticmethod
     def _validate_path(note_path: str | Path) -> Path:

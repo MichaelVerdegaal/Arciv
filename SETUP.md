@@ -16,8 +16,8 @@ uv tool install git+https://github.com/MichaelVerdegaal/Clotho   # or: uv tool i
 patchright install chrome   # browser engine used for fetching
 ```
 
-After that `clotho` is on your PATH. Set `CLOTHO_DATA_DIR` (see below) so the archive has a
-fixed home regardless of where you run the command.
+After that `clotho` is on your PATH. The archive lives in the OS user data directory by
+default (see Configuration below), so no further setup is needed.
 
 ## Develop from a clone
 
@@ -42,5 +42,6 @@ Optional override, via environment variable or a `.env` file (see
 [.env.example](.env.example)):
 
 - `CLOTHO_DATA_DIR` — where the SQLite database, archived pages, and logs live. Defaults to
-  `./data` relative to the working directory, which is fine when running from the repository
-  root; set it explicitly when Clotho is installed as a uv tool.
+  the OS user data directory (Linux: `~/.local/share/clotho`, Windows:
+  `%LOCALAPPDATA%\clotho`). Set `CLOTHO_DATA_DIR=data` in `.env` to keep the archive inside
+  the repository when developing from a clone.

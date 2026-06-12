@@ -137,6 +137,48 @@ class TestStateQueries:
         assert ("a.com", "timeout", 1) in summary
         assert ("a.com", "too short", 1) in summary
 
+    def test_status_counts_covers_every_state(self, db):
+        db.upsert(_page("https://example.com/pending", fetched_at=None))
+        db.upsert(
+            _page(
+                "https://example.com/fetch-failed",
+                fetched_at=None,
+                fail_reason="timeout",
+            )
+        )
+        db.upsert(_page("https://example.com/awaiting-parse"))
+        db.upsert(_page("https://example.com/parse-rejected", fail_reason="too short"))
+        db.upsert(_page("https://example.com/parsed", parsed_at="2026-06-11T01:00:00"))
+        assert db.status_counts() == {
+            "total": 5,
+            "pending": 1,
+            "fetch_failed": 1,
+            "awaiting_parse": 1,
+            "parse_rejected": 1,
+            "parsed": 1,
+        }
+
+    def test_status_counts_empty_db_is_all_zero(self, db):
+        assert db.status_counts() == {
+            "total": 0,
+            "pending": 0,
+            "fetch_failed": 0,
+            "awaiting_parse": 0,
+            "parse_rejected": 0,
+            "parsed": 0,
+        }
+
+    def test_recent_fetches_newest_first_with_limit(self, db):
+        db.upsert(_page("https://example.com/old", fetched_at="2026-06-01T00:00:00"))
+        db.upsert(_page("https://example.com/mid", fetched_at="2026-06-05T00:00:00"))
+        db.upsert(_page("https://example.com/new", fetched_at="2026-06-10T00:00:00"))
+        db.upsert(_page("https://example.com/pending", fetched_at=None))
+        recent = db.recent_fetches(limit=2)
+        assert [p.url for p in recent] == [
+            "https://example.com/new",
+            "https://example.com/mid",
+        ]
+
 
 class TestLinks:
     def test_replace_and_get_files_for_url(self, db):

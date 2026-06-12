@@ -224,6 +224,44 @@ class PageDatabase:
         row = self._conn.execute("SELECT COUNT(*) AS n FROM pages").fetchone()
         return row["n"]
 
+    def status_counts(self) -> dict[str, int]:
+        """Count pages per pipeline state (see Page docstring for states).
+
+        Returns:
+            Dict with keys ``total``, ``pending``, ``fetch_failed``,
+            ``awaiting_parse``, ``parse_rejected``, and ``parsed``.
+        """
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS total, "
+            "COALESCE(SUM(fetched_at IS NULL AND fail_reason IS NULL), 0) "
+            "  AS pending, "
+            "COALESCE(SUM(fetched_at IS NULL AND fail_reason IS NOT NULL), 0) "
+            "  AS fetch_failed, "
+            "COALESCE(SUM(fetched_at IS NOT NULL AND parsed_at IS NULL "
+            "  AND fail_reason IS NULL), 0) AS awaiting_parse, "
+            "COALESCE(SUM(fetched_at IS NOT NULL AND parsed_at IS NULL "
+            "  AND fail_reason IS NOT NULL), 0) AS parse_rejected, "
+            "COALESCE(SUM(parsed_at IS NOT NULL), 0) AS parsed "
+            "FROM pages"
+        ).fetchone()
+        return {key: row[key] for key in row.keys()}
+
+    def recent_fetches(self, limit: int = 10) -> list[Page]:
+        """Get the most recently fetched pages.
+
+        Args:
+            limit: Maximum number of pages to return.
+
+        Returns:
+            Fetched pages ordered by fetched_at, newest first.
+        """
+        rows = self._conn.execute(
+            "SELECT * FROM pages WHERE fetched_at IS NOT NULL "
+            "ORDER BY fetched_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [self._row_to_page(row) for row in rows]
+
     def fail_summary(self) -> list[tuple[str | None, str, int]]:
         """Summarize fetch and parse failures grouped by domain and reason.
 
