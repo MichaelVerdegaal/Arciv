@@ -243,7 +243,7 @@ def slug_for_url(url: str) -> str:
     """
     domain, _ = split_url(url)
     safe_domain = _UNSAFE_SLUG_CHARS_RE.sub("-", domain) or "unknown"
-    url_hash = hashlib.md5(url.encode(errors="surrogateescape")).hexdigest()[:8]
+    url_hash = hashlib.md5(url.encode("utf-8", errors="surrogatepass")).hexdigest()[:8]
     return f"{safe_domain}-{url_hash}"
 
 
