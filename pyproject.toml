@@ -14,6 +14,7 @@ dependencies = [
     "patchright>=1.60.0", # Undetected Playwright fork for scraping
     "liteparse>=2.0.3",
     "platformdirs>=4.10.0", # OS-appropriate user data directory
+    "zstandard>=0.23.0", # Ensure Python 3.13 compatibility
 ]
 
 [project.scripts]
