@@ -1,31 +1,31 @@
-"""Clotho CLI: archive management commands.
+"""Arciv CLI: archive management commands.
 
 Layered archiving with ``get`` (index → fetch → parse in one go):
 
-    clotho get https://example.com   # archive a single URL
-    clotho get --file note.md        # archive all links in one file
-    clotho get --dir ~/notes         # archive all links in a directory
+    arciv get https://example.com   # archive a single URL
+    arciv get --file note.md        # archive all links in one file
+    arciv get --dir ~/notes         # archive all links in a directory
 
 Sources (named directories that can be re-indexed any time):
 
-    clotho add ~/vault/notes notes   # register directory as source "notes"
-    clotho remove notes              # unregister it
-    clotho sources                   # list registered sources
+    arciv add ~/vault/notes notes   # register directory as source "notes"
+    arciv remove notes              # unregister it
+    arciv sources                   # list registered sources
 
 Individual pipeline stages, mainly for development:
 
-    clotho index notes               # index one source
-    clotho index --all               # index every source
-    clotho fetch                     # download pending indexed URLs
-    clotho parse                     # convert fetched pages to markdown
+    arciv index notes               # index one source
+    arciv index --all               # index every source
+    arciv fetch                     # download pending indexed URLs
+    arciv parse                     # convert fetched pages to markdown
 
 Inspection:
 
-    clotho status                    # pipeline counts + failure summary
-    clotho list                      # fetched pages: time, domain, URL
-    clotho path <URL>                # filepath of a page's markdown
-    clotho db dir                    # print the data directory path
-    clotho db remove                 # delete the database (asks first)
+    arciv status                    # pipeline counts + failure summary
+    arciv list                      # fetched pages: time, domain, URL
+    arciv path <URL>                # filepath of a page's markdown
+    arciv db dir                    # print the data directory path
+    arciv db remove                 # delete the database (asks first)
 """
 
 from datetime import datetime, timezone
@@ -34,10 +34,10 @@ from pathlib import Path
 import click
 from loguru import logger
 
-from clotho.settings import DATA_DIR, DB_PATH, SAVED_DIR, configure_logger
-from clotho.db import PageDatabase, Source
-from clotho.scrape import process_url
-from clotho.pipeline import (
+from arciv.settings import DATA_DIR, DB_PATH, SAVED_DIR, configure_logger
+from arciv.db import PageDatabase, Source
+from arciv.scrape import process_url
+from arciv.pipeline import (
     fetch_pending,
     fetch_urls,
     index_all,
@@ -52,7 +52,7 @@ from clotho.pipeline import (
 
 @click.group()
 def cli() -> None:
-    """Clotho: personal knowledge archive."""
+    """Arciv: personal knowledge archive."""
     configure_logger()
 
 
@@ -142,7 +142,7 @@ def sources() -> None:
     with PageDatabase(DB_PATH) as db:
         registered = db.list_sources()
     if not registered:
-        click.echo("No sources registered. Add one with: clotho add <dir> <name>")
+        click.echo("No sources registered. Add one with: arciv add <dir> <name>")
         return
     for source in registered:
         click.echo(f"{source.name}\t{source.path}")
@@ -245,7 +245,7 @@ def list_pages(limit: int, reverse: bool, domain: str | None) -> None:
     """List fetched pages, newest first: fetch time, domain, URL.
 
     Columns are tab-separated so the output pipes cleanly into
-    grep/cut/awk, e.g.: clotho list --n 0 | grep /tag/.
+    grep/cut/awk, e.g.: arciv list --n 0 | grep /tag/.
     """
     with PageDatabase(DB_PATH) as db:
         pages = db.list_fetched(
@@ -262,7 +262,7 @@ def list_pages(limit: int, reverse: bool, domain: str | None) -> None:
 def path(url: str) -> None:
     """Print the filepath of URL's archived markdown.
 
-    Composes with standard tools: cat/less/grep $(clotho path <URL>).
+    Composes with standard tools: cat/less/grep $(arciv path <URL>).
     """
     with PageDatabase(DB_PATH) as db:
         page = db.get(url)
@@ -277,10 +277,10 @@ def path(url: str) -> None:
     if page.fail_reason:
         raise click.ClickException(f"No markdown for {page.url}: {page.fail_reason}")
     if not page.fetched:
-        raise click.ClickException(f"{page.url} is still pending. Run: clotho fetch")
+        raise click.ClickException(f"{page.url} is still pending. Run: arciv fetch")
     if not page.parsed:
         raise click.ClickException(
-            f"{page.url} is fetched but not parsed yet. Run: clotho parse"
+            f"{page.url} is fetched but not parsed yet. Run: arciv parse"
         )
     md_path = SAVED_DIR / page.slug / "page.md"
     if not md_path.exists():

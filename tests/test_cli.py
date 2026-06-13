@@ -3,8 +3,8 @@
 import pytest
 from click.testing import CliRunner
 
-import clotho.scripts.cli as cli_module
-from clotho.db import Page, PageDatabase
+import arciv.scripts.cli as cli_module
+from arciv.db import Page, PageDatabase
 
 
 @pytest.fixture
@@ -16,7 +16,7 @@ def runner():
 def data_dir(tmp_path, monkeypatch):
     """Point the CLI at a temp data dir and silence the logger setup."""
     monkeypatch.setattr(cli_module, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(cli_module, "DB_PATH", tmp_path / "clotho.db")
+    monkeypatch.setattr(cli_module, "DB_PATH", tmp_path / "arciv.db")
     monkeypatch.setattr(cli_module, "SAVED_DIR", tmp_path / "saved")
     monkeypatch.setattr(cli_module, "configure_logger", lambda: None)
     return tmp_path
@@ -36,7 +36,7 @@ def _page(url: str, **overrides) -> Page:
 
 
 def _seed(data_dir, pages: list[Page]) -> None:
-    with PageDatabase(data_dir / "clotho.db") as db:
+    with PageDatabase(data_dir / "arciv.db") as db:
         for page in pages:
             db.upsert(page)
 
@@ -162,13 +162,13 @@ class TestPath:
         _seed(data_dir, [_page("https://example.com/post", fetched_at=None)])
         result = runner.invoke(cli_module.cli, ["path", "https://example.com/post"])
         assert result.exit_code != 0
-        assert "clotho fetch" in result.output
+        assert "arciv fetch" in result.output
 
     def test_unparsed_url_fails_with_hint(self, runner, data_dir):
         _seed(data_dir, [_page("https://example.com/post")])
         result = runner.invoke(cli_module.cli, ["path", "https://example.com/post"])
         assert result.exit_code != 0
-        assert "clotho parse" in result.output
+        assert "arciv parse" in result.output
 
     def test_failed_url_reports_reason(self, runner, data_dir):
         _seed(
@@ -208,7 +208,7 @@ class TestStatus:
         result = runner.invoke(cli_module.cli, ["status"])
         assert result.exit_code == 0
         assert "Pages: 1 total" in result.output
-        # Recently fetched pages moved to `clotho list`
+        # Recently fetched pages moved to `arciv list`
         assert "Recent fetches" not in result.output
 
 
@@ -221,24 +221,24 @@ class TestDbGroup:
     def test_remove_force_deletes_db_and_sidecars(self, runner, data_dir):
         _seed(data_dir, [_page("https://example.com/a")])
         for suffix in ("-wal", "-shm"):
-            (data_dir / f"clotho.db{suffix}").touch()
+            (data_dir / f"arciv.db{suffix}").touch()
         result = runner.invoke(cli_module.cli, ["db", "remove", "--force"])
         assert result.exit_code == 0
-        assert not (data_dir / "clotho.db").exists()
-        assert not (data_dir / "clotho.db-wal").exists()
-        assert not (data_dir / "clotho.db-shm").exists()
+        assert not (data_dir / "arciv.db").exists()
+        assert not (data_dir / "arciv.db-wal").exists()
+        assert not (data_dir / "arciv.db-shm").exists()
 
     def test_remove_asks_and_aborts_on_no(self, runner, data_dir):
         _seed(data_dir, [_page("https://example.com/a")])
         result = runner.invoke(cli_module.cli, ["db", "remove"], input="n\n")
         assert result.exit_code != 0
-        assert (data_dir / "clotho.db").exists()
+        assert (data_dir / "arciv.db").exists()
 
     def test_remove_asks_and_deletes_on_yes(self, runner, data_dir):
         _seed(data_dir, [_page("https://example.com/a")])
         result = runner.invoke(cli_module.cli, ["db", "remove"], input="y\n")
         assert result.exit_code == 0
-        assert not (data_dir / "clotho.db").exists()
+        assert not (data_dir / "arciv.db").exists()
 
     def test_remove_without_db_is_graceful(self, runner, data_dir):
         result = runner.invoke(cli_module.cli, ["db", "remove"])

@@ -1,6 +1,6 @@
 # Plan
 
-Clotho is my main archival tool for all reading material — blog posts, research papers,
+Arciv is my main archival tool for all reading material — blog posts, research papers,
 documentation. Not books, not videos. The strategy: build the entire backend as a super
 streamlined CLI tool first. When that foundation is right, the frontend part will barely have
 to do anything.
@@ -9,7 +9,7 @@ to do anything.
 
 The project splits into three parts to keep responsibilities isolated:
 
-1. **CLI tool** (this repo's `clotho/` package) — all archival logic. Runnable easily as a uv
+1. **CLI tool** (this repo's `arciv/` package) — all archival logic. Runnable easily as a uv
    tool (`uv tool install`), deliberately **not** containerized.
 2. **Backend** — calls the CLI for the most part, or works with the SQLite DB directly. Gets a
    dedicated container.
@@ -22,39 +22,39 @@ Only the CLI exists today; backend and frontend are the next phases.
 A layered approach: single URL, single file, single dir.
 
 ```bash
-clotho get <URL>            # archive one URL directly (single only, on purpose)
-clotho get --file <path>    # archive all links within a single file
-clotho get --dir <path>     # archive all links of all files within a directory
+arciv get <URL>            # archive one URL directly (single only, on purpose)
+arciv get --file <path>    # archive all links within a single file
+arciv get --dir <path>     # archive all links of all files within a directory
 ```
 
 `get` runs the full pipeline — index, then fetch, then parse — under a single command. Each
 stage also has a dedicated command, which makes developing the library easier:
 
-- **`clotho index`** — extracts all links from wherever specified (`.md`, `.txt`, and
+- **`arciv index`** — extracts all links from wherever specified (`.md`, `.txt`, and
   `.rst` files). For each link a row is stored with the link value itself, the full
   normalized filepath where it was found, and the time it was indexed.
-- **`clotho fetch`** — the patchright/playwright magic: downloads pending URLs (browser for
+- **`arciv fetch`** — the patchright/playwright magic: downloads pending URLs (browser for
   HTML, direct HTTP for PDFs) and archives the raw content on disk.
-- **`clotho parse`** — looks at the fetched HTML pages / PDFs and parses them to markdown.
+- **`arciv parse`** — looks at the fetched HTML pages / PDFs and parses them to markdown.
 
 ### Sources — ✅ implemented
 
 A "Source" is a registered file directory (entirely limited to directories for now):
 
 ```bash
-clotho add <directory> <name>   # register a source (both args required)
-clotho remove <name>            # unregister it (indexed pages are kept)
-clotho sources                  # list registered sources
-clotho index <name>             # index a single source
-clotho index --all              # index every registered source
+arciv add <directory> <name>   # register a source (both args required)
+arciv remove <name>            # unregister it (indexed pages are kept)
+arciv sources                  # list registered sources
+arciv index <name>             # index a single source
+arciv index --all              # index every registered source
 ```
 
 ### Data directory — ✅ implemented
 
 The data root defaults to the OS user data dir via platformdirs (Linux:
-`~/.local/share/clotho`, Windows: `%LOCALAPPDATA%\clotho`). Chosen with the Docker backend
+`~/.local/share/arciv`, Windows: `%LOCALAPPDATA%\arciv`). Chosen with the Docker backend
 in mind: it lives outside any repo checkout, so the backend container can mount it directly.
-`CLOTHO_DATA_DIR` still overrides it (e.g. `CLOTHO_DATA_DIR=data` in `.env` when developing
+`ARCIV_DATA_DIR` still overrides it (e.g. `ARCIV_DATA_DIR=data` in `.env` when developing
 from a clone).
 
 ## 1. Backend + Frontend (next phase)
@@ -66,7 +66,7 @@ the frontend, otherwise a blazingly-fast plain HTML site. References:
 - https://news.ycombinator.com/item?id=48475483
 - https://news.ycombinator.com/item?id=48437609
 
-The backend mostly shells out to the CLI or reads `clotho.db` / `saved/<slug>/` under the
+The backend mostly shells out to the CLI or reads `arciv.db` / `saved/<slug>/` under the
 data dir directly — the storage contract it builds against is documented in AGENTS.md. Backend and
 frontend each get a dedicated container (the CLI does not).
 
@@ -85,21 +85,21 @@ it should open it read-only and may need a checkpoint first (or copy the file).
 
 Only what real usage demands.
 
-- `clotho status` — ✅ implemented: pipeline-state counts and failure summary. Recent
-  fetches were dropped from it; that's `clotho list`'s job now.
-- `clotho list` — ✅ implemented: fetched pages as `fetched-at TAB domain TAB url`, newest
+- `arciv status` — ✅ implemented: pipeline-state counts and failure summary. Recent
+  fetches were dropped from it; that's `arciv list`'s job now.
+- `arciv list` — ✅ implemented: fetched pages as `fetched-at TAB domain TAB url`, newest
   first. `--n` caps the row count (0 = everything), `--reverse` flips to oldest first,
   `--domain <d>` restricts to one registered domain (exact match, e.g. `medium.com`).
-  Columns stay tab-separated so finer filtering is still `clotho list --n 0 | grep <pat>`.
-- `clotho path <URL>` — ✅ implemented: prints the filepath of a page's archived markdown,
-  composing with standard tools (`less $(clotho path <URL>)`, `grep ... $(clotho path ...)`)
+  Columns stay tab-separated so finer filtering is still `arciv list --n 0 | grep <pat>`.
+- `arciv path <URL>` — ✅ implemented: prints the filepath of a page's archived markdown,
+  composing with standard tools (`less $(arciv path <URL>)`, `grep ... $(arciv path ...)`)
   instead of reimplementing them. The URL is normalized the same way as at index time, so
   e.g. fragment variants resolve to the same page.
-- `clotho db` — ✅ implemented: `db dir` prints the data directory (answers "where does
-  my archive live", also without `CLOTHO_DATA_DIR` set); `db remove` deletes the SQLite
+- `arciv db` — ✅ implemented: `db dir` prints the data directory (answers "where does
+  my archive live", also without `ARCIV_DATA_DIR` set); `db remove` deletes the SQLite
   DB after confirmation (`--force` skips asking; archived files under `saved/` are kept).
 - Parked until the implementation picture is certain:
-  - Stale-row pruning (`clotho prune`?) — v1 pruned failed rows whose URLs vanished from
+  - Stale-row pruning (`arciv prune`?) — v1 pruned failed rows whose URLs vanished from
     the notes during indexing; that behavior was dropped in the stage split because partial
     (per-source) indexing made it unsafe. Revisit if dead rows actually accumulate.
 - Logging cleanup (later) — prune noisy statements and add a `--verbose` flag, so default
@@ -110,7 +110,7 @@ Only what real usage demands.
 - ~~Wikipedia pages lost every section heading~~ — fixed: MediaWiki puts an "[edit]" link
   next to each heading inside a small wrapper div, and trafilatura's link-density pruning
   deleted the whole div. The `mw-editsection` spans are now pruned before extraction.
-  Re-run `clotho parse --reparse` to repair already-archived pages.
+  Re-run `arciv parse --reparse` to repair already-archived pages.
 - medium.com is paywalled. Research how the freedium.cfd mirror works (its source code is
   fully available) — could inform a rewrite rule or fetch fallback.
 - Cookie-consent walls eat some pages (e.g. gigaom rejected as "too short")
@@ -126,7 +126,7 @@ Only what real usage demands.
 
 ## Rejected
 
-- Obsidian plugin — Clotho is not Obsidian-specific (and is moving further away from that);
+- Obsidian plugin — Arciv is not Obsidian-specific (and is moving further away from that);
   the CLI + web UI path is the direction.
 
 ## Principles

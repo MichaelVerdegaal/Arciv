@@ -16,7 +16,7 @@ from functools import cache
 
 from loguru import logger
 
-from clotho.settings import DATA_DIR
+from arciv.settings import DATA_DIR
 
 UA_FILE = DATA_DIR / "user_agents.txt"
 MICROLINK_URL = "https://microlink.io/user-agents.json"

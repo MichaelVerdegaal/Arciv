@@ -2,7 +2,7 @@
 
 import itertools
 
-from clotho.convert.convert import (
+from arciv.convert.convert import (
     ConversionResult,
     count_words,
     extract_metadata,

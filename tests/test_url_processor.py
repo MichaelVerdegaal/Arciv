@@ -5,7 +5,7 @@ import re
 from hypothesis import given
 from hypothesis import strategies as st
 
-from clotho.scrape.url_processor import (
+from arciv.scrape.url_processor import (
     is_pdf_url,
     is_raw_text_url,
     process_url,

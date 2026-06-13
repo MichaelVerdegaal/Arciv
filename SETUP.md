@@ -1,6 +1,6 @@
 # Setup
 
-How to set up Clotho.
+How to set up Arciv.
 
 ## Requirements
 
@@ -9,14 +9,14 @@ How to set up Clotho.
 
 ## Install as a uv tool (recommended for usage)
 
-Clotho is a plain CLI tool — no container needed:
+Arciv is a plain CLI tool — no container needed:
 
 ```bash
 uv tool install git+https://github.com/MichaelVerdegaal/Clotho   # or: uv tool install . from a clone
 patchright install chrome   # browser engine used for fetching
 ```
 
-After that `clotho` is on your PATH. The archive lives in the OS user data directory by default (see
+After that `arciv` is on your PATH. The archive lives in the OS user data directory by default (see
 Configuration below), so no further setup is needed.
 
 ## Develop from a clone
@@ -33,16 +33,16 @@ this by manually installing Chrome.
 ## Configuration
 
 Everything works out of the box — the browser user-agent pool refreshes itself on the first run.
-Point Clotho at your notes by registering them as a source:
+Point Arciv at your notes by registering them as a source:
 
 ```bash
-clotho add "/path/to/your/vault/Daily notes" notes
-clotho index notes
+arciv add "/path/to/your/vault/Daily notes" notes
+arciv index notes
 ```
 
 Optional override, via environment variable or a `.env` file (see [.env.example](.env.example)):
 
-- `CLOTHO_DATA_DIR` — where the SQLite database, archived pages, and logs live. Defaults to the OS
-  user data directory (Linux: `~/.local/share/clotho`, Windows: `%LOCALAPPDATA%\clotho`). Set
-  `CLOTHO_DATA_DIR=data` in `.env` to keep the archive inside the repository when developing from a
+- `ARCIV_DATA_DIR` — where the SQLite database, archived pages, and logs live. Defaults to the OS
+  user data directory (Linux: `~/.local/share/arciv`, Windows: `%LOCALAPPDATA%\arciv`). Set
+  `ARCIV_DATA_DIR=data` in `.env` to keep the archive inside the repository when developing from a
   clone.

@@ -3,7 +3,7 @@
 For every link found, a row is stored with the processed URL, the full
 normalized path of the file it was found in, and the time it was indexed.
 Pages are created in pending state; downloading them is the fetch stage's
-job (see ``clotho.pipeline.fetch``).
+job (see ``arciv.pipeline.fetch``).
 """
 
 from datetime import datetime, timezone
@@ -11,9 +11,9 @@ from pathlib import Path
 
 from loguru import logger
 
-from clotho.db import PageDatabase
-from clotho.notes import Note, load_note, load_notes
-from clotho.scrape import process_url, registered_domain, slug_for_url, split_url
+from arciv.db import PageDatabase
+from arciv.notes import Note, load_note, load_notes
+from arciv.scrape import process_url, registered_domain, slug_for_url, split_url
 
 
 def _page_entry(processed_url: str, original_url: str) -> tuple[str, str, str, str]:
@@ -105,7 +105,7 @@ def index_all(db: PageDatabase) -> list[str]:
 def register_urls(db: PageDatabase, urls: list[str]) -> list[str]:
     """Register directly-provided URLs (no source file, so no link rows).
 
-    Used by ``clotho get <URL>``, where the URL doesn't come from a file.
+    Used by ``arciv get <URL>``, where the URL doesn't come from a file.
     Returns the processed URLs that were registered; skipped URLs excluded.
     """
     registered: dict[str, None] = {}

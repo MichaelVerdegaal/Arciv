@@ -2,8 +2,8 @@
 
 import pytest
 
-from clotho.db import Page, PageDatabase
-from clotho.pipeline.parse import parse_pending
+from arciv.db import Page, PageDatabase
+from arciv.pipeline.parse import parse_pending
 
 
 def _make_html(tag: str) -> str:

@@ -2,7 +2,7 @@
 
 import pytest
 
-from clotho.db import Page, PageDatabase, Source
+from arciv.db import Page, PageDatabase, Source
 
 
 @pytest.fixture

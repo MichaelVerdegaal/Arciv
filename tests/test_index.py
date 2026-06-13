@@ -2,8 +2,8 @@
 
 import pytest
 
-from clotho.db import PageDatabase, Source
-from clotho.pipeline.index import (
+from arciv.db import PageDatabase, Source
+from arciv.pipeline.index import (
     index_all,
     index_directory,
     index_file,
