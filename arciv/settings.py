@@ -1,10 +1,10 @@
 """Configuration: data directory layout and logging setup.
 
 The data root defaults to the OS user data directory (Linux:
-``~/.local/share/clotho``, Windows: ``%LOCALAPPDATA%\\clotho``), so the
+``~/.local/share/arciv``, Windows: ``%LOCALAPPDATA%\\arciv``), so the
 archive has one fixed home regardless of where the command runs, and
 lives outside any repo checkout, so the future backend container can
-mount it directly. Set ``CLOTHO_DATA_DIR`` (in the environment or a
+mount it directly. Set ``ARCIV_DATA_DIR`` (in the environment or a
 ``.env`` file) to relocate it, e.g. to ``./data`` when developing from
 a clone.
 """
@@ -22,15 +22,15 @@ from platformdirs import user_data_dir
 load_dotenv()
 
 # Data root holding the database, archived pages, and logs; override via
-# CLOTHO_DATA_DIR to relocate it (e.g. onto a synced drive)
+# ARCIV_DATA_DIR to relocate it (e.g. onto a synced drive)
 DATA_DIR = Path(
-    os.getenv("CLOTHO_DATA_DIR") or user_data_dir("clotho", appauthor=False)
+    os.getenv("ARCIV_DATA_DIR") or user_data_dir("arciv", appauthor=False)
 ).resolve()
 SAVED_DIR = DATA_DIR / "saved"
 LOGS_DIR = DATA_DIR / "logs"
 
 # File constants
-DB_PATH = DATA_DIR / "clotho.db"
+DB_PATH = DATA_DIR / "arciv.db"
 
 
 def configure_logger(
@@ -63,7 +63,7 @@ def configure_logger(
     # File - mode="a" appends across runs
     if log_file:
         logger.add(
-            LOGS_DIR / "clotho.log",
+            LOGS_DIR / "arciv.log",
             format=log_format,
             level=file_level,
             backtrace=True,

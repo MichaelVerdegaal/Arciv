@@ -1,11 +1,11 @@
-# Clotho
+# Arciv
 
 ## Project Description
-Clotho is a personal archival tool for reading material — blog posts, research papers,
+Arciv is a personal archival tool for reading material — blog posts, research papers,
 documentation. Not books, not videos. It extracts URLs from markdown files (or takes them
 directly on the CLI), scrapes their content, and archives it as markdown on disk. The goal: a
 trustworthy archive of everything worth reading again, retrievable years later. Retrieval today
-is the inspection commands (`clotho list`, `clotho path`) plus ripgrep over the archive; a web
+is the inspection commands (`arciv list`, `arciv path`) plus ripgrep over the archive; a web
 UI for browsing it is the next step (see PLAN.md).
 
 The project splits into three isolated parts: the **CLI tool** (this package — all archival
@@ -15,17 +15,17 @@ which each get a dedicated container.
 ### Architecture
 
 Three stages, no writeback into the notes. Each stage has a dedicated CLI command;
-`clotho get` runs all three in order on a URL, a file (`--file`), or a directory (`--dir`).
+`arciv get` runs all three in order on a URL, a file (`--file`), or a directory (`--dir`).
 
-1. **Indexing** (`clotho index`, `clotho/pipeline/index.py`) — Parse note files (`.md`,
+1. **Indexing** (`arciv index`, `arciv/pipeline/index.py`) — Parse note files (`.md`,
    `.txt`, `.rst`), extract all links, deduplicate, apply filtering/rewrite rules, register
    pending pages. Each link
    gets a row with the URL, the full normalized filepath it was found in, and an indexed-at
-   timestamp. Indexing operates on registered sources (`clotho add <dir> <name>`).
-2. **Fetching** (`clotho fetch`, `clotho/pipeline/fetch.py` + `clotho/scrape/`) — Download raw
+   timestamp. Indexing operates on registered sources (`arciv add <dir> <name>`).
+2. **Fetching** (`arciv fetch`, `arciv/pipeline/fetch.py` + `arciv/scrape/`) — Download raw
    content with patchright (async, concurrency-controlled); PDFs via direct HTTP. Writes
    `page.html` / `page.pdf` to disk, no conversion.
-3. **Parsing** (`clotho parse`, `clotho/pipeline/parse.py` + `clotho/convert/`) — Validate
+3. **Parsing** (`arciv parse`, `arciv/pipeline/parse.py` + `arciv/convert/`) — Validate
    fetched HTML, convert to markdown via trafilatura (HTML) or liteparse (PDF), write
    `page.md` next to the raw file, fill in title/author/word count.
 
@@ -34,7 +34,7 @@ Three stages, no writeback into the notes. Each stage has a dedicated CLI comman
 The planned backend/frontend read the data directory directly, so treat this layout as a
 public interface — changes to it ripple beyond the Python code:
 
-- `<data dir>/clotho.db` — SQLite (WAL mode, foreign keys ON). `pages` holds one row per URL:
+- `<data dir>/arciv.db` — SQLite (WAL mode, foreign keys ON). `pages` holds one row per URL:
   `url` (PK, normalized), `original_url`, `domain`, `slug`, `content_type` (`html`/`pdf`,
   set at fetch), `title`, `author`, `word_count`, `fail_reason`, `added_at`, `fetched_at`,
   `parsed_at`. Pipeline state is carried by the timestamps: pending (no `fetched_at`),
@@ -46,8 +46,8 @@ public interface — changes to it ripple beyond the Python code:
   `page.md` once parsed. Slug format is `<domain>-<hash8>`, sanitized to be a safe directory
   name on Linux and Windows.
 - The data root defaults to the OS user data dir via platformdirs (Linux:
-  `~/.local/share/clotho`, Windows: `%LOCALAPPDATA%\clotho`) and is relocatable via
-  `CLOTHO_DATA_DIR` (e.g. `CLOTHO_DATA_DIR=data` in `.env` when developing from a clone).
+  `~/.local/share/arciv`, Windows: `%LOCALAPPDATA%\arciv`) and is relocatable via
+  `ARCIV_DATA_DIR` (e.g. `ARCIV_DATA_DIR=data` in `.env` when developing from a clone).
 
 ### Key Libraries
 
@@ -72,13 +72,13 @@ uv add --group dev <package>     # Add dev dependency
 uv run ruff check                # Lint
 uv run ruff format               # Format code
 uv run pytest                    # Run tests (with coverage)
-uv run clotho --help             # Run the CLI from the repo
+uv run arciv --help             # Run the CLI from the repo
 uv tool install .                # Install the CLI as a global tool
 ```
 
 ## Current Direction
 
-The scope is settled: Clotho is the main archival tool for all reading material. The CLI
+The scope is settled: Arciv is the main archival tool for all reading material. The CLI
 foundation (layered `get`, separated stages, sources) is in place; the backend + frontend
 phase is what's being built next. PLAN.md is the live roadmap. One standing constraint for
 that work:

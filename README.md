@@ -1,14 +1,11 @@
-# Clotho
+# Arciv
 
 [![CI](https://github.com/MichaelVerdegaal/Clotho/actions/workflows/ci.yml/badge.svg)](https://github.com/MichaelVerdegaal/Clotho/actions/workflows/ci.yml)
 
-Clotho is your personal archive for reading material. The blog posts, research papers, and
+Arciv is your personal archive for reading material. The blog posts, research papers, and
 documentation you collect — linked in your notes or fed in directly — are fetched and stored
 as clean, searchable markdown you can trust years from now. Reading material only: not books,
 not videos.
-
-In ancient greek mythology, Clotho is one of the three Fates responsible for spinning the thread
-of life. And what is a knowledge archive, if not a web of interconnected threads of knowledge?
 
 ## What It Does
 
@@ -24,39 +21,39 @@ Three stages, no writeback into your notes:
 Archive things directly — a single URL, a single file, or a whole directory:
 
 ```bash
-clotho get https://example.com/post   # archive one URL
-clotho get --file note.md             # archive all links in one file
-clotho get --dir path/to/notes        # archive all links in a directory
+arciv get https://example.com/post   # archive one URL
+arciv get --file note.md             # archive all links in one file
+arciv get --dir path/to/notes        # archive all links in a directory
 ```
 
 Register directories you index repeatedly as named sources:
 
 ```bash
-clotho add ~/vault/daily-notes notes  # register a source
-clotho sources                        # list registered sources
-clotho index notes                    # index one source
-clotho index --all                    # index every source
-clotho remove notes                   # unregister (archived pages are kept)
+arciv add ~/vault/daily-notes notes  # register a source
+arciv sources                        # list registered sources
+arciv index notes                    # index one source
+arciv index --all                    # index every source
+arciv remove notes                   # unregister (archived pages are kept)
 ```
 
 Run individual pipeline stages:
 
 ```bash
-clotho fetch                          # download indexed URLs still pending
-clotho fetch --refetch                # re-download every known page
-clotho parse                          # convert fetched pages to markdown
-clotho parse --reparse                # re-parse everything from disk
+arciv fetch                          # download indexed URLs still pending
+arciv fetch --refetch                # re-download every known page
+arciv parse                          # convert fetched pages to markdown
+arciv parse --reparse                # re-parse everything from disk
 ```
 
 Inspect the archive:
 
 ```bash
-clotho status                         # pipeline counts + failure summary
-clotho list --n 50                    # fetched pages: time, domain, URL
-clotho list --domain medium.com       # only pages from one domain
-clotho path https://example.com/post  # filepath of its archived markdown
-clotho db dir                         # where the archive lives on disk
-clotho db remove                      # delete the database (asks first)
+arciv status                         # pipeline counts + failure summary
+arciv list --n 50                    # fetched pages: time, domain, URL
+arciv list --domain medium.com       # only pages from one domain
+arciv path https://example.com/post  # filepath of its archived markdown
+arciv db dir                         # where the archive lives on disk
+arciv db remove                      # delete the database (asks first)
 ```
 
 See [SETUP.md](SETUP.md) for installation and configuration.
@@ -65,3 +62,7 @@ See [SETUP.md](SETUP.md) for installation and configuration.
 
 The CLI foundation is in place; the focus now is on getting insight into what's stored — a web
 UI for browsing the archive, backed by this CLI. See [PLAN.md](PLAN.md) for the roadmap.
+
+## The Name
+
+"Arciv" is a compact respelling of *archivum*, the Latin root of "archive". Arciv helps you accumulate historical records, just like a physical archive does.

@@ -14,10 +14,10 @@ from pathlib import Path
 
 from loguru import logger
 
-from clotho.convert import check_html, parse_html, pdf_to_text
-from clotho.db import Page, PageDatabase
-from clotho.scrape import is_raw_text_url
-from clotho.settings import SAVED_DIR
+from arciv.convert import check_html, parse_html, pdf_to_text
+from arciv.db import Page, PageDatabase
+from arciv.scrape import is_raw_text_url
+from arciv.settings import SAVED_DIR
 
 DEFAULT_MIN_WORDS = 150
 

@@ -1,5 +1,5 @@
 [project]
-name = "clotho"
+name = "arciv"
 version = "0.1.0"
 description = "Your personal knowledge toolkit."
 readme = "README.md"
@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
-clotho = "clotho.scripts.cli:cli"
+arciv = "arciv.scripts.cli:cli"
 
 [dependency-groups]
 dev = [
@@ -32,15 +32,15 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["clotho"]
+packages = ["arciv"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=clotho --cov-report=term-missing"
+addopts = "--cov=arciv --cov-report=term-missing"
 
 [tool.coverage.run]
 branch = true
-source = ["clotho"]
+source = ["arciv"]
 
 [tool.coverage.report]
 show_missing = true

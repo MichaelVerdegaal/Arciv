@@ -12,6 +12,51 @@ wheels = [
 ]
 
 [[package]]
+name = "arciv"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "aiofiles" },
+    { name = "click" },
+    { name = "liteparse" },
+    { name = "loguru" },
+    { name = "patchright" },
+    { name = "platformdirs" },
+    { name = "python-dotenv" },
+    { name = "tldextract" },
+    { name = "trafilatura" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "hypothesis" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiofiles", specifier = ">=25.1.0" },
+    { name = "click", specifier = ">=8.1.0" },
+    { name = "liteparse", specifier = ">=2.0.3" },
+    { name = "loguru", specifier = ">=0.7.3" },
+    { name = "patchright", specifier = ">=1.60.0" },
+    { name = "platformdirs", specifier = ">=4.10.0" },
+    { name = "python-dotenv", specifier = ">=1.2.1" },
+    { name = "tldextract", specifier = ">=5.3.1" },
+    { name = "trafilatura", specifier = ">=2.0.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "hypothesis", specifier = ">=6.120.0" },
+    { name = "pytest", specifier = ">=8.3.0" },
+    { name = "pytest-cov", specifier = ">=6.0.0" },
+    { name = "ruff", specifier = ">=0.15.15" },
+]
+
+[[package]]
 name = "babel"
 version = "2.18.0"
 source = { registry = "https://pypi.org/simple" }
@@ -112,51 +157,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/9b/98/518d8e5081007684232226f475082b30087d0f585e8457db087298259f49/click-8.4.1.tar.gz", hash = "sha256:918b5633eddf6b41c32d4f454bf0de810065c74e3f7dbf8ee5452f8be88d3e96", size = 353007, upload-time = "2026-05-22T04:08:37.769Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c7/0d/67e5b4109ea4a837e80daa87c2c696711955e40449a97e8926672534def2/click-8.4.1-py3-none-any.whl", hash = "sha256:482be17c6991b8c19c5429a1e995d9b0efdbb63172824c41f99965dc0ade8ec2", size = 116639, upload-time = "2026-05-22T04:08:35.26Z" },
-]
-
-[[package]]
-name = "clotho"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "aiofiles" },
-    { name = "click" },
-    { name = "liteparse" },
-    { name = "loguru" },
-    { name = "patchright" },
-    { name = "platformdirs" },
-    { name = "python-dotenv" },
-    { name = "tldextract" },
-    { name = "trafilatura" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "hypothesis" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiofiles", specifier = ">=25.1.0" },
-    { name = "click", specifier = ">=8.1.0" },
-    { name = "liteparse", specifier = ">=2.0.3" },
-    { name = "loguru", specifier = ">=0.7.3" },
-    { name = "patchright", specifier = ">=1.60.0" },
-    { name = "platformdirs", specifier = ">=4.10.0" },
-    { name = "python-dotenv", specifier = ">=1.2.1" },
-    { name = "tldextract", specifier = ">=5.3.1" },
-    { name = "trafilatura", specifier = ">=2.0.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "hypothesis", specifier = ">=6.120.0" },
-    { name = "pytest", specifier = ">=8.3.0" },
-    { name = "pytest-cov", specifier = ">=6.0.0" },
-    { name = "ruff", specifier = ">=0.15.15" },
 ]
 
 [[package]]
