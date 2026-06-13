@@ -1,10 +1,12 @@
 """Tests for the inspection/data-dir CLI commands (list, path, status, db)."""
 
 import pytest
+from loguru import logger
 from typer.testing import CliRunner
 
 import arciv.scripts.cli as cli_module
 from arciv.db import Page, PageDatabase
+from arciv.settings import configure_logger
 
 
 @pytest.fixture
@@ -244,3 +246,17 @@ class TestDbGroup:
         result = runner.invoke(cli_module.cli, ["db", "remove"])
         assert result.exit_code == 0
         assert "No database" in result.output
+
+
+class TestLogging:
+    def test_logs_go_to_stderr_not_stdout(self, capfd):
+        # Data commands print to stdout; logs are diagnostics and must go
+        # to stderr so output like `arciv list` stays clean and pipeable.
+        configure_logger(log_file=False)
+        try:
+            logger.info("STDERR-MARKER")
+        finally:
+            logger.remove()  # flush and join the enqueue worker
+        out, err = capfd.readouterr()
+        assert "STDERR-MARKER" not in out
+        assert "STDERR-MARKER" in err

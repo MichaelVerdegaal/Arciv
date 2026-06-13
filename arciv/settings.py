@@ -49,10 +49,11 @@ def configure_logger(
         "<level>{message}</level>"
     )
 
-    # Console with colors
+    # Console on stderr so data printed to stdout (e.g. `arciv list`,
+    # `arciv path`) stays clean and pipeable; logs are diagnostics, not data
     if log_console:
         logger.add(
-            sys.stdout,
+            sys.stderr,
             format=log_format,
             level=console_level,
             backtrace=True,
