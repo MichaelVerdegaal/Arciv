@@ -102,8 +102,13 @@ Only what real usage demands.
   - Stale-row pruning (`arciv prune`?) — v1 pruned failed rows whose URLs vanished from
     the notes during indexing; that behavior was dropped in the stage split because partial
     (per-source) indexing made it unsafe. Revisit if dead rows actually accumulate.
-- Logging cleanup (later) — prune noisy statements and add a `--verbose` flag, so default
-  runs stay quiet and the detail lives behind the flag.
+- Logging cleanup — ✅ done: the CLI moved from Click to **cyclopts**, logs now go to
+  stderr (data on stdout), and global `-v`/`-vv`/`-q` flags plus `--color` control verbosity
+  and color. `--json`/JSONL output, stdin (`get -`), and `--null` were added for Unix
+  composability.
+- Shell completion — open item. Click shipped bash/zsh/fish completion nearly for free;
+  cyclopts offers an `install-completion` command, but the developer-facing completion story
+  after the swap still needs a decision (accept as-is, or wire up a generated script).
 
 ## Known fetch/parse gaps
 

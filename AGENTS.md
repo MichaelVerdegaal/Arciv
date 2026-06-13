@@ -55,7 +55,7 @@ public interface — changes to it ripple beyond the Python code:
 - `trafilatura` — HTML content extraction
 - `liteparse` — PDF text extraction
 - `tldextract` — domain parsing (registered domain grouping)
-- `click` — CLI framework
+- `cyclopts` — CLI framework
 - `loguru` — logging (one log statement per URL processed)
 - `platformdirs` — OS-appropriate default data directory
 

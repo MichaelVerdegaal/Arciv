@@ -7,6 +7,9 @@ How to set up Arciv.
 - Python 3.12 or newer (`.python-version` pins the development default).
 - [UV](https://docs.astral.sh/uv/) installed for package management
 
+The CLI is built on [cyclopts](https://cyclopts.readthedocs.io/); it is pulled in
+automatically as a dependency, nothing extra to install.
+
 ## Install as a uv tool (recommended for usage)
 
 Arciv is a plain CLI tool — no container needed:
@@ -46,3 +49,10 @@ Optional override, via environment variable or a `.env` file (see [.env.example]
   user data directory (Linux: `~/.local/share/arciv`, Windows: `%LOCALAPPDATA%\arciv`). Set
   `ARCIV_DATA_DIR=data` in `.env` to keep the archive inside the repository when developing from a
   clone.
+
+## Windows / Git Bash
+
+The CLI runs on native Windows Python and under Git Bash. One caveat: Git Bash
+(MinTTY) pipes Arciv's I/O, so `sys.stderr.isatty()` is `False` even in an
+interactive session and `--color auto` therefore disables color. To keep colored
+logs in Git Bash, pass `--color always` (or set `FORCE_COLOR=1`).
