@@ -12,7 +12,7 @@ How to set up Arciv.
 Arciv is a plain CLI tool — no container needed:
 
 ```bash
-uv tool install git+https://github.com/MichaelVerdegaal/Clotho   # or: uv tool install . from a clone
+uv tool install git+https://github.com/MichaelVerdegaal/Arciv   # or: uv tool install . from a clone
 patchright install chrome   # browser engine used for fetching
 ```
 
