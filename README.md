@@ -1,6 +1,6 @@
 # Arciv
 
-[![CI](https://github.com/MichaelVerdegaal/Clotho/actions/workflows/ci.yml/badge.svg)](https://github.com/MichaelVerdegaal/Clotho/actions/workflows/ci.yml)
+[![CI](https://github.com/MichaelVerdegaal/Arciv/actions/workflows/ci.yml/badge.svg)](https://github.com/MichaelVerdegaal/Arciv/actions/workflows/ci.yml)
 
 Arciv is your personal archive for reading material. The blog posts, research papers, and
 documentation you collect — linked in your notes or fed in directly — are fetched and stored
