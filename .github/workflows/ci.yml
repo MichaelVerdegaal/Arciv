@@ -41,3 +41,18 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: uv sync --frozen
       - run: uv run pytest
+
+  windows-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    # The CLI must import and run on native Windows Python. This is a smoke
+    # check (install + import + --help), not the full suite — a full Windows
+    # test matrix is a follow-up if it proves worth the CI time.
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen
+      - run: uv run python -c "import arciv.scripts.cli"
+      - run: uv run arciv --help
