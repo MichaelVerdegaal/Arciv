@@ -33,14 +33,30 @@ LOGS_DIR = DATA_DIR / "logs"
 DB_PATH = DATA_DIR / "arciv.db"
 
 
-def configure_logger(
-    console_level: str = "DEBUG",
-    file_level: str = "DEBUG",
-    log_console: bool = True,
-    log_file: bool = True,
-) -> None:
-    """Configure loguru logger with detailed formatting."""
+# Maps the CLI's --color choice to loguru's colorize argument. "auto"
+# becomes None so loguru auto-detects the sink's TTY and honors
+# NO_COLOR / FORCE_COLOR.
+_COLOR_TO_COLORIZE: dict[str, bool | None] = {
+    "always": True,
+    "never": False,
+    "auto": None,
+}
+
+
+def configure_logger(level: str = "INFO", color: str = "auto") -> None:
+    """Configure loguru to log to stderr (and a rotating file).
+
+    Data belongs on stdout; everything diagnostic (logs, progress,
+    summaries) goes to stderr so ``arciv list | cat`` shows only data.
+    Calling this repeatedly is safe: handlers are reset first.
+
+    Args:
+        level: Console log level, e.g. "INFO", "DEBUG", "TRACE", "ERROR".
+        color: One of "auto" (let loguru detect the TTY and honor
+            NO_COLOR/FORCE_COLOR), "always", or "never".
+    """
     logger.remove()
+    colorize = _COLOR_TO_COLORIZE.get(color)
 
     # Shared format (color tags get stripped in file output)
     log_format = (
@@ -49,25 +65,24 @@ def configure_logger(
         "<level>{message}</level>"
     )
 
-    # Console with colors
-    if log_console:
-        logger.add(
-            sys.stdout,
-            format=log_format,
-            level=console_level,
-            backtrace=True,
-            diagnose=True,
-            enqueue=True,
-        )
+    # Console sink on stderr so data on stdout stays clean
+    logger.add(
+        sys.stderr,
+        format=log_format,
+        level=level,
+        colorize=colorize,
+        backtrace=True,
+        diagnose=True,
+        enqueue=True,
+    )
 
-    # File - mode="a" appends across runs
-    if log_file:
-        logger.add(
-            LOGS_DIR / "arciv.log",
-            format=log_format,
-            level=file_level,
-            backtrace=True,
-            diagnose=True,
-            rotation="1 day",
-            enqueue=True,
-        )
+    # File - rotates daily, always at DEBUG for a full diagnostic trail
+    logger.add(
+        LOGS_DIR / "arciv.log",
+        format=log_format,
+        level="DEBUG",
+        backtrace=True,
+        diagnose=True,
+        rotation="1 day",
+        enqueue=True,
+    )
