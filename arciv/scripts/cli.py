@@ -1,4 +1,4 @@
-"""Arciv CLI: archive management commands.
+"""Arciv CLI: archive management commands (built on Typer).
 
 Layered archiving with ``get`` (index → fetch → parse in one go):
 
@@ -30,8 +30,9 @@ Inspection:
 
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NoReturn
 
-import click
+import typer
 from loguru import logger
 
 from arciv.settings import DATA_DIR, DB_PATH, SAVED_DIR, configure_logger
@@ -49,40 +50,54 @@ from arciv.pipeline import (
     report,
 )
 
+# add_completion=False keeps the CLI surface identical to the old click one
+# (no extra --install-completion/--show-completion options).
+cli = typer.Typer(
+    help="Arciv: personal knowledge archive.",
+    no_args_is_help=True,
+    add_completion=False,
+)
+db_app = typer.Typer(help="Inspect or manage the database file.", no_args_is_help=True)
+cli.add_typer(db_app, name="db")
 
-@click.group()
-def cli() -> None:
+
+def _fail(message: str, code: int = 1) -> NoReturn:
+    """Print an error to stderr and exit, no traceback.
+
+    Mirrors click's ClickException/UsageError: a clean ``Error: ...`` line
+    and a non-zero exit code. Use code 2 for a usage error (bad argument
+    combination), 1 for an operation that failed.
+    """
+    typer.echo(f"Error: {message}", err=True)
+    raise typer.Exit(code)
+
+
+@cli.callback()
+def main() -> None:
     """Arciv: personal knowledge archive."""
     configure_logger()
 
 
 @cli.command()
-@click.argument("url", required=False)
-@click.option(
-    "--file",
-    "file_path",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=None,
-    help="Archive all links within a single file.",
-)
-@click.option(
-    "--dir",
-    "dir_path",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    default=None,
-    help="Archive all links of all files within a directory.",
-)
-@click.option(
-    "--refetch",
-    is_flag=True,
-    default=False,
-    help="Re-download pages even if already fetched.",
-)
 def get(
-    url: str | None,
-    file_path: Path | None,
-    dir_path: Path | None,
-    refetch: bool,
+    url: str | None = typer.Argument(None, help="A single URL to archive."),
+    file_path: Path | None = typer.Option(
+        None,
+        "--file",
+        exists=True,
+        dir_okay=False,
+        help="Archive all links within a single file.",
+    ),
+    dir_path: Path | None = typer.Option(
+        None,
+        "--dir",
+        exists=True,
+        file_okay=False,
+        help="Archive all links of all files within a directory.",
+    ),
+    refetch: bool = typer.Option(
+        False, "--refetch", help="Re-download pages even if already fetched."
+    ),
 ) -> None:
     """Archive a URL, the links in a file, or a whole directory.
 
@@ -91,7 +106,7 @@ def get(
     """
     targets = [t for t in (url, file_path, dir_path) if t is not None]
     if len(targets) != 1:
-        raise click.UsageError("Provide exactly one of: URL, --file, or --dir.")
+        _fail("Provide exactly one of: URL, --file, or --dir.", code=2)
 
     with PageDatabase(DB_PATH) as db:
         if url is not None:
@@ -108,12 +123,15 @@ def get(
 
 
 @cli.command()
-@click.argument(
-    "directory",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-)
-@click.argument("name")
-def add(directory: Path, name: str) -> None:
+def add(
+    directory: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=False,
+        help="The directory to register (must exist).",
+    ),
+    name: str = typer.Argument(..., help="The unique name for this source."),
+) -> None:
     """Register DIRECTORY as a source named NAME."""
     source = Source(
         name=name,
@@ -122,17 +140,18 @@ def add(directory: Path, name: str) -> None:
     )
     with PageDatabase(DB_PATH) as db:
         if not db.add_source(source):
-            raise click.ClickException(f"A source named '{name}' already exists.")
+            _fail(f"A source named '{name}' already exists.")
     logger.info(f"Added source '{name}' -> {source.path}")
 
 
 @cli.command()
-@click.argument("name")
-def remove(name: str) -> None:
+def remove(
+    name: str = typer.Argument(..., help="The source name to unregister."),
+) -> None:
     """Unregister the source named NAME (indexed pages are kept)."""
     with PageDatabase(DB_PATH) as db:
         if not db.remove_source(name):
-            raise click.ClickException(f"No source named '{name}'.")
+            _fail(f"No source named '{name}'.")
     logger.info(f"Removed source '{name}'")
 
 
@@ -142,25 +161,24 @@ def sources() -> None:
     with PageDatabase(DB_PATH) as db:
         registered = db.list_sources()
     if not registered:
-        click.echo("No sources registered. Add one with: arciv add <dir> <name>")
+        typer.echo("No sources registered. Add one with: arciv add <dir> <name>")
         return
     for source in registered:
-        click.echo(f"{source.name}\t{source.path}")
+        typer.echo(f"{source.name}\t{source.path}")
 
 
 @cli.command()
-@click.argument("source", required=False)
-@click.option(
-    "--all",
-    "all_sources",
-    is_flag=True,
-    default=False,
-    help="Index every registered source.",
-)
-def index(source: str | None, all_sources: bool) -> None:
+def index(
+    source: str | None = typer.Argument(
+        None, help="Name of the registered source to index."
+    ),
+    all_sources: bool = typer.Option(
+        False, "--all", help="Index every registered source."
+    ),
+) -> None:
     """Index stage: extract links from a registered SOURCE (or --all)."""
     if bool(source) == all_sources:
-        raise click.UsageError("Provide a source name or --all, not both.")
+        _fail("Provide a source name or --all, not both.", code=2)
 
     with PageDatabase(DB_PATH) as db:
         if all_sources:
@@ -169,18 +187,18 @@ def index(source: str | None, all_sources: bool) -> None:
             try:
                 urls = index_source(db, source)
             except KeyError as e:
-                raise click.ClickException(str(e.args[0]))
+                _fail(str(e.args[0]))
     logger.info(f"Indexed {len(urls)} unique URLs")
 
 
 @cli.command()
-@click.option(
-    "--refetch",
-    is_flag=True,
-    default=False,
-    help="Re-download every known page, even fetched/failed ones.",
-)
-def fetch(refetch: bool) -> None:
+def fetch(
+    refetch: bool = typer.Option(
+        False,
+        "--refetch",
+        help="Re-download every known page, even fetched/failed ones.",
+    ),
+) -> None:
     """Fetch stage: download indexed URLs that are still pending."""
     with PageDatabase(DB_PATH) as db:
         fetched = fetch_pending(db, refetch=refetch)
@@ -188,13 +206,11 @@ def fetch(refetch: bool) -> None:
 
 
 @cli.command()
-@click.option(
-    "--reparse",
-    is_flag=True,
-    default=False,
-    help="Re-parse every fetched page, not just unparsed ones.",
-)
-def parse(reparse: bool) -> None:
+def parse(
+    reparse: bool = typer.Option(
+        False, "--reparse", help="Re-parse every fetched page, not just unparsed ones."
+    ),
+) -> None:
     """Parse stage: convert fetched HTML/PDFs into markdown."""
     with PageDatabase(DB_PATH) as db:
         parse_pending(db, reparse=reparse)
@@ -207,41 +223,34 @@ def status() -> None:
         counts = db.status_counts()
         failures = db.fail_summary()
 
-    click.echo(f"Archive: {DB_PATH}")
-    click.echo(f"Pages: {counts['total']} total")
-    click.echo(f"  pending         {counts['pending']}")
-    click.echo(f"  fetch failed    {counts['fetch_failed']}")
-    click.echo(f"  awaiting parse  {counts['awaiting_parse']}")
-    click.echo(f"  parse rejected  {counts['parse_rejected']}")
-    click.echo(f"  parsed          {counts['parsed']}")
+    typer.echo(f"Archive: {DB_PATH}")
+    typer.echo(f"Pages: {counts['total']} total")
+    typer.echo(f"  pending         {counts['pending']}")
+    typer.echo(f"  fetch failed    {counts['fetch_failed']}")
+    typer.echo(f"  awaiting parse  {counts['awaiting_parse']}")
+    typer.echo(f"  parse rejected  {counts['parse_rejected']}")
+    typer.echo(f"  parsed          {counts['parsed']}")
 
     if failures:
-        click.echo("\nFailures by domain:")
+        typer.echo("\nFailures by domain:")
         for domain, reason, count in failures[:10]:
-            click.echo(f"  {domain}: {reason} ({count})")
+            typer.echo(f"  {domain}: {reason} ({count})")
 
 
 @cli.command(name="list")
-@click.option(
-    "--n",
-    "limit",
-    type=click.IntRange(min=0),
-    default=20,
-    show_default=True,
-    help="Number of rows to show; 0 shows everything.",
-)
-@click.option(
-    "--reverse",
-    is_flag=True,
-    default=False,
-    help="Oldest first instead of newest first.",
-)
-@click.option(
-    "--domain",
-    default=None,
-    help="Only show pages from this registered domain, e.g. medium.com.",
-)
-def list_pages(limit: int, reverse: bool, domain: str | None) -> None:
+def list_pages(
+    limit: int = typer.Option(
+        20, "--n", min=0, help="Number of rows to show; 0 shows everything."
+    ),
+    reverse: bool = typer.Option(
+        False, "--reverse", help="Oldest first instead of newest first."
+    ),
+    domain: str | None = typer.Option(
+        None,
+        "--domain",
+        help="Only show pages from this registered domain, e.g. medium.com.",
+    ),
+) -> None:
     """List fetched pages, newest first: fetch time, domain, URL.
 
     Columns are tab-separated so the output pipes cleanly into
@@ -254,12 +263,15 @@ def list_pages(limit: int, reverse: bool, domain: str | None) -> None:
     for page in pages:
         # ISO timestamp trimmed to seconds for readability
         fetched_at = (page.fetched_at or "")[:19]
-        click.echo(f"{fetched_at}\t{page.domain}\t{page.url}")
+        typer.echo(f"{fetched_at}\t{page.domain}\t{page.url}")
 
 
 @cli.command()
-@click.argument("url")
-def path(url: str) -> None:
+def path(
+    url: str = typer.Argument(
+        ..., help="The URL whose archived markdown path to print."
+    ),
+) -> None:
     """Print the filepath of URL's archived markdown.
 
     Composes with standard tools: cat/less/grep $(arciv path <URL>).
@@ -273,50 +285,41 @@ def path(url: str) -> None:
             if processed is not None and processed != url:
                 page = db.get(processed)
     if page is None:
-        raise click.ClickException(f"Unknown URL: {url}")
+        _fail(f"Unknown URL: {url}")
     if page.fail_reason:
-        raise click.ClickException(f"No markdown for {page.url}: {page.fail_reason}")
+        _fail(f"No markdown for {page.url}: {page.fail_reason}")
     if not page.fetched:
-        raise click.ClickException(f"{page.url} is still pending. Run: arciv fetch")
+        _fail(f"{page.url} is still pending. Run: arciv fetch")
     if not page.parsed:
-        raise click.ClickException(
-            f"{page.url} is fetched but not parsed yet. Run: arciv parse"
-        )
+        _fail(f"{page.url} is fetched but not parsed yet. Run: arciv parse")
     md_path = SAVED_DIR / page.slug / "page.md"
     if not md_path.exists():
-        raise click.ClickException(f"Markdown file missing on disk: {md_path}")
-    click.echo(md_path)
+        _fail(f"Markdown file missing on disk: {md_path}")
+    typer.echo(str(md_path))
 
 
-@cli.group(name="db")
-def db_group() -> None:
-    """Inspect or manage the database file."""
-
-
-@db_group.command(name="dir")
+@db_app.command(name="dir")
 def db_dir() -> None:
     """Print the data directory that holds the database."""
-    click.echo(DATA_DIR)
+    typer.echo(str(DATA_DIR))
 
 
-@db_group.command(name="remove")
-@click.option(
-    "--force",
-    is_flag=True,
-    default=False,
-    help="Delete without asking for confirmation.",
-)
-def db_remove(force: bool) -> None:
+@db_app.command(name="remove")
+def db_remove(
+    force: bool = typer.Option(
+        False, "--force", help="Delete without asking for confirmation."
+    ),
+) -> None:
     """Delete the SQLite database; archived files under saved/ are kept."""
     if not DB_PATH.exists():
-        click.echo(f"No database at {DB_PATH}")
+        typer.echo(f"No database at {DB_PATH}")
         return
     if not force:
-        click.confirm(f"Delete {DB_PATH}? All page/source tracking is lost", abort=True)
+        typer.confirm(f"Delete {DB_PATH}? All page/source tracking is lost", abort=True)
     # The WAL sidecar files belong to the main file and must go with it
     for suffix in ("", "-wal", "-shm"):
         DB_PATH.with_name(DB_PATH.name + suffix).unlink(missing_ok=True)
-    click.echo(f"Deleted {DB_PATH}")
+    typer.echo(f"Deleted {DB_PATH}")
 
 
 if __name__ == "__main__":
