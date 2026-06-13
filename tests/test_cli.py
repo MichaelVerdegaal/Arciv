@@ -1,4 +1,4 @@
-"""Tests for the inspection/data-dir CLI commands (list, cat, status, db)."""
+"""Tests for the inspection/data-dir CLI commands (list, path, status, db)."""
 
 import pytest
 from click.testing import CliRunner
