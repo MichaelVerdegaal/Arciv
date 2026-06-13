@@ -77,6 +77,37 @@ class TestHtmlToMarkdown:
     def test_empty_returns_none(self):
         assert html_to_markdown("") is None
 
+    def test_mediawiki_edit_links_dont_swallow_headings(self):
+        # MediaWiki puts an "[edit]" link next to each heading inside a small
+        # wrapper div; without pruning it, trafilatura's link-density check
+        # deleted the whole div and every Wikipedia heading vanished.
+        edit = (
+            '<span class="mw-editsection">'
+            '<span class="mw-editsection-bracket">[</span>'
+            '<a href="/w/index.php?title=Moirai&amp;action=edit">'
+            "<span>edit</span></a>"
+            '<span class="mw-editsection-bracket">]</span></span>'
+        )
+        tag = f"uniq{next(_counter)}"
+        html = (
+            "<html><head><title>Moirai - Wikipedia</title></head><body>"
+            '<main id="content" class="mw-body">'
+            '<div id="bodyContent" class="vector-body">'
+            '<div id="mw-content-text" class="mw-body-content">'
+            '<div class="mw-content-ltr mw-parser-output">'
+            f"<p>{(tag + 'a ') * 60}</p>"
+            f'<div class="mw-heading mw-heading2"><h2 id="s1">Mythology</h2>{edit}</div>'
+            f"<p>{(tag + 'b ') * 60}</p>"
+            f'<div class="mw-heading mw-heading3"><h3 id="s2">Cult sites</h3>{edit}</div>'
+            f"<p>{(tag + 'c ') * 60}</p>"
+            "</div></div></div></main></body></html>"
+        )
+        md = html_to_markdown(html)
+        assert md is not None
+        assert "## Mythology" in md
+        assert "### Cult sites" in md
+        assert "[edit]" not in md
+
 
 class TestExtractMetadata:
     def test_title_from_metadata(self):

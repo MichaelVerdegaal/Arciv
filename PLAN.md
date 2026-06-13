@@ -85,17 +85,32 @@ it should open it read-only and may need a checkpoint first (or copy the file).
 
 Only what real usage demands.
 
-- `clotho status` — ✅ implemented: pipeline-state counts, recent fetches, failure summary
+- `clotho status` — ✅ implemented: pipeline-state counts and failure summary. Recent
+  fetches were dropped from it; that's `clotho list`'s job now.
+- `clotho list` — ✅ implemented: fetched pages as `fetched-at TAB domain TAB url`, newest
+  first. `--n` caps the row count (0 = everything), `--reverse` flips to oldest first,
+  `--domain <d>` restricts to one registered domain (exact match, e.g. `medium.com`).
+  Columns stay tab-separated so finer filtering is still `clotho list --n 0 | grep <pat>`.
+- `clotho path <URL>` — ✅ implemented: prints the filepath of a page's archived markdown,
+  composing with standard tools (`less $(clotho path <URL>)`, `grep ... $(clotho path ...)`)
+  instead of reimplementing them. The URL is normalized the same way as at index time, so
+  e.g. fragment variants resolve to the same page.
+- `clotho db` — ✅ implemented: `db dir` prints the data directory (answers "where does
+  my archive live", also without `CLOTHO_DATA_DIR` set); `db remove` deletes the SQLite
+  DB after confirmation (`--force` skips asking; archived files under `saved/` are kept).
 - Parked until the implementation picture is certain:
-  - `clotho list --domain <d>`
   - Stale-row pruning (`clotho prune`?) — v1 pruned failed rows whose URLs vanished from
     the notes during indexing; that behavior was dropped in the stage split because partial
     (per-source) indexing made it unsafe. Revisit if dead rows actually accumulate.
 - Logging cleanup (later) — prune noisy statements and add a `--verbose` flag, so default
   runs stay quiet and the detail lives behind the flag.
 
-## Known fetch gaps
+## Known fetch/parse gaps
 
+- ~~Wikipedia pages lost every section heading~~ — fixed: MediaWiki puts an "[edit]" link
+  next to each heading inside a small wrapper div, and trafilatura's link-density pruning
+  deleted the whole div. The `mw-editsection` spans are now pruned before extraction.
+  Re-run `clotho parse --reparse` to repair already-archived pages.
 - medium.com is paywalled. Research how the freedium.cfd mirror works (its source code is
   fully available) — could inform a rewrite rule or fetch fallback.
 - Cookie-consent walls eat some pages (e.g. gigaom rejected as "too short")
