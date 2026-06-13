@@ -1,5 +1,7 @@
 """Allow ``python -m arciv.scripts`` to invoke the CLI."""
 
-from .cli import cli
+import sys
 
-cli()
+from .cli import main
+
+sys.exit(main())
