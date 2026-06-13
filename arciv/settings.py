@@ -49,10 +49,11 @@ def configure_logger(
         "<level>{message}</level>"
     )
 
-    # Console with colors
+    # Console with colors. Logs go to stderr so stdout stays clean data
+    # only, letting commands like `arciv index` pipe into `arciv fetch`.
     if log_console:
         logger.add(
-            sys.stdout,
+            sys.stderr,
             format=log_format,
             level=console_level,
             backtrace=True,

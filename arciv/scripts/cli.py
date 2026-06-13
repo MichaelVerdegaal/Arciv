@@ -15,14 +15,19 @@ Sources (named directories that can be re-indexed any time):
 Individual pipeline stages, mainly for development:
 
     arciv index notes               # index one source
+    arciv index https://example.com # index a single URL
     arciv index --all               # index every source
     arciv fetch                     # download pending indexed URLs
+    arciv fetch https://example.com # download just one URL (no parse)
     arciv parse                     # convert fetched pages to markdown
+
+``index`` prints every indexed URL, one per line, so its output chains
+into ``fetch``: ``arciv index notes | xargs -n1 arciv fetch``.
 
 Inspection:
 
     arciv status                    # pipeline counts + failure summary
-    arciv list                      # fetched pages: time, domain, URL
+    arciv list                      # fetched pages: time, domain, URL, file
     arciv path <URL>                # filepath of a page's markdown
     arciv db dir                    # print the data directory path
     arciv db remove                 # delete the database (asks first)
@@ -35,7 +40,7 @@ import click
 from loguru import logger
 
 from arciv.settings import DATA_DIR, DB_PATH, SAVED_DIR, configure_logger
-from arciv.db import PageDatabase, Source
+from arciv.db import Page, PageDatabase, Source
 from arciv.scrape import process_url
 from arciv.pipeline import (
     fetch_pending,
@@ -48,6 +53,20 @@ from arciv.pipeline import (
     register_urls,
     report,
 )
+
+
+def _markdown_path(page: Page) -> Path:
+    """On-disk path of a page's archived markdown (may not exist yet)."""
+    return SAVED_DIR / page.slug / "page.md"
+
+
+def _looks_like_url(target: str) -> bool:
+    """Whether an index/fetch target is a URL rather than a source name.
+
+    A scheme is required so a bare source name can never be mistaken for a
+    URL; index a scheme-less address by prefixing it with ``https://``.
+    """
+    return target.startswith(("http://", "https://"))
 
 
 @click.group()
@@ -149,7 +168,7 @@ def sources() -> None:
 
 
 @cli.command()
-@click.argument("source", required=False)
+@click.argument("target", required=False)
 @click.option(
     "--all",
     "all_sources",
@@ -157,33 +176,50 @@ def sources() -> None:
     default=False,
     help="Index every registered source.",
 )
-def index(source: str | None, all_sources: bool) -> None:
-    """Index stage: extract links from a registered SOURCE (or --all)."""
-    if bool(source) == all_sources:
-        raise click.UsageError("Provide a source name or --all, not both.")
+def index(target: str | None, all_sources: bool) -> None:
+    """Index stage: register links from a registered source, or a single URL
+    (``https://...``), or --all sources.
+
+    Prints every indexed URL, one per line, so the output pipes into the
+    fetch stage: ``arciv index notes | xargs -n1 arciv fetch``.
+    """
+    if bool(target) == all_sources:
+        raise click.UsageError("Provide a source name or URL, or --all.")
 
     with PageDatabase(DB_PATH) as db:
         if all_sources:
             urls = index_all(db)
+        elif _looks_like_url(target):
+            urls = register_urls(db, [target])
         else:
             try:
-                urls = index_source(db, source)
+                urls = index_source(db, target)
             except KeyError as e:
                 raise click.ClickException(str(e.args[0]))
     logger.info(f"Indexed {len(urls)} unique URLs")
+    for url in urls:
+        click.echo(url)
 
 
 @cli.command()
+@click.argument("url", required=False)
 @click.option(
     "--refetch",
     is_flag=True,
     default=False,
     help="Re-download every known page, even fetched/failed ones.",
 )
-def fetch(refetch: bool) -> None:
-    """Fetch stage: download indexed URLs that are still pending."""
+def fetch(url: str | None, refetch: bool) -> None:
+    """Fetch stage: download a single URL, or every still-pending indexed URL.
+
+    Fetching only archives raw content; it does not parse. Run ``arciv parse``
+    afterwards, or use ``arciv get <URL>`` to fetch and parse in one step.
+    """
     with PageDatabase(DB_PATH) as db:
-        fetched = fetch_pending(db, refetch=refetch)
+        if url is not None:
+            fetched = fetch_urls(db, [url], refetch=refetch)
+        else:
+            fetched = fetch_pending(db, refetch=refetch)
         report(db, len(fetched))
 
 
@@ -241,20 +277,33 @@ def status() -> None:
     default=None,
     help="Only show pages from this registered domain, e.g. medium.com.",
 )
-def list_pages(limit: int, reverse: bool, domain: str | None) -> None:
-    """List fetched pages, newest first: fetch time, domain, URL.
+@click.option(
+    "--no-header",
+    "no_header",
+    is_flag=True,
+    default=False,
+    help="Omit the header row for clean piping into grep/cut/awk.",
+)
+def list_pages(limit: int, reverse: bool, domain: str | None, no_header: bool) -> None:
+    """List fetched pages, newest first: fetch time, domain, URL, filepath.
 
-    Columns are tab-separated so the output pipes cleanly into
-    grep/cut/awk, e.g.: arciv list --n 0 | grep /tag/.
+    The filepath column holds the archived markdown's location, or is empty
+    for pages not parsed yet. Columns are tab-separated so the output pipes
+    cleanly into grep/cut/awk, e.g.: arciv list --n 0 | cut -f3.
     """
     with PageDatabase(DB_PATH) as db:
         pages = db.list_fetched(
             limit=limit or None, oldest_first=reverse, domain=domain
         )
+    # Header only when there are rows, so an empty archive prints nothing
+    if pages and not no_header:
+        click.echo("fetched_at\tdomain\turl\tfilepath")
     for page in pages:
         # ISO timestamp trimmed to seconds for readability
         fetched_at = (page.fetched_at or "")[:19]
-        click.echo(f"{fetched_at}\t{page.domain}\t{page.url}")
+        md_path = _markdown_path(page)
+        filepath = str(md_path) if page.parsed and md_path.exists() else ""
+        click.echo(f"{fetched_at}\t{page.domain}\t{page.url}\t{filepath}")
 
 
 @cli.command()
@@ -282,7 +331,7 @@ def path(url: str) -> None:
         raise click.ClickException(
             f"{page.url} is fetched but not parsed yet. Run: arciv parse"
         )
-    md_path = SAVED_DIR / page.slug / "page.md"
+    md_path = _markdown_path(page)
     if not md_path.exists():
         raise click.ClickException(f"Markdown file missing on disk: {md_path}")
     click.echo(md_path)

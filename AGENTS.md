@@ -21,10 +21,13 @@ Three stages, no writeback into the notes. Each stage has a dedicated CLI comman
    `.txt`, `.rst`), extract all links, deduplicate, apply filtering/rewrite rules, register
    pending pages. Each link
    gets a row with the URL, the full normalized filepath it was found in, and an indexed-at
-   timestamp. Indexing operates on registered sources (`arciv add <dir> <name>`).
+   timestamp. Indexing operates on a registered source, `--all` sources, or a single URL
+   (`arciv index https://...`). It prints every indexed URL one per line, so the output
+   pipes into the fetch stage (`arciv index --all | xargs -n1 arciv fetch`).
 2. **Fetching** (`arciv fetch`, `arciv/pipeline/fetch.py` + `arciv/scrape/`) — Download raw
    content with patchright (async, concurrency-controlled); PDFs via direct HTTP. Writes
-   `page.html` / `page.pdf` to disk, no conversion.
+   `page.html` / `page.pdf` to disk, no conversion. Fetches all pending pages, or a single
+   `arciv fetch <URL>` (registering it if new); never parses — use `arciv get` for both.
 3. **Parsing** (`arciv parse`, `arciv/pipeline/parse.py` + `arciv/convert/`) — Validate
    fetched HTML, convert to markdown via trafilatura (HTML) or liteparse (PDF), write
    `page.md` next to the raw file, fill in title/author/word count.

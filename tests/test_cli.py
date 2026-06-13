@@ -62,13 +62,20 @@ class TestList:
             ],
         )
 
+    def test_first_line_is_header(self, runner, data_dir):
+        self._seed_three(data_dir)
+        result = runner.invoke(cli_module.cli, ["list"])
+        assert result.exit_code == 0
+        assert result.output.splitlines()[0] == "fetched_at\tdomain\turl\tfilepath"
+
     def test_rows_are_tab_separated_newest_first(self, runner, data_dir):
         self._seed_three(data_dir)
         result = runner.invoke(cli_module.cli, ["list"])
         assert result.exit_code == 0
-        lines = result.output.splitlines()
-        assert lines[0] == "2026-06-10T10:15:00\texample.com\thttps://example.com/new"
-        assert [line.split("\t")[2] for line in lines] == [
+        rows = result.output.splitlines()[1:]  # skip header
+        # Unparsed pages have a trailing empty filepath column
+        assert rows[0] == "2026-06-10T10:15:00\texample.com\thttps://example.com/new\t"
+        assert [line.split("\t")[2] for line in rows] == [
             "https://example.com/new",
             "https://example.com/mid",
             "https://example.com/old",
@@ -78,19 +85,19 @@ class TestList:
         self._seed_three(data_dir)
         result = runner.invoke(cli_module.cli, ["list", "--n", "1"])
         assert result.exit_code == 0
-        assert result.output.splitlines() == [
-            "2026-06-10T10:15:00\texample.com\thttps://example.com/new"
+        assert result.output.splitlines()[1:] == [
+            "2026-06-10T10:15:00\texample.com\thttps://example.com/new\t"
         ]
 
     def test_n_zero_shows_everything(self, runner, data_dir):
         self._seed_three(data_dir)
         result = runner.invoke(cli_module.cli, ["list", "--n", "0"])
-        assert len(result.output.splitlines()) == 3
+        assert len(result.output.splitlines()[1:]) == 3
 
     def test_reverse_shows_oldest_first(self, runner, data_dir):
         self._seed_three(data_dir)
         result = runner.invoke(cli_module.cli, ["list", "--reverse"])
-        first_urls = [line.split("\t")[2] for line in result.output.splitlines()]
+        first_urls = [line.split("\t")[2] for line in result.output.splitlines()[1:]]
         assert first_urls[0] == "https://example.com/old"
         assert first_urls[-1] == "https://example.com/new"
 
@@ -98,6 +105,29 @@ class TestList:
         result = runner.invoke(cli_module.cli, ["list"])
         assert result.exit_code == 0
         assert result.output == ""
+
+    def test_no_header_omits_header(self, runner, data_dir):
+        self._seed_three(data_dir)
+        result = runner.invoke(cli_module.cli, ["list", "--no-header"])
+        assert result.exit_code == 0
+        assert result.output.splitlines()[0].startswith("2026-06-10T10:15:00\t")
+
+    def test_filepath_column_holds_markdown_path_when_parsed(self, runner, data_dir):
+        page = _page("https://example.com/post", parsed_at="2026-06-11T01:00:00+00:00")
+        _seed(data_dir, [page])
+        md_path = data_dir / "saved" / page.slug / "page.md"
+        md_path.parent.mkdir(parents=True)
+        md_path.write_text("# Hi\n", encoding="utf-8")
+        result = runner.invoke(cli_module.cli, ["list"])
+        assert result.exit_code == 0
+        assert result.output.splitlines()[1].split("\t")[3] == str(md_path)
+
+    def test_filepath_column_empty_when_not_parsed(self, runner, data_dir):
+        # Fetched but not parsed: no markdown on disk, so the column is blank
+        _seed(data_dir, [_page("https://example.com/post")])
+        result = runner.invoke(cli_module.cli, ["list"])
+        assert result.exit_code == 0
+        assert result.output.splitlines()[1].split("\t")[3] == ""
 
     def test_domain_filters_to_one_domain(self, runner, data_dir):
         _seed(
@@ -122,7 +152,7 @@ class TestList:
         )
         result = runner.invoke(cli_module.cli, ["list", "--domain", "a.com"])
         assert result.exit_code == 0
-        urls = [line.split("\t")[2] for line in result.output.splitlines()]
+        urls = [line.split("\t")[2] for line in result.output.splitlines()[1:]]
         assert urls == ["https://a.com/2", "https://a.com/1"]
 
 
@@ -200,6 +230,94 @@ class TestPath:
         result = runner.invoke(cli_module.cli, ["path", "https://example.com/post"])
         assert result.exit_code != 0
         assert "missing" in result.output
+
+
+class TestIndexCli:
+    def test_source_name_echoes_indexed_urls(self, runner, data_dir, monkeypatch):
+        monkeypatch.setattr(
+            cli_module, "index_source", lambda db, name: ["https://a/1", "https://a/2"]
+        )
+        result = runner.invoke(cli_module.cli, ["index", "notes"])
+        assert result.exit_code == 0
+        assert result.output.splitlines() == ["https://a/1", "https://a/2"]
+
+    def test_url_target_registers_and_echoes(self, runner, data_dir, monkeypatch):
+        seen = {}
+
+        def fake_register(db, urls):
+            seen["urls"] = urls
+            return urls
+
+        monkeypatch.setattr(cli_module, "register_urls", fake_register)
+        monkeypatch.setattr(
+            cli_module,
+            "index_source",
+            lambda *a, **k: pytest.fail("URL must not hit index_source"),
+        )
+        result = runner.invoke(cli_module.cli, ["index", "https://x.com/1"])
+        assert result.exit_code == 0
+        assert seen["urls"] == ["https://x.com/1"]
+        assert result.output.splitlines() == ["https://x.com/1"]
+
+    def test_all_echoes_indexed_urls(self, runner, data_dir, monkeypatch):
+        monkeypatch.setattr(cli_module, "index_all", lambda db: ["https://a/1"])
+        result = runner.invoke(cli_module.cli, ["index", "--all"])
+        assert result.exit_code == 0
+        assert result.output.splitlines() == ["https://a/1"]
+
+    def test_target_and_all_together_errors(self, runner, data_dir):
+        result = runner.invoke(cli_module.cli, ["index", "notes", "--all"])
+        assert result.exit_code != 0
+
+    def test_unknown_source_reports_error(self, runner, data_dir, monkeypatch):
+        def raise_missing(db, name):
+            raise KeyError(f"No source named '{name}'")
+
+        monkeypatch.setattr(cli_module, "index_source", raise_missing)
+        result = runner.invoke(cli_module.cli, ["index", "ghost"])
+        assert result.exit_code != 0
+        assert "No source named 'ghost'" in result.output
+
+
+class TestFetchCli:
+    def test_url_argument_fetches_only_that_url(self, runner, data_dir, monkeypatch):
+        calls = {}
+
+        def fake_fetch_urls(db, urls, refetch=False):
+            calls["urls"] = urls
+            calls["refetch"] = refetch
+            return []
+
+        monkeypatch.setattr(cli_module, "fetch_urls", fake_fetch_urls)
+        monkeypatch.setattr(
+            cli_module,
+            "fetch_pending",
+            lambda *a, **k: pytest.fail("a URL must not fetch pending"),
+        )
+        monkeypatch.setattr(cli_module, "report", lambda db, n: None)
+        result = runner.invoke(
+            cli_module.cli, ["fetch", "https://x.com/1", "--refetch"]
+        )
+        assert result.exit_code == 0
+        assert calls == {"urls": ["https://x.com/1"], "refetch": True}
+
+    def test_no_argument_fetches_pending(self, runner, data_dir, monkeypatch):
+        called = {"pending": False}
+
+        def fake_pending(db, refetch=False):
+            called["pending"] = True
+            return []
+
+        monkeypatch.setattr(cli_module, "fetch_pending", fake_pending)
+        monkeypatch.setattr(
+            cli_module,
+            "fetch_urls",
+            lambda *a, **k: pytest.fail("no URL must not fetch a single url"),
+        )
+        monkeypatch.setattr(cli_module, "report", lambda db, n: None)
+        result = runner.invoke(cli_module.cli, ["fetch"])
+        assert result.exit_code == 0
+        assert called["pending"]
 
 
 class TestStatus:

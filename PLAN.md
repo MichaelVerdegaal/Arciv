@@ -31,10 +31,12 @@ arciv get --dir <path>     # archive all links of all files within a directory
 stage also has a dedicated command, which makes developing the library easier:
 
 - **`arciv index`** — extracts all links from wherever specified (`.md`, `.txt`, and
-  `.rst` files). For each link a row is stored with the link value itself, the full
-  normalized filepath where it was found, and the time it was indexed.
+  `.rst` files), or registers a single URL passed directly. For each link a row is stored
+  with the link value itself, the full normalized filepath where it was found, and the time
+  it was indexed. Prints the indexed URLs one per line for piping into `arciv fetch`.
 - **`arciv fetch`** — the patchright/playwright magic: downloads pending URLs (browser for
-  HTML, direct HTTP for PDFs) and archives the raw content on disk.
+  HTML, direct HTTP for PDFs) and archives the raw content on disk. Takes an optional single
+  URL to fetch just that one (no parse).
 - **`arciv parse`** — looks at the fetched HTML pages / PDFs and parses them to markdown.
 
 ### Sources — ✅ implemented
@@ -87,10 +89,12 @@ Only what real usage demands.
 
 - `arciv status` — ✅ implemented: pipeline-state counts and failure summary. Recent
   fetches were dropped from it; that's `arciv list`'s job now.
-- `arciv list` — ✅ implemented: fetched pages as `fetched-at TAB domain TAB url`, newest
-  first. `--n` caps the row count (0 = everything), `--reverse` flips to oldest first,
-  `--domain <d>` restricts to one registered domain (exact match, e.g. `medium.com`).
-  Columns stay tab-separated so finer filtering is still `arciv list --n 0 | grep <pat>`.
+- `arciv list` — ✅ implemented: fetched pages as `fetched-at TAB domain TAB url TAB
+  filepath` (the archived markdown's path, empty until parsed), newest first, under a
+  tab-separated header row. `--n` caps the row count (0 = everything), `--reverse` flips
+  to oldest first, `--domain <d>` restricts to one registered domain (exact match, e.g.
+  `medium.com`), `--no-header` drops the header for clean piping. Columns stay
+  tab-separated so finer filtering is still `arciv list --n 0 | grep <pat>`.
 - `arciv path <URL>` — ✅ implemented: prints the filepath of a page's archived markdown,
   composing with standard tools (`less $(arciv path <URL>)`, `grep ... $(arciv path ...)`)
   instead of reimplementing them. The URL is normalized the same way as at index time, so

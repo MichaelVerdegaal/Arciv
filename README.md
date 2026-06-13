@@ -31,7 +31,8 @@ Register directories you index repeatedly as named sources:
 ```bash
 arciv add ~/vault/daily-notes notes  # register a source
 arciv sources                        # list registered sources
-arciv index notes                    # index one source
+arciv index notes                    # index one source (prints found URLs)
+arciv index https://example.com/post # index a single URL
 arciv index --all                    # index every source
 arciv remove notes                   # unregister (archived pages are kept)
 ```
@@ -40,17 +41,26 @@ Run individual pipeline stages:
 
 ```bash
 arciv fetch                          # download indexed URLs still pending
+arciv fetch https://example.com/post # download just one URL (no parse)
 arciv fetch --refetch                # re-download every known page
 arciv parse                          # convert fetched pages to markdown
 arciv parse --reparse                # re-parse everything from disk
+```
+
+`arciv index` prints each indexed URL on its own line, so it pipes straight
+into `arciv fetch`:
+
+```bash
+arciv index --all | xargs -n1 arciv fetch   # index everything, then fetch it
 ```
 
 Inspect the archive:
 
 ```bash
 arciv status                         # pipeline counts + failure summary
-arciv list --n 50                    # fetched pages: time, domain, URL
+arciv list --n 50                    # fetched pages: time, domain, URL, filepath
 arciv list --domain medium.com       # only pages from one domain
+arciv list --no-header | cut -f4     # markdown filepaths, header omitted
 arciv path https://example.com/post  # filepath of its archived markdown
 arciv db dir                         # where the archive lives on disk
 arciv db remove                      # delete the database (asks first)
