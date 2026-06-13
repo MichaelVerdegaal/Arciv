@@ -236,14 +236,21 @@ def status() -> None:
     default=False,
     help="Oldest first instead of newest first.",
 )
-def list_pages(limit: int, reverse: bool) -> None:
+@click.option(
+    "--domain",
+    default=None,
+    help="Only show pages from this registered domain, e.g. medium.com.",
+)
+def list_pages(limit: int, reverse: bool, domain: str | None) -> None:
     """List fetched pages, newest first: fetch time, domain, URL.
 
     Columns are tab-separated so the output pipes cleanly into
-    grep/cut/awk, e.g.: clotho list --n 0 | grep medium.com
+    grep/cut/awk, e.g.: clotho list --n 0 | grep /tag/.
     """
     with PageDatabase(DB_PATH) as db:
-        pages = db.list_fetched(limit=limit or None, oldest_first=reverse)
+        pages = db.list_fetched(
+            limit=limit or None, oldest_first=reverse, domain=domain
+        )
     for page in pages:
         # ISO timestamp trimmed to seconds for readability
         fetched_at = (page.fetched_at or "")[:19]

@@ -200,6 +200,23 @@ class TestStateQueries:
             "https://example.com/new",
         ]
 
+    def test_list_fetched_filters_by_domain(self, db):
+        db.upsert(_page("https://a.com/1", domain="a.com"))
+        db.upsert(_page("https://b.com/1", domain="b.com"))
+        db.upsert(_page("https://a.com/2", domain="a.com"))
+        fetched = db.list_fetched(domain="a.com")
+        assert {p.url for p in fetched} == {"https://a.com/1", "https://a.com/2"}
+
+    def test_list_fetched_domain_filter_excludes_pending(self, db):
+        db.upsert(_page("https://a.com/fetched", domain="a.com"))
+        db.upsert(_page("https://a.com/pending", domain="a.com", fetched_at=None))
+        fetched = db.list_fetched(domain="a.com")
+        assert [p.url for p in fetched] == ["https://a.com/fetched"]
+
+    def test_list_fetched_domain_with_no_matches_is_empty(self, db):
+        db.upsert(_page("https://a.com/1", domain="a.com"))
+        assert db.list_fetched(domain="nope.com") == []
+
 
 class TestLinks:
     def test_replace_and_get_files_for_url(self, db):

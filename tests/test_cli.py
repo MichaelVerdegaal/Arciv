@@ -99,6 +99,32 @@ class TestList:
         assert result.exit_code == 0
         assert result.output == ""
 
+    def test_domain_filters_to_one_domain(self, runner, data_dir):
+        _seed(
+            data_dir,
+            [
+                _page(
+                    "https://a.com/1",
+                    domain="a.com",
+                    fetched_at="2026-06-10T00:00:00+00:00",
+                ),
+                _page(
+                    "https://b.com/1",
+                    domain="b.com",
+                    fetched_at="2026-06-11T00:00:00+00:00",
+                ),
+                _page(
+                    "https://a.com/2",
+                    domain="a.com",
+                    fetched_at="2026-06-12T00:00:00+00:00",
+                ),
+            ],
+        )
+        result = runner.invoke(cli_module.cli, ["list", "--domain", "a.com"])
+        assert result.exit_code == 0
+        urls = [line.split("\t")[2] for line in result.output.splitlines()]
+        assert urls == ["https://a.com/2", "https://a.com/1"]
+
 
 class TestPath:
     def _seed_parsed(self, data_dir):

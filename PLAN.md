@@ -88,9 +88,9 @@ Only what real usage demands.
 - `clotho status` — ✅ implemented: pipeline-state counts and failure summary. Recent
   fetches were dropped from it; that's `clotho list`'s job now.
 - `clotho list` — ✅ implemented: fetched pages as `fetched-at TAB domain TAB url`, newest
-  first. `--n` caps the row count (0 = everything), `--reverse` flips to oldest first.
-  Tab-separated on purpose: filtering is `clotho list --n 0 | grep <domain>`, so the
-  once-parked `--domain` flag is not needed.
+  first. `--n` caps the row count (0 = everything), `--reverse` flips to oldest first,
+  `--domain <d>` restricts to one registered domain (exact match, e.g. `medium.com`).
+  Columns stay tab-separated so finer filtering is still `clotho list --n 0 | grep <pat>`.
 - `clotho path <URL>` — ✅ implemented: prints the filepath of a page's archived markdown,
   composing with standard tools (`less $(clotho path <URL>)`, `grep ... $(clotho path ...)`)
   instead of reimplementing them. The URL is normalized the same way as at index time, so
