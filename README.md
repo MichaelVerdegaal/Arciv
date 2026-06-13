@@ -56,6 +56,32 @@ arciv db dir                         # where the archive lives on disk
 arciv db remove                      # delete the database (asks first)
 ```
 
+### Global options and pipes
+
+Data goes to stdout; all logs and diagnostics go to stderr, so `arciv list | cat`
+shows only data. Global flags go *before* the command:
+
+```bash
+arciv -v fetch         # more detail (-v debug, -vv trace)
+arciv -q fetch         # errors only
+arciv --color never list
+arciv --json status    # machine-readable output on stdout
+```
+
+With `--json`, `status` and `path` emit one JSON object, while `list` and
+`sources` emit JSONL (one object per line) so they stream into `head`/`grep`/`jq`.
+The commands compose with standard Unix tools:
+
+```bash
+# Re-archive every page from a given domain found in the archive
+arciv list --json | jq -r .url | grep medium.com | arciv get -
+
+# NUL-separated output survives odd characters and feeds xargs -0
+arciv list --n 0 --null | xargs -0 -n1 echo
+```
+
+`arciv get -` reads newline-separated URLs from stdin.
+
 See [SETUP.md](SETUP.md) for installation and configuration.
 
 ## Where It's Going

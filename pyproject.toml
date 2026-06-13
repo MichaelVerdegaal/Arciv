@@ -6,7 +6,6 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "aiofiles>=25.1.0", # Asynchronous file operations
-    "click>=8.1.0", # CLI framework
     "python-dotenv>=1.2.1", # Environment variable management
     "loguru>=0.7.3", # Logging
     "tldextract>=5.3.1", # Extracting domain information from URLs
@@ -14,6 +13,7 @@ dependencies = [
     "patchright>=1.60.0", # Undetected Playwright fork for scraping
     "liteparse>=2.0.3",
     "platformdirs>=4.10.0", # OS-appropriate user data directory
+    "typer>=0.26.7", # CLI framework
 ]
 
 [project.scripts]
