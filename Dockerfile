@@ -3,7 +3,9 @@
 FROM python:3.12-slim
 
 # uv for fast, reproducible installs (pinned to the version that wrote uv.lock).
-COPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /uvx /bin/
+# Installed from PyPI rather than the ghcr image so the build works on networks
+# that don't reach GitHub's container registry.
+RUN pip install --no-cache-dir uv==0.8.17
 
 ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
