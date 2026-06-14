@@ -1,0 +1,21 @@
+.git
+.github
+.venv
+.tooling
+.ruff_cache
+__pycache__
+*.pyc
+.coverage
+.coverage.*
+htmlcov
+.pytest_cache
+data
+*.db
+*.db-shm
+*.db-wal
+tests
+SETUP.md
+# Built CSS and self-hosted datastar.js (arciv_api/static) are intentionally
+# kept; only the CSS build inputs are dropped from the image.
+arciv_api/styles
+scripts

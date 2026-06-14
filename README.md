@@ -84,10 +84,22 @@ arciv list --n 0 --null | xargs -0 -n1 echo
 
 See [SETUP.md](SETUP.md) for installation and configuration.
 
-## Where It's Going
+## Web app
 
-The CLI foundation is in place; the focus now is on getting insight into what's stored — a web
-UI for browsing the archive, backed by this CLI. See [PLAN.md](PLAN.md) for the roadmap.
+A single self-hosted web app browses the archive and archives new URLs from the browser with
+live status. It is a FastAPI service that imports this library directly and renders its own
+HTML (Jinja2 + Datastar, Tailwind/DaisyUI) — no separate frontend runtime.
+
+```bash
+# With Docker, mounting the same data dir the CLI writes:
+ARCIV_DATA_DIR=~/.local/share/arciv docker compose up   # http://localhost:8000
+
+# Or directly from a clone:
+uv run uvicorn arciv_api.app:app                         # http://localhost:8000
+```
+
+One user per instance — no auth or TLS by design. To reach it beyond your LAN, put a reverse
+proxy with auth in front. See [PLAN.md](PLAN.md) for the architecture and roadmap.
 
 ## The Name
 

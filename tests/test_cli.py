@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 import arciv.scripts.cli as cli_module
 from arciv.db import Page, PageDatabase, Source
+from arciv.scrape import slug_for_url
 from arciv.scripts import output
 from arciv.settings import configure_logger
 
@@ -45,10 +46,13 @@ def data_dir(tmp_path, monkeypatch):
 
 
 def _page(url: str, **overrides) -> Page:
+    # slug is unique per URL (slug_for_url is deterministic), matching
+    # production and satisfying the slug UNIQUE constraint when a test
+    # seeds several pages at once.
     defaults = dict(
         original_url=url,
         domain="example.com",
-        slug="example.com-abc12345",
+        slug=slug_for_url(url),
         content_type="html",
         word_count=500,
         fetched_at="2026-06-11T00:00:00+00:00",

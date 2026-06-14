@@ -58,6 +58,23 @@ class Page:
         """Whether the raw content has been converted to markdown."""
         return self.parsed_at is not None
 
+    @property
+    def state(self) -> str:
+        """Coarse UI state for the web browse view: ``"done"``,
+        ``"failed"``, or ``"pending"``.
+
+        A coarsening of the five pipeline states above into the triad the
+        UI shows: ``done`` is parsed, ``failed`` is any fetch or parse
+        failure (``fail_reason`` set), and ``pending`` is everything still
+        in flight. A parse never both succeeds and fails, so checking
+        ``parsed_at`` first is just defensive ordering.
+        """
+        if self.parsed_at is not None:
+            return "done"
+        if self.fail_reason is not None:
+            return "failed"
+        return "pending"
+
 
 @dataclass
 class Source:

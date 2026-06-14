@@ -35,7 +35,8 @@ The planned backend/frontend read the data directory directly, so treat this lay
 public interface — changes to it ripple beyond the Python code:
 
 - `<data dir>/arciv.db` — SQLite (WAL mode, foreign keys ON). `pages` holds one row per URL:
-  `url` (PK, normalized), `original_url`, `domain`, `slug`, `content_type` (`html`/`pdf`,
+  `url` (PK, normalized), `original_url`, `domain`, `slug` (UNIQUE; names the
+  on-disk `saved/<slug>/` folder), `content_type` (`html`/`pdf`,
   set at fetch), `title`, `author`, `word_count`, `fail_reason`, `added_at`, `fetched_at`,
   `parsed_at`. Pipeline state is carried by the timestamps: pending (no `fetched_at`),
   fetched (`fetched_at` set), parsed (`parsed_at` set); `fail_reason` marks a failure at
@@ -79,12 +80,16 @@ uv tool install .                # Install the CLI as a global tool
 ## Current Direction
 
 The scope is settled: Arciv is the main archival tool for all reading material. The CLI
-foundation (layered `get`, separated stages, sources) is in place; the backend + frontend
-phase is what's being built next. PLAN.md is the live roadmap. One standing constraint for
-that work:
+foundation (layered `get`, separated stages, sources) is in place; the web app phase is now
+underway. PLAN.md is the live roadmap.
 
-- A web UI (likely Astro, reading the data directory) is planned but **not designed yet — do
-  not scaffold any frontend or backend code** until the page views are decided.
+- The web app is built: a single FastAPI service (`arciv_api/`) imports the arciv library (it
+  never shells out), reads through short-lived read-only connections, and renders its own HTML
+  with Jinja2 + Datastar (Tailwind/DaisyUI) — there is no separate frontend runtime. It serves
+  browse, page detail, domains, sources, and status, plus a `POST /archive` job flow run by a
+  single in-process worker started in the app lifespan. Page markdown is rendered to HTML and
+  sanitized in Python. Assets are self-hosted: `datastar.js` and a Tailwind/DaisyUI-built
+  `app.css` (rebuild with `scripts/build_css.sh`).
 
 ## Context
 

@@ -61,6 +61,25 @@ ON CONFLICT(url) DO UPDATE SET
     parsed_at    = excluded.parsed_at;
 """
 
+# Maps a coarse UI state (see Page.state) to the SQL predicate that selects it,
+# so the row-level mapping in Page.state and the query-level filter in
+# list_pages stay a single definition. The three are mutually exclusive: a
+# parsed page is never also failed.
+_STATE_PREDICATES: dict[str, str] = {
+    "done": "parsed_at IS NOT NULL",
+    "failed": "parsed_at IS NULL AND fail_reason IS NOT NULL",
+    "pending": "parsed_at IS NULL AND fail_reason IS NULL",
+}
+
+# Columns list_pages may sort by, allow-listed so request input never reaches
+# the SQL string directly. fetched_at and title may be NULL (pending/unparsed
+# rows); SQLite orders NULLs first ascending, last descending.
+_SORT_COLUMNS: dict[str, str] = {
+    "fetched_at": "fetched_at",
+    "title": "title",
+    "word_count": "word_count",
+}
+
 
 def _now() -> str:
     """Current UTC time as an ISO string."""
@@ -77,10 +96,18 @@ class PageDatabase:
 
     Args:
         db_path: Path to the SQLite database file. Created if it doesn't exist.
+        read_only: Open without writing: a ``mode=ro`` connection that skips
+            schema creation, for the backend's concurrent read endpoints. The
+            file must already exist. Defaults to False (the read-write path
+            the CLI uses).
     """
 
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, read_only: bool = False) -> None:
         self.db_path = db_path
+        self.read_only = read_only
+        if read_only:
+            self._open_readonly(db_path)
+            return
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
@@ -89,6 +116,53 @@ class PageDatabase:
         self._conn.executescript(_SCHEMA)
         # executescript commits and resets pragmas set before it
         self._conn.execute("PRAGMA foreign_keys=ON")
+        # Wait briefly for a lock rather than failing outright: the web app's
+        # archive worker writes while the API (and CLI) may also be open on the
+        # same WAL database.
+        self._conn.execute("PRAGMA busy_timeout=5000")
+        self._ensure_unique_slug_index()
+
+    def _ensure_unique_slug_index(self) -> None:
+        """Enforce one page per slug, with an actionable error on collision.
+
+        The slug names the ``saved/<slug>/`` folder and is the id the web app
+        looks pages up by, so it must be unique; a unique index also backfills
+        the guarantee onto databases created before it, since this runs on every
+        open. Created here rather than in ``_SCHEMA`` so that if existing rows
+        already share a slug (a hash collision, or a legacy blank slug) the
+        operator gets a clear message naming the duplicates instead of a bare
+        ``IntegrityError`` that would leave the database un-openable.
+        """
+        try:
+            self._conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_pages_slug ON pages(slug)"
+            )
+        except sqlite3.IntegrityError as exc:
+            dupes = self._conn.execute(
+                "SELECT slug, COUNT(*) AS n FROM pages "
+                "GROUP BY slug HAVING n > 1 ORDER BY n DESC"
+            ).fetchall()
+            examples = ", ".join(f"{row['slug']!r}×{row['n']}" for row in dupes[:5])
+            raise RuntimeError(
+                f"Cannot enforce unique page slugs: {len(dupes)} slug(s) are "
+                f"shared by multiple URLs ({examples}). This is most likely a "
+                "slug hash collision; resolve the duplicate rows before upgrading."
+            ) from exc
+
+    def _open_readonly(self, db_path: Path) -> None:
+        """Open a connection that can read but never write the database.
+
+        Uses a ``mode=ro`` URI so the open leaves the file untouched: a normal
+        open runs ``executescript`` (a write), and the backend must not write
+        to the database the CLI owns. Meant for one short-lived connection per
+        request. ``check_same_thread`` is off because FastAPI serves ``def``
+        endpoints from a threadpool; a per-request connection is fine as long
+        as it is not shared between threads at the same time.
+        """
+        uri = f"{db_path.resolve().as_uri()}?mode=ro"
+        self._conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA busy_timeout=5000")
 
     def close(self) -> None:
         """Close the database connection."""
@@ -160,6 +234,18 @@ class PageDatabase:
     def get(self, url: str) -> Page | None:
         """Get a page by its processed/normalized URL (primary key)."""
         row = self._conn.execute("SELECT * FROM pages WHERE url = ?", (url,)).fetchone()
+        return self._row_to_page(row) if row else None
+
+    def get_by_slug(self, slug: str) -> Page | None:
+        """Get a page by its slug (the ``saved/<slug>/`` folder name), or
+        None if no page has it.
+
+        The slug has a UNIQUE index, so this matches at most one row. The
+        backend uses it to resolve ``/page/<slug>`` to a page.
+        """
+        row = self._conn.execute(
+            "SELECT * FROM pages WHERE slug = ?", (slug,)
+        ).fetchone()
         return self._row_to_page(row) if row else None
 
     def get_unfetched(self) -> list[Page]:
@@ -237,6 +323,67 @@ class PageDatabase:
         ).fetchall()
         return [self._row_to_page(row) for row in rows]
 
+    def list_pages(
+        self,
+        status: str | None = None,
+        domain: str | None = None,
+        sort: str = "fetched_at",
+        order: str = "desc",
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[Page]:
+        """List pages for the browse view: filtered, sorted, and paged.
+
+        Unlike list_fetched, this includes pending and failed pages, so the
+        archive view can show a page the moment it is registered.
+
+        Args:
+            status: Restrict to one coarse state ("done", "failed", or
+                "pending"; see Page.state). None returns every state.
+            domain: Restrict to one exact registered domain (e.g. medium.com).
+            sort: Column to order by: "fetched_at", "title", or "word_count".
+            order: "asc" or "desc" (default, newest/highest first).
+            limit: Maximum rows to return; None returns all matching rows.
+            offset: Rows to skip before collecting, for paging.
+
+        Returns:
+            The matching pages. The primary key (url) breaks sort ties so
+            paging stays stable across requests.
+
+        Raises:
+            ValueError: If status, sort, or order is not a recognized value.
+        """
+        if sort not in _SORT_COLUMNS:
+            raise ValueError(f"Invalid sort column: {sort!r}")
+        direction = order.lower()
+        if direction not in ("asc", "desc"):
+            raise ValueError(f"Invalid sort order: {order!r}")
+
+        clauses: list[str] = []
+        params: list[object] = []
+        if status is not None:
+            if status not in _STATE_PREDICATES:
+                raise ValueError(f"Invalid status: {status!r}")
+            clauses.append(f"({_STATE_PREDICATES[status]})")
+        if domain is not None:
+            clauses.append("domain = ?")
+            params.append(domain)
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        # sort and order are validated against fixed allow-lists above, so
+        # they are safe to interpolate; user-supplied values are bound params.
+        sql_dir = direction.upper()
+        order_by = f"ORDER BY {_SORT_COLUMNS[sort]} {sql_dir}, url {sql_dir}"
+
+        # SQLite reads a negative LIMIT as "no limit"; OFFSET still applies.
+        params.append(-1 if limit is None else limit)
+        params.append(offset)
+        rows = self._conn.execute(
+            f"SELECT * FROM pages {where} {order_by} LIMIT ? OFFSET ?",
+            params,
+        ).fetchall()
+        return [self._row_to_page(row) for row in rows]
+
     def fail_summary(self) -> list[tuple[str | None, str, int]]:
         """Summarize failures as (domain, fail_reason, count) tuples,
         biggest groups first."""
@@ -246,6 +393,16 @@ class PageDatabase:
             "GROUP BY domain, fail_reason ORDER BY n DESC"
         ).fetchall()
         return [(row["domain"], row["fail_reason"], row["n"]) for row in rows]
+
+    def domain_counts(self) -> list[tuple[str, int]]:
+        """Count pages per domain, biggest groups first (domain name breaks
+        ties). Covers every pipeline state, so the browse-by-domain view
+        counts pending and failed pages too."""
+        rows = self._conn.execute(
+            "SELECT domain, COUNT(*) AS n FROM pages "
+            "GROUP BY domain ORDER BY n DESC, domain ASC"
+        ).fetchall()
+        return [(row["domain"], row["n"]) for row in rows]
 
     # -- indexed links --
 
@@ -340,5 +497,27 @@ class PageDatabase:
         rows = self._conn.execute("SELECT * FROM sources ORDER BY name").fetchall()
         return [
             Source(name=row["name"], path=row["path"], added_at=row["added_at"])
+            for row in rows
+        ]
+
+    def list_sources_with_counts(self) -> list[tuple[Source, int]]:
+        """List sources, each paired with the number of distinct pages it
+        indexed.
+
+        Like list_sources, but every source carries a count of the distinct
+        page URLs linked from it (0 if it has indexed nothing yet). Ordered by
+        name; a LEFT JOIN keeps sources that have no links.
+        """
+        rows = self._conn.execute(
+            "SELECT s.name, s.path, s.added_at, COUNT(DISTINCT l.url) AS n "
+            "FROM sources s LEFT JOIN links l ON l.source_name = s.name "
+            "GROUP BY s.name, s.path, s.added_at "
+            "ORDER BY s.name"
+        ).fetchall()
+        return [
+            (
+                Source(name=row["name"], path=row["path"], added_at=row["added_at"]),
+                row["n"],
+            )
             for row in rows
         ]

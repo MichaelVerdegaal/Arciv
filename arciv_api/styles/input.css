@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+/* Scan the Jinja templates for utility classes. */
+@source "../templates";
+
+/* DaisyUI as a standalone plugin (no npm project); see scripts/build_css.sh. */
+@plugin "./daisyui.js";
+
+/* Typography for archived article bodies, rendered server-side into .article.
+   Kept small and local rather than pulling in the Tailwind typography plugin. */
+@layer components {
+  .article {
+    max-width: none;
+    line-height: 1.7;
+  }
+  .article h1 { font-size: 1.6rem; font-weight: 700; margin: 1.4rem 0 0.6rem; }
+  .article h2 { font-size: 1.3rem; font-weight: 700; margin: 1.3rem 0 0.5rem; }
+  .article h3 { font-size: 1.1rem; font-weight: 600; margin: 1.1rem 0 0.4rem; }
+  .article p { margin: 0.75rem 0; }
+  .article ul { list-style: disc; margin: 0.75rem 0; padding-left: 1.4rem; }
+  .article ol { list-style: decimal; margin: 0.75rem 0; padding-left: 1.4rem; }
+  .article a { color: var(--color-primary, #2b6cb0); text-decoration: underline; }
+  .article blockquote {
+    border-left: 3px solid var(--color-base-300, #ddd);
+    padding-left: 1rem;
+    margin: 1rem 0;
+    opacity: 0.85;
+  }
+  .article pre {
+    background: var(--color-base-200, #f6f8fa);
+    padding: 1rem;
+    border-radius: 0.4rem;
+    overflow-x: auto;
+    margin: 1rem 0;
+  }
+  .article :not(pre) > code {
+    background: var(--color-base-200, #f6f8fa);
+    padding: 0.1rem 0.3rem;
+    border-radius: 0.25rem;
+  }
+  .article img { max-width: 100%; height: auto; }
+  .article table { border-collapse: collapse; margin: 1rem 0; }
+  .article th, .article td { border: 1px solid var(--color-base-300, #ddd); padding: 0.4rem 0.6rem; }
+}
