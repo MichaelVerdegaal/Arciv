@@ -1,28 +1,31 @@
 # Arciv web app: one Python service that renders the UI and serves the archive.
 # Heavier than the CLI because the archive worker drives a real Chrome.
-FROM python:3.12-slim
+FROM python:3.12-slim-trixie
 
-# uv for fast, reproducible installs (pinned to the version that wrote uv.lock).
-# Installed from PyPI rather than the ghcr image so the build works on networks
-# that don't reach GitHub's container registry.
-RUN pip install --no-cache-dir uv==0.8.17
+# Copy UV binaries
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
+# Set UV and Arciv environment variables.
 ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
     ARCIV_DATA_DIR=/data
 
 WORKDIR /app
 
-# Install dependencies (and the arciv library) first, for layer caching.
-COPY pyproject.toml uv.lock README.md ./
+# Install dependencies via mount, no project install yet.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --frozen --no-install-workspace --no-editable --group app
+
+# Copy project onto image
 COPY arciv ./arciv
-RUN uv sync --frozen --group app
 
 # Chrome plus its system libraries for the fetch stage. Cached above the app
 # copy so editing the web app does not re-run this heavy step.
-RUN uv run patchright install --with-deps chrome
+RUN uv run patchright install chrome
 
-# The web app itself (templates, built CSS, self-hosted datastar.js).
+# Copy web app onto image
 COPY arciv_api ./arciv_api
 
 VOLUME ["/data"]
