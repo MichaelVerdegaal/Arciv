@@ -43,6 +43,12 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["arciv"]
 
+[tool.uv]
+# Install the web app's runtime deps alongside dev tooling for local work and
+# tests (so `uv run pytest` and `uv run uvicorn arciv_api.app:app` just work).
+# The container installs only the `app` group explicitly, keeping its image lean.
+default-groups = ["dev", "app"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # arciv_api lives at the repo root but is not part of the arciv wheel, so put
