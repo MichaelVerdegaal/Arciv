@@ -1,31 +1,40 @@
-# Arciv web app: one Python service that renders the UI and serves the archive.
-# Heavier than the CLI because the archive worker drives a real Chrome.
-FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim
+# syntax=docker/dockerfile:1
 
-# Set UV and Arciv environment variables.
+# Builder: resolve the environment with uv, then leave uv behind.
+FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim AS builder
+
 ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
-    ARCIV_DATA_DIR=/data
+    UV_PYTHON_DOWNLOADS=0
 
 WORKDIR /app
 
-# Install dependencies via mount, no project install yet.
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project  --no-default-groups --no-editable --group app
+    uv sync --frozen --no-install-project --no-default-groups --no-editable --group app
 
-# Chrome plus its system libraries for the fetch stage. Cached above the app
-# copy so editing the web app does not re-run this heavy step.
-RUN uv run patchright install --with-deps chrome
+# Runtime: plain official Python (no uv, no build tooling) plus Chrome.
+FROM python:3.12-slim-trixie
 
-# Copy project onto image
+ENV ARCIV_DATA_DIR=/data \
+    PATH="/app/.venv/bin:$PATH"
+
+WORKDIR /app
+
+# The resolved venv. Same interpreter path as the builder, so it relocates cleanly.
+COPY --from=builder /app/.venv /app/.venv
+
+# Patched Chrome plus system libraries, apt metadata wiped in the same layer.
+RUN patchright install --with-deps chrome \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/* /tmp/*
+
+ # Copy source code to container
 COPY arciv ./arciv
-
-# Copy web app onto image
 COPY arciv_api ./arciv_api
 
-# Run web app
+# Run app
 VOLUME ["/data"]
 EXPOSE 8000
-CMD ["uv", "run", "uvicorn", "arciv_api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "arciv_api.app:app", "--host", "0.0.0.0", "--port", "8000"]
