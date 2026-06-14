@@ -1,0 +1,48 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { fetchDomains, ApiError, type DomainCount } from '../lib/api';
+
+let domains: DomainCount[] = [];
+let error: string | null = null;
+try {
+  const data = await fetchDomains();
+  domains = data.domains;
+} catch (e) {
+  error =
+    e instanceof ApiError && e.status === 503
+      ? 'Archive database not found. Run the arciv CLI to create it.'
+      : 'Could not reach the Arciv API.';
+}
+---
+
+<Layout title="Arciv — Domains">
+  <h1>Domains</h1>
+  {
+    error ? (
+      <p class="notice">{error}</p>
+    ) : domains.length === 0 ? (
+      <p class="muted">No domains yet.</p>
+    ) : (
+      <table>
+        <thead>
+          <tr>
+            <th>Domain</th>
+            <th>Pages</th>
+          </tr>
+        </thead>
+        <tbody>
+          {domains.map((d) => (
+            <tr>
+              <td>
+                <a href={`/?domain=${encodeURIComponent(d.domain)}`}>
+                  {d.domain || '(unknown)'}
+                </a>
+              </td>
+              <td class="muted">{d.count}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )
+  }
+</Layout>

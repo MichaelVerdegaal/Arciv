@@ -1,0 +1,188 @@
+---
+interface Props {
+  title?: string;
+}
+const { title = 'Arciv' } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <style is:global>
+      :root {
+        --fg: #1a1a1a;
+        --muted: #666;
+        --bg: #fff;
+        --accent: #2b6cb0;
+        --border: #e3e3e3;
+        --surface: #fafafa;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        color: var(--fg);
+        background: var(--bg);
+        line-height: 1.6;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      .wrap {
+        max-width: 62rem;
+        margin: 0 auto;
+        padding: 1rem 1.25rem;
+      }
+      header.site {
+        border-bottom: 1px solid var(--border);
+      }
+      header.site nav {
+        display: flex;
+        gap: 1.25rem;
+        align-items: baseline;
+      }
+      header.site .brand {
+        font-weight: 700;
+        font-size: 1.1rem;
+      }
+      main.wrap {
+        padding-top: 1.5rem;
+        padding-bottom: 3rem;
+      }
+      h1 {
+        font-size: 1.6rem;
+        margin: 0 0 1rem;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 0.5rem;
+        border-bottom: 1px solid var(--border);
+        vertical-align: top;
+      }
+      th {
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        color: var(--muted);
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .badge {
+        font-size: 0.72rem;
+        padding: 0.1rem 0.45rem;
+        border-radius: 1rem;
+        border: 1px solid var(--border);
+        white-space: nowrap;
+      }
+      .badge.done {
+        color: #1a7f37;
+        border-color: #1a7f3733;
+        background: #1a7f3711;
+      }
+      .badge.pending {
+        color: #9a6700;
+        border-color: #9a670033;
+        background: #9a670011;
+      }
+      .badge.failed {
+        color: #cf222e;
+        border-color: #cf222e33;
+        background: #cf222e11;
+      }
+      form.filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+        align-items: end;
+        margin-bottom: 1.25rem;
+      }
+      form.filters label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+        font-size: 0.75rem;
+        color: var(--muted);
+      }
+      input,
+      select,
+      button {
+        font: inherit;
+        padding: 0.35rem 0.5rem;
+        border: 1px solid var(--border);
+        border-radius: 0.35rem;
+        background: #fff;
+      }
+      button {
+        cursor: pointer;
+      }
+      .pager {
+        display: flex;
+        gap: 1.25rem;
+        margin-top: 1.25rem;
+      }
+      .notice {
+        padding: 1rem;
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        background: var(--surface);
+      }
+      article.page {
+        margin-top: 1.5rem;
+      }
+      article.page :is(h1, h2, h3) {
+        line-height: 1.25;
+      }
+      article.page pre {
+        background: #f6f8fa;
+        padding: 1rem;
+        overflow: auto;
+        border-radius: 0.4rem;
+      }
+      article.page code {
+        background: #f6f8fa;
+        padding: 0.1rem 0.3rem;
+        border-radius: 0.25rem;
+      }
+      article.page pre code {
+        background: none;
+        padding: 0;
+      }
+      article.page img {
+        max-width: 100%;
+        height: auto;
+      }
+      .sources ul {
+        padding-left: 1.1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site">
+      <div class="wrap">
+        <nav>
+          <a class="brand" href="/">Arciv</a>
+          <a href="/">Archive</a>
+          <a href="/domains">Domains</a>
+        </nav>
+      </div>
+    </header>
+    <main class="wrap">
+      <slot />
+    </main>
+  </body>
+</html>

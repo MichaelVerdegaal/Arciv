@@ -1,0 +1,138 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { fetchPages, ApiError, type PageSummary } from '../lib/api';
+
+const params = Astro.url.searchParams;
+const domain = params.get('domain') ?? '';
+const status = params.get('status') ?? '';
+const sort = params.get('sort') ?? 'fetched_at';
+const order = params.get('order') ?? 'desc';
+const limit = 50;
+const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
+
+const query = new URLSearchParams();
+if (domain) query.set('domain', domain);
+if (status) query.set('status', status);
+query.set('sort', sort);
+query.set('order', order);
+query.set('limit', String(limit));
+query.set('offset', String((page - 1) * limit));
+
+let pages: PageSummary[] = [];
+let hasMore = false;
+let error: string | null = null;
+try {
+  const data = await fetchPages(query);
+  pages = data.items;
+  hasMore = data.has_more;
+} catch (e) {
+  error =
+    e instanceof ApiError && e.status === 503
+      ? 'Archive database not found. Run the arciv CLI to create it.'
+      : 'Could not reach the Arciv API.';
+}
+
+function pageHref(n: number): string {
+  const q = new URLSearchParams(params);
+  q.set('page', String(n));
+  return `/?${q.toString()}`;
+}
+function fmtDate(iso: string | null): string {
+  return iso ? iso.slice(0, 10) : '—';
+}
+---
+
+<Layout title="Arciv — Archive">
+  <h1>Archive</h1>
+
+  <form class="filters" method="get">
+    <label>
+      Domain
+      <input type="text" name="domain" value={domain} placeholder="example.com" />
+    </label>
+    <label>
+      Status
+      <select name="status">
+        <option value="" selected={status === ''}>any</option>
+        <option value="done" selected={status === 'done'}>done</option>
+        <option value="pending" selected={status === 'pending'}>pending</option>
+        <option value="failed" selected={status === 'failed'}>failed</option>
+      </select>
+    </label>
+    <label>
+      Sort
+      <select name="sort">
+        <option value="fetched_at" selected={sort === 'fetched_at'}>fetched</option>
+        <option value="title" selected={sort === 'title'}>title</option>
+        <option value="word_count" selected={sort === 'word_count'}>words</option>
+      </select>
+    </label>
+    <label>
+      Order
+      <select name="order">
+        <option value="desc" selected={order === 'desc'}>desc</option>
+        <option value="asc" selected={order === 'asc'}>asc</option>
+      </select>
+    </label>
+    <button type="submit">Apply</button>
+  </form>
+
+  {
+    error ? (
+      <p class="notice">{error}</p>
+    ) : pages.length === 0 ? (
+      <p class="muted">No pages match.</p>
+    ) : (
+      <table>
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Domain</th>
+            <th>Words</th>
+            <th>State</th>
+            <th>Fetched</th>
+            <th>Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          {pages.map((p) => (
+            <tr>
+              <td>
+                <a href={`/page/${p.slug}`}>{p.title ?? p.url}</a>
+              </td>
+              <td class="muted">{p.domain}</td>
+              <td class="muted">{p.word_count || '—'}</td>
+              <td>
+                <span class={`badge ${p.state}`}>{p.state}</span>
+              </td>
+              <td class="muted">{fmtDate(p.fetched_at)}</td>
+              <td>
+                <a href={p.url} target="_blank" rel="noopener noreferrer">
+                  link ↗
+                </a>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )
+  }
+
+  {
+    !error && (pages.length > 0 || page > 1) && (
+      <div class="pager">
+        {page > 1 ? (
+          <a href={pageHref(page - 1)}>← Prev</a>
+        ) : (
+          <span class="muted">← Prev</span>
+        )}
+        <span class="muted">Page {page}</span>
+        {hasMore ? (
+          <a href={pageHref(page + 1)}>Next →</a>
+        ) : (
+          <span class="muted">Next →</span>
+        )}
+      </div>
+    )
+  }
+</Layout>

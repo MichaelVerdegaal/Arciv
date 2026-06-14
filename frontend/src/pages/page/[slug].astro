@@ -1,0 +1,99 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { fetchPage, ApiError, type PageDetail } from '../../lib/api';
+import { renderMarkdown } from '../../lib/markdown';
+
+const { slug } = Astro.params;
+
+let page: PageDetail | null = null;
+let error: string | null = null;
+try {
+  page = slug ? await fetchPage(slug) : null;
+} catch (e) {
+  error =
+    e instanceof ApiError && e.status === 503
+      ? 'Archive database not found. Run the arciv CLI to create it.'
+      : 'Could not reach the Arciv API.';
+}
+
+// A known slug renders its content; an unknown one is a real 404. The pending
+// URL is real and refresh-safe: it exists the instant a page is registered.
+if (!error && page === null) {
+  Astro.response.status = 404;
+}
+
+const bodyHtml = page?.markdown ? renderMarkdown(page.markdown) : null;
+function fmtDate(iso: string | null): string {
+  return iso ? iso.slice(0, 19).replace('T', ' ') : '—';
+}
+---
+
+<Layout title={page?.title ?? page?.url ?? 'Arciv'}>
+  {
+    error ? (
+      <p class="notice">{error}</p>
+    ) : page === null ? (
+      <>
+        <h1>Not found</h1>
+        <p class="muted">
+          No archived page has the slug <code>{slug}</code>.
+        </p>
+        <p>
+          <a href="/">← Back to archive</a>
+        </p>
+      </>
+    ) : (
+      <>
+        <p class="muted">
+          <a href="/">← Archive</a>
+        </p>
+        <h1>{page.title ?? page.url}</h1>
+        <p class="muted">
+          <span class={`badge ${page.state}`}>{page.state}</span>
+          {' · '}
+          <a href={page.url} target="_blank" rel="noopener noreferrer">
+            {page.domain} ↗
+          </a>
+          {page.author ? <span> · {page.author}</span> : null}
+          {page.word_count ? <span> · {page.word_count} words</span> : null}
+          {page.fetched_at ? <span> · fetched {fmtDate(page.fetched_at)}</span> : null}
+        </p>
+
+        {page.state === 'failed' && (
+          <p class="notice">
+            Archiving failed: {page.fail_reason}. The original is still at{' '}
+            <a href={page.url} target="_blank" rel="noopener noreferrer">
+              {page.url}
+            </a>
+            .
+          </p>
+        )}
+        {page.state === 'pending' && (
+          <p class="notice">
+            This page is queued for archiving. Check back shortly, or read the
+            original at{' '}
+            <a href={page.url} target="_blank" rel="noopener noreferrer">
+              {page.url}
+            </a>
+            .
+          </p>
+        )}
+
+        {bodyHtml && <article class="page" set:html={bodyHtml} />}
+
+        {page.sources.length > 0 && (
+          <section class="sources">
+            <h2>Referenced from</h2>
+            <ul>
+              {page.sources.map((s) => (
+                <li class="muted">
+                  <code>{s}</code>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </>
+    )
+  }
+</Layout>

@@ -11,11 +11,12 @@ The project splits into three parts to keep responsibilities isolated:
 
 1. **CLI tool** (this repo's `arciv/` package) — all archival logic. Runnable easily as a uv
    tool (`uv tool install`), deliberately **not** containerized.
-2. **Backend** — calls the CLI for the most part, or works with the SQLite DB directly. Gets a
-   dedicated container.
+2. **Backend** — imports the arciv library (never shells out) and serves it over HTTP via
+   FastAPI, reading the SQLite DB through read-only connections. Gets a dedicated container.
 3. **Frontend** — the browsing/insight UI. Gets a dedicated container.
 
-Only the CLI exists today; backend and frontend are the next phases.
+The CLI is complete; the backend and frontend read path (browse, page detail, domains) is now
+implemented, with the archive/write flow still to come.
 
 ## CLI design — ✅ implemented
 
@@ -66,9 +67,16 @@ the frontend, otherwise a blazingly-fast plain HTML site. References:
 - https://news.ycombinator.com/item?id=48475483
 - https://news.ycombinator.com/item?id=48437609
 
-The backend mostly shells out to the CLI or reads `arciv.db` / `saved/<slug>/` under the
-data dir directly — the storage contract it builds against is documented in AGENTS.md. Backend and
-frontend each get a dedicated container (the CLI does not).
+The backend imports the arciv library (it does not shell out) and reads `arciv.db` /
+`saved/<slug>/` under the data dir through read-only connections — the storage contract it
+builds against is documented in AGENTS.md. The Astro frontend never touches the data dir; it
+only speaks HTTP to the backend. Backend and frontend each get a dedicated container (the CLI
+does not).
+
+The read path is implemented: `arciv_api/` (FastAPI) serves `GET /api/pages`,
+`/api/pages/{slug}`, and `/api/domains`; `frontend/` (Astro SSR) renders the browse and page
+views from it. The ideas below remain the fuller vision; the archive/write flow is still to
+come.
 
 Page views to design before writing any code (ideas, not decisions):
 

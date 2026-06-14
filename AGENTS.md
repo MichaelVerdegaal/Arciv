@@ -81,11 +81,13 @@ uv tool install .                # Install the CLI as a global tool
 
 The scope is settled: Arciv is the main archival tool for all reading material. The CLI
 foundation (layered `get`, separated stages, sources) is in place; the backend + frontend
-phase is what's being built next. PLAN.md is the live roadmap. One standing constraint for
-that work:
+phase is now underway. PLAN.md is the live roadmap.
 
-- A web UI (likely Astro, reading the data directory) is planned but **not designed yet — do
-  not scaffold any frontend or backend code** until the page views are decided.
+- The read path is built: a FastAPI backend (`arciv_api/`) imports the arciv library (it
+  never shells out) and serves the archive over HTTP through read-only database connections;
+  an Astro SSR frontend (`frontend/`) consumes that API and never opens the database or
+  `saved/` directly. The archive/write flow (the background fetch+parse worker) is not built
+  yet — build for what exists.
 
 ## Context
 
