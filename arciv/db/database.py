@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Self
 
-from .models import Page, Source
+from .models import SKIP_REASON_PREFIX, Page, Source
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS pages (
@@ -61,14 +61,34 @@ ON CONFLICT(url) DO UPDATE SET
     parsed_at    = excluded.parsed_at;
 """
 
+# Matches the fail_reason of a "skipped" page (too-short content). Kept next to
+# the predicates so the SQL filter and Page.state classify identically; the
+# trailing % lets it match the full "too short (12 words ...)" message.
+_SKIP_LIKE = f"{SKIP_REASON_PREFIX}%"
+
 # Maps a coarse UI state (see Page.state) to the SQL predicate that selects it,
 # so the row-level mapping in Page.state and the query-level filter in
-# list_pages stay a single definition. The three are mutually exclusive: a
-# parsed page is never also failed.
+# list_pages stay a single definition. The four are mutually exclusive: a
+# parsed page is never also failed, and "skipped" carves the too-short
+# rejections out of "failed".
 _STATE_PREDICATES: dict[str, str] = {
     "done": "parsed_at IS NOT NULL",
-    "failed": "parsed_at IS NULL AND fail_reason IS NOT NULL",
+    "skipped": f"parsed_at IS NULL AND fail_reason LIKE '{_SKIP_LIKE}'",
+    "failed": (
+        "parsed_at IS NULL AND fail_reason IS NOT NULL "
+        f"AND fail_reason NOT LIKE '{_SKIP_LIKE}'"
+    ),
     "pending": "parsed_at IS NULL AND fail_reason IS NULL",
+}
+
+# Maps an `arciv prune` mode to the WHERE clause selecting the rows it removes.
+# "missing" is the narrow, safe default (dead failed rows with no surviving
+# link); "all" is the wipe. Fixed strings, never built from user input, so they
+# are safe to interpolate into the prune statements.
+_PRUNE_PREDICATES: dict[str, str] = {
+    "missing": ("fail_reason IS NOT NULL AND url NOT IN (SELECT url FROM links)"),
+    "failed": "fail_reason IS NOT NULL",
+    "all": "1 = 1",
 }
 
 # Columns list_pages may sort by, allow-listed so request input never reaches
@@ -383,6 +403,55 @@ class PageDatabase:
             params,
         ).fetchall()
         return [self._row_to_page(row) for row in rows]
+
+    def prune_pages(self, mode: str, dry_run: bool = False) -> list[str]:
+        """Delete page rows (and their link rows) selected by ``mode``.
+
+        Modes:
+
+        - ``missing``: failed pages no longer indexed in any note — rows with a
+          ``fail_reason`` that no ``links`` row points at (the dead rows that
+          accumulate when a URL is removed from the notes and re-indexing drops
+          its link).
+        - ``failed``: every page with a ``fail_reason`` set (fetch or parse
+          failures, including the too-short "skipped" ones).
+        - ``all``: every page in the database.
+
+        Link rows are removed first because ``links.url`` is a foreign key into
+        ``pages`` with no cascade, so a referenced page cannot be deleted while
+        its link survives.
+
+        Args:
+            mode: One of "missing", "failed", or "all".
+            dry_run: If True, return the slugs that would be deleted without
+                touching the database. Used to preview/confirm before deleting.
+
+        Returns:
+            The slugs of the affected pages, so the caller can delete the
+            matching ``saved/<slug>/`` folders on disk.
+
+        Raises:
+            ValueError: If mode is not a recognized value.
+        """
+        if mode not in _PRUNE_PREDICATES:
+            raise ValueError(f"Invalid prune mode: {mode!r}")
+        where = _PRUNE_PREDICATES[mode]
+
+        slugs = [
+            row["slug"]
+            for row in self._conn.execute(
+                f"SELECT slug FROM pages WHERE {where}"
+            ).fetchall()
+        ]
+        if dry_run:
+            return slugs
+
+        self._conn.execute(
+            f"DELETE FROM links WHERE url IN (SELECT url FROM pages WHERE {where})"
+        )
+        self._conn.execute(f"DELETE FROM pages WHERE {where}")
+        self._conn.commit()
+        return slugs
 
     def fail_summary(self) -> list[tuple[str | None, str, int]]:
         """Summarize failures as (domain, fail_reason, count) tuples,

@@ -25,6 +25,7 @@ Inspection:
     arciv status                    # pipeline counts + failure summary
     arciv list                      # fetched pages: time, domain, URL
     arciv path <URL>                # filepath of a page's markdown
+    arciv prune failed              # drop stale rows: missing | failed | all
     arciv db dir                    # print the data directory path
     arciv db remove                 # delete the database (asks first)
 
@@ -36,6 +37,7 @@ shows only data.
 """
 
 import json
+import shutil
 import sys
 from datetime import datetime, timezone
 from enum import Enum
@@ -49,7 +51,6 @@ from arciv.settings import DATA_DIR, DB_PATH, SAVED_DIR, configure_logger
 from arciv.db import PageDatabase, Source
 from arciv.scrape import process_url
 from arciv.pipeline import (
-    fetch_pending,
     fetch_urls,
     index_all,
     index_directory,
@@ -85,6 +86,23 @@ class ColorWhen(str, Enum):
     auto = "auto"
     always = "always"
     never = "never"
+
+
+class PruneMode(str, Enum):
+    """What ``arciv prune`` deletes (see the command's help)."""
+
+    missing = "missing"
+    failed = "failed"
+    all = "all"
+
+
+# Human-readable descriptions for each prune mode, shown in the confirmation
+# prompt so the operator sees exactly what is about to be deleted.
+_PRUNE_DESCRIPTIONS: dict[PruneMode, str] = {
+    PruneMode.missing: "failed pages no longer indexed in any note",
+    PruneMode.failed: "all failed pages (fetch failures and skipped/too-short)",
+    PruneMode.all: "EVERY page — the entire archive index",
+}
 
 
 def _fail(message: str, code: int = 1) -> NoReturn:
@@ -182,7 +200,7 @@ def get(
         fetched = fetch_urls(db, urls, refetch=refetch)
         # A refetch resets parsed_at, so refetched pages re-parse here too
         parse_pending(db)
-        report(db, len(fetched))
+        report(db, len(fetched), urls)
 
 
 def _resolve_url_targets(url: str) -> list[str]:
@@ -289,8 +307,12 @@ def fetch(
 ) -> None:
     """Fetch stage: download indexed URLs that are still pending."""
     with PageDatabase(DB_PATH) as db:
-        fetched = fetch_pending(db, refetch=refetch)
-        report(db, len(fetched))
+        # Select the URLs up front so report() can scope its failure summary
+        # to exactly the pages this run touched (refetch reprocesses all).
+        pages = db.get_all() if refetch else db.get_unfetched()
+        urls = [page.url for page in pages]
+        fetched = fetch_urls(db, urls, refetch=refetch)
+        report(db, len(fetched), urls)
 
 
 @cli.command()
@@ -302,6 +324,60 @@ def parse(
     """Parse stage: convert fetched HTML/PDFs into markdown."""
     with PageDatabase(DB_PATH) as db:
         parse_pending(db, reparse=reparse)
+
+
+@cli.command()
+def prune(
+    mode: PruneMode = typer.Argument(
+        ...,
+        help=(
+            "missing: drop failed rows no longer indexed; "
+            "failed: drop all failed rows; "
+            "all: drop every row (destructive)."
+        ),
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Delete without asking for confirmation."
+    ),
+) -> None:
+    """Delete stale page rows and their archived files under saved/.
+
+    Three modes, narrowest first:
+
+    - ``missing`` removes failed pages that no note links to anymore (the dead
+      rows left when a URL drops out of the notes and re-indexing unlinks it).
+    - ``failed`` removes every page with a failure reason, indexed or not.
+    - ``all`` wipes every page row — the whole archive index.
+
+    The matching ``saved/<slug>/`` folders are deleted too, so disk space is
+    reclaimed. Link rows are removed alongside the pages; registered sources
+    are untouched. Asks for confirmation unless --force is given.
+    """
+    with PageDatabase(DB_PATH) as db:
+        targets = db.prune_pages(mode.value, dry_run=True)
+        if not targets:
+            # Diagnostic, not data: keep it on stderr so pipes stay clean
+            logger.info(f"Nothing to prune for '{mode.value}'.")
+            return
+        if not force:
+            typer.confirm(
+                f"Delete {len(targets)} page(s) "
+                f"({_PRUNE_DESCRIPTIONS[mode]}) and their saved files?",
+                abort=True,
+            )
+        deleted = db.prune_pages(mode.value)
+
+    removed_folders = 0
+    for slug in deleted:
+        # A blank slug would resolve to SAVED_DIR itself; never recurse into it
+        if not slug:
+            continue
+        folder = SAVED_DIR / slug
+        if folder.is_dir():
+            shutil.rmtree(folder)
+            removed_folders += 1
+
+    emit(f"Pruned {len(deleted)} page(s); removed {removed_folders} saved folder(s).")
 
 
 @cli.command()

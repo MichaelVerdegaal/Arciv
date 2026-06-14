@@ -18,15 +18,19 @@
           <a href="/status" class="btn btn-ghost btn-sm">Status</a>
         </nav>
       </div>
+      {# Datastar v1 separates a plugin's key from its name with a colon
+         (data-bind:url, data-on:click). The hyphen form silently no-ops:
+         the attribute parses to an unknown "bind-url"/"on-click" plugin and
+         is skipped, so the button fires no request at all. #}
       <div class="flex flex-none items-center gap-2" data-signals="{url: ''}">
         <input
-          data-bind-url
+          data-bind:url
           type="url"
           placeholder="https://… archive a URL"
           class="input input-sm input-bordered w-64 md:w-80"
-          data-on-keydown="evt.key === 'Enter' && @post('/archive')"
+          data-on:keydown="evt.key === 'Enter' && @post('/archive')"
         />
-        <button class="btn btn-primary btn-sm" data-on-click="@post('/archive')">
+        <button class="btn btn-primary btn-sm" data-on:click="@post('/archive')">
           Archive
         </button>
       </div>

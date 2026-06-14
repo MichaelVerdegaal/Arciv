@@ -2,6 +2,20 @@
 
 from dataclasses import dataclass
 
+# Prefix of the fail_reason written when a page is rejected purely for being
+# below the word-count threshold (see arciv.pipeline.parse). Such a page was
+# fetched and extracted fine — it is just too small to be worth keeping — so
+# the UI surfaces it as "skipped" rather than lumping it in with real errors
+# (block pages, extraction failures, fetch timeouts). The classifier lives
+# here so Page.state and the SQL filter in PageDatabase share one definition.
+SKIP_REASON_PREFIX = "too short"
+
+
+def is_skip_reason(fail_reason: str | None) -> bool:
+    """Whether a fail_reason marks a deliberate skip (too-short content)
+    rather than an error."""
+    return fail_reason is not None and fail_reason.startswith(SKIP_REASON_PREFIX)
+
 
 @dataclass
 class Page:
@@ -61,16 +75,19 @@ class Page:
     @property
     def state(self) -> str:
         """Coarse UI state for the web browse view: ``"done"``,
-        ``"failed"``, or ``"pending"``.
+        ``"skipped"``, ``"failed"``, or ``"pending"``.
 
-        A coarsening of the five pipeline states above into the triad the
-        UI shows: ``done`` is parsed, ``failed`` is any fetch or parse
-        failure (``fail_reason`` set), and ``pending`` is everything still
-        in flight. A parse never both succeeds and fails, so checking
-        ``parsed_at`` first is just defensive ordering.
+        A coarsening of the pipeline states above into what the UI shows:
+        ``done`` is parsed, ``skipped`` is content rejected only for being
+        too short (a clean fetch+extract, just below the threshold),
+        ``failed`` is any other fetch or parse failure, and ``pending`` is
+        everything still in flight. A parse never both succeeds and fails,
+        so checking ``parsed_at`` first is just defensive ordering.
         """
         if self.parsed_at is not None:
             return "done"
+        if is_skip_reason(self.fail_reason):
+            return "skipped"
         if self.fail_reason is not None:
             return "failed"
         return "pending"

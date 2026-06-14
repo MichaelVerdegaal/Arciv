@@ -14,7 +14,7 @@ router = APIRouter()
 
 _SORTS = {"fetched_at", "title", "word_count"}
 _ORDERS = {"asc", "desc"}
-_STATUSES = {"done", "failed", "pending"}
+_STATUSES = {"done", "skipped", "failed", "pending"}
 _LIMIT = 50
 
 
