@@ -17,6 +17,16 @@
     <span>Archiving failed: {{ page.fail_reason }}. The original is at
       <a class="link" href="{{ page.url }}" target="_blank" rel="noopener noreferrer">{{ page.url }}</a>.</span>
   </div>
+  {% elif page.state == 'skipped' %}
+  <div class="alert alert-warning">
+    <span>Skipped ({{ page.fail_reason }}). The page was fetched and extracted
+      but landed below the word-count threshold, so no markdown was kept. The
+      reason shows the extracted word count next to the raw page size: a large
+      raw size with few words usually means a fetch/parse miss (paywall, JS-only
+      content) rather than genuinely short text. Open the
+      <a class="link" href="{{ page.url }}" target="_blank" rel="noopener noreferrer">original</a>
+      to judge.</span>
+  </div>
   {% elif page.state == 'pending' %}
   <div class="alert">
     <span class="loading loading-spinner loading-sm"></span>

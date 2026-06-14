@@ -15,6 +15,7 @@
       <option value="" {{ 'selected' if not status }}>any</option>
       <option value="done" {{ 'selected' if status == 'done' }}>done</option>
       <option value="pending" {{ 'selected' if status == 'pending' }}>pending</option>
+      <option value="skipped" {{ 'selected' if status == 'skipped' }}>skipped</option>
       <option value="failed" {{ 'selected' if status == 'failed' }}>failed</option>
     </select>
   </label>

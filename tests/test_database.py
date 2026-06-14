@@ -405,9 +405,16 @@ class TestPageState:
         page = _page("https://x.com/a", fetched_at=None, fail_reason="timeout")
         assert page.state == "failed"
 
-    def test_parse_rejection_is_failed(self):
-        # fetched but rejected: fetched_at set AND fail_reason set
-        page = _page("https://x.com/a", fail_reason="too short")
+    def test_too_short_rejection_is_skipped(self):
+        # fetched and extracted fine, just below the word threshold
+        page = _page(
+            "https://x.com/a", fail_reason="too short (12 words from 4 KB html)"
+        )
+        assert page.state == "skipped"
+
+    def test_other_parse_rejection_is_failed(self):
+        # fetched but rejected for a real error: fetched_at set AND fail_reason set
+        page = _page("https://x.com/a", fail_reason="extraction failed")
         assert page.state == "failed"
 
     def test_unfetched_is_pending(self):
@@ -449,23 +456,38 @@ class TestListPages:
                 fail_reason="timeout",
             )
         )
+        db.upsert(
+            _page(
+                "https://c.com/skipped",
+                domain="c.com",
+                fail_reason="too short (5 words from 2 KB html)",
+            )
+        )
 
-    def test_includes_pending_and_failed(self, db):
+    def test_includes_pending_failed_and_skipped(self, db):
         self._seed_mixed(db)
         assert {p.url for p in db.list_pages()} == {
             "https://a.com/parsed",
             "https://a.com/pending",
             "https://b.com/failed",
+            "https://c.com/skipped",
         }
 
     def test_status_done(self, db):
         self._seed_mixed(db)
         assert [p.url for p in db.list_pages(status="done")] == ["https://a.com/parsed"]
 
-    def test_status_failed(self, db):
+    def test_status_failed_excludes_skipped(self, db):
         self._seed_mixed(db)
+        # "too short" rows are skipped, not failed, so failed is only the timeout
         assert [p.url for p in db.list_pages(status="failed")] == [
             "https://b.com/failed"
+        ]
+
+    def test_status_skipped(self, db):
+        self._seed_mixed(db)
+        assert [p.url for p in db.list_pages(status="skipped")] == [
+            "https://c.com/skipped"
         ]
 
     def test_status_pending(self, db):
@@ -478,7 +500,7 @@ class TestListPages:
         # The SQL filter and Page.state are one definition: every row a
         # status returns must report that same state.
         self._seed_mixed(db)
-        for status in ("done", "failed", "pending"):
+        for status in ("done", "failed", "skipped", "pending"):
             for page in db.list_pages(status=status):
                 assert page.state == status
 
@@ -513,6 +535,66 @@ class TestListPages:
     def test_invalid_sort_raises(self, db):
         with pytest.raises(ValueError):
             db.list_pages(sort="url; DROP TABLE pages")
+
+
+class TestPrune:
+    def _seed(self, db):
+        # parsed (kept by everything but "all")
+        db.upsert(_page("https://a.com/ok", parsed_at="2026-06-11T00:00:00"))
+        # failed and still indexed (a link points at it)
+        db.upsert(_page("https://a.com/failed-linked", fail_reason="timeout"))
+        db.replace_links_for_files(
+            ["/notes/a.md"],
+            [("https://a.com/failed-linked", "/notes/a.md", None, "2026-06-11")],
+        )
+        # failed and no longer indexed (no link)
+        db.upsert(
+            _page(
+                "https://a.com/failed-orphan",
+                fail_reason="too short (3 words from 1 KB html)",
+            )
+        )
+
+    def test_missing_drops_only_unlinked_failures(self, db):
+        self._seed(db)
+        slugs = db.prune_pages("missing")
+        assert slugs == [slug_for_url("https://a.com/failed-orphan")]
+        remaining = {p.url for p in db.get_all()}
+        assert remaining == {
+            "https://a.com/ok",
+            "https://a.com/failed-linked",
+        }
+
+    def test_failed_drops_all_failures_and_their_links(self, db):
+        self._seed(db)
+        slugs = db.prune_pages("failed")
+        assert set(slugs) == {
+            slug_for_url("https://a.com/failed-linked"),
+            slug_for_url("https://a.com/failed-orphan"),
+        }
+        assert {p.url for p in db.get_all()} == {"https://a.com/ok"}
+        # the link to the deleted page is gone too (FK has no cascade)
+        assert db.get_files_for_url("https://a.com/failed-linked") == []
+
+    def test_all_drops_everything(self, db):
+        self._seed(db)
+        slugs = db.prune_pages("all")
+        assert len(slugs) == 3
+        assert db.get_all() == []
+
+    def test_dry_run_deletes_nothing(self, db):
+        self._seed(db)
+        before = {p.url for p in db.get_all()}
+        slugs = db.prune_pages("failed", dry_run=True)
+        assert set(slugs) == {
+            slug_for_url("https://a.com/failed-linked"),
+            slug_for_url("https://a.com/failed-orphan"),
+        }
+        assert {p.url for p in db.get_all()} == before
+
+    def test_invalid_mode_raises(self, db):
+        with pytest.raises(ValueError):
+            db.prune_pages("everything")
 
     def test_invalid_order_raises(self, db):
         with pytest.raises(ValueError):

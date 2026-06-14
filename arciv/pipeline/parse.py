@@ -22,6 +22,21 @@ from arciv.settings import SAVED_DIR
 DEFAULT_MIN_WORDS = 150
 
 
+def _too_short_reason(words: int, raw_bytes: int, kind: str) -> str:
+    """Build the rejection reason for below-threshold content.
+
+    Pairs the extracted word count with the raw source size so a skip can be
+    judged at a glance: a large raw size yielding few words points to a
+    fetch/parse miss (paywall, JS-only page), while a small raw size is just
+    genuinely short. ``kind`` labels the source (e.g. "html", "pdf").
+    """
+    if raw_bytes < 1024:
+        size = f"{raw_bytes} B"
+    else:
+        size = f"{raw_bytes // 1024} KB"
+    return f"too short ({words} words from {size} {kind})"
+
+
 def _accept(
     db: PageDatabase,
     page: Page,
@@ -90,7 +105,7 @@ def _parse_pdf(
 
     word_count = len(text.split())
     if word_count < min_words:
-        _reject(db, page, f"too short ({word_count} words)")
+        _reject(db, page, _too_short_reason(word_count, pdf_path.stat().st_size, "pdf"))
         return None
 
     result = _accept(db, page, md_path, text, None, None, word_count)
@@ -112,10 +127,12 @@ def _parse_html(
     """
     html = html_path.read_text(encoding="utf-8")
 
+    raw_bytes = len(html.encode("utf-8"))
+
     if is_raw_text_url(page.url):
         word_count = len(html.split())
         if word_count < min_words:
-            _reject(db, page, f"too short ({word_count} words)")
+            _reject(db, page, _too_short_reason(word_count, raw_bytes, "text"))
             return None
         result = _accept(db, page, md_path, html, None, None, word_count)
         logger.info(f"Parsed {page.url} (raw text, {word_count} words)")
@@ -135,7 +152,7 @@ def _parse_html(
     # code-heavy pages with real prose aren't rejected as "too short".
     gate_count = max(conversion.word_count, conversion.full_word_count)
     if gate_count < min_words:
-        _reject(db, page, f"too short ({gate_count} words)")
+        _reject(db, page, _too_short_reason(gate_count, raw_bytes, "html"))
         return None
 
     result = _accept(

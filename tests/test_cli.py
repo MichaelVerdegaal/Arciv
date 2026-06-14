@@ -238,6 +238,51 @@ class TestStatus:
         assert "Recent fetches" not in result.output
 
 
+class TestPrune:
+    def _seed_with_folders(self, data_dir):
+        """Seed an ok page and a failed page, each with a saved/<slug>/ folder."""
+        pages = [
+            _page("https://example.com/ok", parsed_at="2026-06-11T00:00:00+00:00"),
+            _page("https://example.com/bad", fail_reason="timeout"),
+        ]
+        _seed(data_dir, pages)
+        for page in pages:
+            folder = data_dir / "saved" / page.slug
+            folder.mkdir(parents=True)
+            (folder / "page.html").write_text("x", encoding="utf-8")
+        return pages
+
+    def test_failed_force_deletes_row_and_folder(self, runner, data_dir):
+        ok, bad = self._seed_with_folders(data_dir)
+        result = runner.invoke(cli_module.cli, ["prune", "failed", "--force"])
+        assert result.exit_code == 0
+        assert "Pruned 1 page(s)" in result.output
+        with PageDatabase(data_dir / "arciv.db") as db:
+            assert {p.url for p in db.get_all()} == {"https://example.com/ok"}
+        assert not (data_dir / "saved" / bad.slug).exists()
+        assert (data_dir / "saved" / ok.slug).exists()
+
+    def test_nothing_to_prune_is_graceful(self, runner, data_dir):
+        _seed(
+            data_dir,
+            [_page("https://example.com/ok", parsed_at="2026-06-11T00:00:00+00:00")],
+        )
+        result = runner.invoke(cli_module.cli, ["prune", "failed", "--force"])
+        assert result.exit_code == 0
+        assert "Nothing to prune" in result.output
+
+    def test_asks_and_aborts_on_no(self, runner, data_dir):
+        self._seed_with_folders(data_dir)
+        result = runner.invoke(cli_module.cli, ["prune", "all"], input="n\n")
+        assert result.exit_code != 0
+        with PageDatabase(data_dir / "arciv.db") as db:
+            assert len(db.get_all()) == 2
+
+    def test_invalid_mode_is_usage_error(self, runner, data_dir):
+        result = runner.invoke(cli_module.cli, ["prune", "everything"])
+        assert result.exit_code != 0
+
+
 class TestDbGroup:
     def test_dir_prints_data_dir(self, runner, data_dir):
         result = runner.invoke(cli_module.cli, ["db", "dir"])
