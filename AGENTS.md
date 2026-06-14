@@ -80,14 +80,16 @@ uv tool install .                # Install the CLI as a global tool
 ## Current Direction
 
 The scope is settled: Arciv is the main archival tool for all reading material. The CLI
-foundation (layered `get`, separated stages, sources) is in place; the backend + frontend
-phase is now underway. PLAN.md is the live roadmap.
+foundation (layered `get`, separated stages, sources) is in place; the web app phase is now
+underway. PLAN.md is the live roadmap.
 
-- The read path is built: a FastAPI backend (`arciv_api/`) imports the arciv library (it
-  never shells out) and serves the archive over HTTP through read-only database connections;
-  an Astro SSR frontend (`frontend/`) consumes that API and never opens the database or
-  `saved/` directly. The archive/write flow (the background fetch+parse worker) is not built
-  yet — build for what exists.
+- The web app is built: a single FastAPI service (`arciv_api/`) imports the arciv library (it
+  never shells out), reads through short-lived read-only connections, and renders its own HTML
+  with Jinja2 + Datastar (Tailwind/DaisyUI) — there is no separate frontend runtime. It serves
+  browse, page detail, domains, sources, and status, plus a `POST /archive` job flow run by a
+  single in-process worker started in the app lifespan. Page markdown is rendered to HTML and
+  sanitized in Python. Assets are self-hosted: `datastar.js` and a Tailwind/DaisyUI-built
+  `app.css` (rebuild with `scripts/build_css.sh`).
 
 ## Context
 

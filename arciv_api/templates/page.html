@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}{{ page.title or page.url }} — Arciv{% endblock %}
+{% block main %}
+{% include "partials/_page_main.html" %}
+
+{% if sources %}
+<section class="mt-8">
+  <h2 class="mb-2 text-lg font-semibold">Referenced from</h2>
+  <ul class="list-inside list-disc text-sm opacity-70">
+    {% for s in sources %}<li><code>{{ s }}</code></li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endblock %}

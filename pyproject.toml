@@ -28,6 +28,10 @@ dev = [
     "fastapi>=0.136.3", # Backend API framework (arciv_api)
     "uvicorn[standard]>=0.49.0", # ASGI server for the backend
     "httpx>=0.28.1", # Test client for the API
+    "jinja2>=3.1.6",
+    "markdown>=3.10.2",
+    "nh3>=0.3.5",
+    "datastar-py>=1.0.2",
 ]
 
 [build-system]

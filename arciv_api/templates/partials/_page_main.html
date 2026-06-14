@@ -1,0 +1,31 @@
+{% from "_macros.html" import state_badge %}
+{# Shared by GET /page/{slug} and the /progress poll. While pending it carries
+   the polling interval; done/failed drop it, so the browser stops polling. #}
+<div id="page-main"{% if page.state == 'pending' %} data-on-interval__duration.1500ms="@get('/page/{{ page.slug }}/progress')"{% endif %}>
+  <p class="text-sm opacity-60"><a class="link" href="/">← Archive</a></p>
+  <h1 class="mb-1 text-2xl font-bold">{{ page.title or page.url }}</h1>
+  <p class="mb-4 text-sm opacity-70">
+    {{ state_badge(page.state) }}
+    · <a class="link" href="{{ page.url }}" target="_blank" rel="noopener noreferrer">{{ page.domain }} ↗</a>
+    {% if page.author %} · {{ page.author }}{% endif %}
+    {% if page.word_count %} · {{ page.word_count }} words{% endif %}
+    {% if page.fetched_at %} · fetched {{ page.fetched_at[:10] }}{% endif %}
+  </p>
+
+  {% if page.state == 'failed' %}
+  <div class="alert alert-error">
+    <span>Archiving failed: {{ page.fail_reason }}. The original is at
+      <a class="link" href="{{ page.url }}" target="_blank" rel="noopener noreferrer">{{ page.url }}</a>.</span>
+  </div>
+  {% elif page.state == 'pending' %}
+  <div class="alert">
+    <span class="loading loading-spinner loading-sm"></span>
+    <span>{{ (phase or 'queued')|capitalize }}… archiving
+      <a class="link" href="{{ page.url }}" target="_blank" rel="noopener noreferrer">{{ page.url }}</a>.</span>
+  </div>
+  {% endif %}
+
+  {% if body_html %}
+  <article class="article mt-4">{{ body_html|safe }}</article>
+  {% endif %}
+</div>

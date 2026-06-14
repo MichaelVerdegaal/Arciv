@@ -5,18 +5,20 @@ documentation. Not books, not videos. The strategy: build the entire backend as 
 streamlined CLI tool first. When that foundation is right, the frontend part will barely have
 to do anything.
 
-## Architecture: three isolated parts
+## Architecture: two parts
 
-The project splits into three parts to keep responsibilities isolated:
+The project splits into two deployables to keep responsibilities isolated:
 
 1. **CLI tool** (this repo's `arciv/` package) — all archival logic. Runnable easily as a uv
    tool (`uv tool install`), deliberately **not** containerized.
-2. **Backend** — imports the arciv library (never shells out) and serves it over HTTP via
-   FastAPI, reading the SQLite DB through read-only connections. Gets a dedicated container.
-3. **Frontend** — the browsing/insight UI. Gets a dedicated container.
+2. **Web app** (`arciv_api/`) — one Python (FastAPI) service that imports the arciv library
+   (never shells out), reads through read-only connections, and renders its own HTML with
+   Jinja2 + Datastar (Tailwind/DaisyUI). Gets a dedicated container. (Originally planned as a
+   separate backend plus an Astro frontend; collapsing to one server-rendered service dropped
+   the second runtime and the internal-vs-public URL juggling the split needed.)
 
-The CLI is complete; the backend and frontend read path (browse, page detail, domains) is now
-implemented, with the archive/write flow still to come.
+The CLI is complete; the web app implements browse, page detail, domains, sources, status, and
+the archive job flow (a single in-process fetch+parse worker behind `POST /archive`).
 
 ## CLI design — ✅ implemented
 
@@ -58,36 +60,33 @@ in mind: it lives outside any repo checkout, so the backend container can mount 
 `ARCIV_DATA_DIR` still overrides it (e.g. `ARCIV_DATA_DIR=data` in `.env` when developing
 from a clone).
 
-## 1. Backend + Frontend (next phase)
+## 1. Web app — ✅ implemented
 
 A web UI is a must-have: the CLI alone is too annoying for viewing stored results, and
-browsing the archive is the best way to gain insight into what was fetched earlier. Astro for
-the frontend, otherwise a blazingly-fast plain HTML site. References:
+browsing the archive is the best way to gain insight into what was fetched earlier. Built as a
+single server-rendered FastAPI service (Jinja2 + Datastar, Tailwind/DaisyUI), deliberately not
+Astro: Arciv is heading toward CLI parity in the browser (archive a URL with live status),
+which is a reactive webapp, not a static content showcase. References:
 
 - https://news.ycombinator.com/item?id=48475483
 - https://news.ycombinator.com/item?id=48437609
 
-The backend imports the arciv library (it does not shell out) and reads `arciv.db` /
+The web app imports the arciv library (it does not shell out) and reads `arciv.db` /
 `saved/<slug>/` under the data dir through read-only connections — the storage contract it
-builds against is documented in AGENTS.md. The Astro frontend never touches the data dir; it
-only speaks HTTP to the backend. Backend and frontend each get a dedicated container (the CLI
-does not).
+builds against is documented in AGENTS.md. It renders its own HTML (page markdown is rendered
+to HTML in Python and sanitized), so there is no separate frontend runtime. It gets a
+dedicated container (the CLI does not).
 
-The read path is implemented: `arciv_api/` (FastAPI) serves `GET /api/pages`,
-`/api/pages/{slug}`, and `/api/domains`; `frontend/` (Astro SSR) renders the browse and page
-views from it. The ideas below remain the fuller vision; the archive/write flow is still to
-come.
+Routes: `GET /` (browse), `/page/{slug}` (+ `/progress` poll), `/domains`, `/sources`,
+`/status`, and `POST /archive`. Page views (status):
 
-Page views to design before writing any code (ideas, not decisions):
+- **Archive index** — ✅ sortable/filterable list: title, domain, word count, fetch date, link
+- **Page detail** — ✅ rendered markdown, source files, fetch metadata, live archive status
+- **Sources** — ✅ pages per registered source, plus a **Status** dashboard
+- **Search** — parked (client-side over titles, or SQLite FTS5 once the gap is felt)
 
-- **Archive index** — sortable/filterable list: title, domain, word count, fetch date, link to
-  the original URL
-- **Page detail** — rendered markdown, source files that referenced it, fetch metadata
-- **Search** — start dumb (client-side index over titles, or SQLite FTS5 once the gap is felt)
-- **Sources** — browse pages per registered source
-
-One thing to settle at implementation time: the DB runs in WAL mode, so a build step reading
-it should open it read-only and may need a checkpoint first (or copy the file).
+The DB runs in WAL mode; the web app opens it read-only (a `mode=ro` connection that skips the
+schema) with one short-lived connection per request — implemented in `PageDatabase`.
 
 ## 2. CLI polish (ongoing)
 

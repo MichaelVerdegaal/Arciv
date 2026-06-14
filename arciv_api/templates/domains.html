@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Arciv — Domains{% endblock %}
+{% block main %}
+<h1 class="mb-4 text-2xl font-bold">Domains</h1>
+{% if not domains %}
+<p class="opacity-60">No domains yet.</p>
+{% else %}
+<table class="table table-zebra table-sm w-auto">
+  <thead><tr><th>Domain</th><th>Pages</th></tr></thead>
+  <tbody>
+    {% for name, count in domains %}
+    <tr>
+      <td><a class="link link-primary" href="/?domain={{ name|urlencode }}">{{ name or '(unknown)' }}</a></td>
+      <td class="opacity-70">{{ count }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

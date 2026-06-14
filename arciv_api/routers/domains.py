@@ -1,17 +1,17 @@
-"""Domain endpoint: page counts per registered domain, for browse facets."""
+"""Domains: GET /domains — registered domains with page counts."""
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import HTMLResponse
 
 from arciv.db import PageDatabase
 
 from ..dependencies import get_db
-from ..schemas import DomainCount, DomainList
+from ..rendering import render
 
-router = APIRouter(prefix="/api", tags=["domains"])
+router = APIRouter()
 
 
-@router.get("/domains", response_model=DomainList)
-def list_domains(db: PageDatabase = Depends(get_db)) -> DomainList:
-    """List domains with their page counts, biggest groups first."""
-    domains = [DomainCount(domain=name, count=n) for name, n in db.domain_counts()]
-    return DomainList(domains=domains)
+@router.get("/domains", response_class=HTMLResponse)
+def domains(db: PageDatabase = Depends(get_db)) -> str:
+    """List domains with their page counts, biggest first."""
+    return render("domains.html", domains=db.domain_counts())

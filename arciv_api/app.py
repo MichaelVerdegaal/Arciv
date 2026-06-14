@@ -1,30 +1,49 @@
-"""FastAPI application: the read API the Astro frontend consumes.
+"""FastAPI web app: the server-rendered Arciv UI.
 
-Step 1 is read-only browsing (pages, page detail, domains). The archive job
-flow and its background worker come later and will hang off a lifespan
-handler added here.
+One Python service renders its own HTML (Jinja2) and drives interactivity with
+Datastar (``data-*`` attributes that fire requests answered with HTML fragments
+or SSE patches). It imports the arciv library directly — it never shells out —
+and reads through short-lived read-only connections; the only writes go through
+the archive worker started here in the lifespan.
 
 Run locally from the repo root::
 
     uv run uvicorn arciv_api.app:app --reload
 """
 
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
 
-from .routers import domains, pages
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+
+from . import config
+from .jobs import ArchiveQueue
+from .routers import archive, browse, domains, page, sources, status
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start the single archive worker, and cancel it on shutdown."""
+    queue = ArchiveQueue(config.DB_PATH)
+    queue.start()
+    app.state.archive = queue
+    try:
+        yield
+    finally:
+        await queue.stop()
 
 
 def create_app() -> FastAPI:
-    """Build the FastAPI app with the read routers mounted."""
-    app = FastAPI(title="Arciv API", version="0.1.0")
+    """Build the app: mount static assets and the page routers."""
+    app = FastAPI(title="Arciv", lifespan=lifespan)
+    app.mount("/static", StaticFiles(directory=str(config.STATIC_DIR)), name="static")
 
-    @app.get("/api/health", tags=["meta"])
+    @app.get("/health", include_in_schema=False)
     def health() -> dict[str, str]:
-        """Liveness check that does not touch the database."""
         return {"status": "ok"}
 
-    app.include_router(pages.router)
-    app.include_router(domains.router)
+    for module in (browse, page, domains, sources, status, archive):
+        app.include_router(module.router)
     return app
 
 

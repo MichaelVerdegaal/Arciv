@@ -122,6 +122,10 @@ class PageDatabase:
         self._conn.executescript(_SCHEMA)
         # executescript commits and resets pragmas set before it
         self._conn.execute("PRAGMA foreign_keys=ON")
+        # Wait briefly for a lock rather than failing outright: the web app's
+        # archive worker writes while the API (and CLI) may also be open on the
+        # same WAL database.
+        self._conn.execute("PRAGMA busy_timeout=5000")
 
     def _open_readonly(self, db_path: Path) -> None:
         """Open a connection that can read but never write the database.
@@ -136,6 +140,7 @@ class PageDatabase:
         uri = f"{db_path.resolve().as_uri()}?mode=ro"
         self._conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA busy_timeout=5000")
 
     def close(self) -> None:
         """Close the database connection."""

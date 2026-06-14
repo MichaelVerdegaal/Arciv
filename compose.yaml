@@ -1,0 +1,16 @@
+# Single service: the Arciv web app. Mount the same data directory the CLI
+# writes so the UI reads the same arciv.db and saved/ files.
+#
+#   ARCIV_DATA_DIR=~/.local/share/arciv docker compose up
+#
+# ARCIV_DATA_DIR defaults to ./data (handy when developing from a clone). No
+# auth or TLS here by design; put a reverse proxy in front to expose beyond a
+# LAN. See PLAN.md and the backend plan for the hosting model.
+services:
+  arciv:
+    build: .
+    ports:
+      - "${ARCIV_PORT:-8000}:8000"
+    volumes:
+      - "${ARCIV_DATA_DIR:-./data}:/data"
+    restart: unless-stopped
