@@ -1,8 +1,11 @@
 """Tests for the SQLite-backed PageDatabase."""
 
+import sqlite3
+
 import pytest
 
 from arciv.db import Page, PageDatabase, Source
+from arciv.scrape import slug_for_url
 
 
 @pytest.fixture
@@ -13,10 +16,13 @@ def db(tmp_path):
 
 
 def _page(url: str, **overrides) -> Page:
+    # slug is unique per URL (slug_for_url is deterministic), matching
+    # production and satisfying the slug UNIQUE constraint when a test
+    # seeds several pages at once.
     defaults = dict(
         original_url=url,
         domain="example.com",
-        slug="example.com-abc12345",
+        slug=slug_for_url(url),
         content_type="html",
         word_count=500,
         fetched_at="2026-06-11T00:00:00+00:00",
@@ -93,6 +99,44 @@ class TestCrud:
             ]
         )
         assert db.get("https://example.com/a").title == "Kept"
+
+
+class TestSlugConstraint:
+    def test_duplicate_slug_is_rejected(self, db):
+        db.upsert(_page("https://example.com/a", slug="example.com-dup00000"))
+        # A different URL may not reuse a slug: the two would collide on the
+        # same saved/<slug>/ folder and break slug-keyed lookups.
+        with pytest.raises(sqlite3.IntegrityError):
+            db.upsert(_page("https://example.com/b", slug="example.com-dup00000"))
+
+    def test_index_is_added_to_a_db_created_before_the_constraint(self, tmp_path):
+        db_path = tmp_path / "legacy.db"
+        # A database from before the constraint: a pages table, no slug index.
+        legacy = sqlite3.connect(db_path)
+        legacy.executescript(
+            "CREATE TABLE pages (url TEXT PRIMARY KEY, slug TEXT NOT NULL DEFAULT '');"
+        )
+        legacy.executemany(
+            "INSERT INTO pages (url, slug) VALUES (?, ?)",
+            [("https://a", "s1"), ("https://b", "s2")],
+        )
+        legacy.commit()
+        legacy.close()
+
+        # Opening re-runs the schema script, which adds the index in place:
+        # CREATE UNIQUE INDEX IF NOT EXISTS migrates the existing table.
+        with PageDatabase(db_path):
+            pass
+
+        check = sqlite3.connect(db_path)
+        index_names = {
+            row[0]
+            for row in check.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index'"
+            )
+        }
+        check.close()
+        assert "idx_pages_slug" in index_names
 
 
 class TestStateQueries:
@@ -289,8 +333,6 @@ class TestLinks:
 
     def test_link_requires_existing_page(self, db):
         # foreign_keys=ON: links cannot point at unknown pages
-        import sqlite3
-
         with pytest.raises(sqlite3.IntegrityError):
             db.replace_links_for_files(
                 [],

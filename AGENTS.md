@@ -35,7 +35,8 @@ The planned backend/frontend read the data directory directly, so treat this lay
 public interface — changes to it ripple beyond the Python code:
 
 - `<data dir>/arciv.db` — SQLite (WAL mode, foreign keys ON). `pages` holds one row per URL:
-  `url` (PK, normalized), `original_url`, `domain`, `slug`, `content_type` (`html`/`pdf`,
+  `url` (PK, normalized), `original_url`, `domain`, `slug` (UNIQUE; names the
+  on-disk `saved/<slug>/` folder), `content_type` (`html`/`pdf`,
   set at fetch), `title`, `author`, `word_count`, `fail_reason`, `added_at`, `fetched_at`,
   `parsed_at`. Pipeline state is carried by the timestamps: pending (no `fetched_at`),
   fetched (`fetched_at` set), parsed (`parsed_at` set); `fail_reason` marks a failure at

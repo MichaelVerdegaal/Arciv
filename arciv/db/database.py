@@ -23,6 +23,12 @@ CREATE TABLE IF NOT EXISTS pages (
     parsed_at    TEXT
 );
 
+-- slug names the saved/<slug>/ folder on disk and is the id the backend
+-- looks pages up by, so it must be unique. A unique index (rather than a
+-- column UNIQUE constraint) also backfills the guarantee onto databases
+-- created before it, on their next open, and speeds up slug lookups.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pages_slug ON pages(slug);
+
 CREATE TABLE IF NOT EXISTS sources (
     name     TEXT PRIMARY KEY,
     path     TEXT NOT NULL,
