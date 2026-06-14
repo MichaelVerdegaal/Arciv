@@ -23,12 +23,6 @@ CREATE TABLE IF NOT EXISTS pages (
     parsed_at    TEXT
 );
 
--- slug names the saved/<slug>/ folder on disk and is the id the backend
--- looks pages up by, so it must be unique. A unique index (rather than a
--- column UNIQUE constraint) also backfills the guarantee onto databases
--- created before it, on their next open, and speeds up slug lookups.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_pages_slug ON pages(slug);
-
 CREATE TABLE IF NOT EXISTS sources (
     name     TEXT PRIMARY KEY,
     path     TEXT NOT NULL,
@@ -126,6 +120,34 @@ class PageDatabase:
         # archive worker writes while the API (and CLI) may also be open on the
         # same WAL database.
         self._conn.execute("PRAGMA busy_timeout=5000")
+        self._ensure_unique_slug_index()
+
+    def _ensure_unique_slug_index(self) -> None:
+        """Enforce one page per slug, with an actionable error on collision.
+
+        The slug names the ``saved/<slug>/`` folder and is the id the web app
+        looks pages up by, so it must be unique; a unique index also backfills
+        the guarantee onto databases created before it, since this runs on every
+        open. Created here rather than in ``_SCHEMA`` so that if existing rows
+        already share a slug (a hash collision, or a legacy blank slug) the
+        operator gets a clear message naming the duplicates instead of a bare
+        ``IntegrityError`` that would leave the database un-openable.
+        """
+        try:
+            self._conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_pages_slug ON pages(slug)"
+            )
+        except sqlite3.IntegrityError as exc:
+            dupes = self._conn.execute(
+                "SELECT slug, COUNT(*) AS n FROM pages "
+                "GROUP BY slug HAVING n > 1 ORDER BY n DESC"
+            ).fetchall()
+            examples = ", ".join(f"{row['slug']!r}×{row['n']}" for row in dupes[:5])
+            raise RuntimeError(
+                f"Cannot enforce unique page slugs: {len(dupes)} slug(s) are "
+                f"shared by multiple URLs ({examples}). This is most likely a "
+                "slug hash collision; resolve the duplicate rows before upgrading."
+            ) from exc
 
     def _open_readonly(self, db_path: Path) -> None:
         """Open a connection that can read but never write the database.

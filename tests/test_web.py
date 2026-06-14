@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import arciv_api.config as api_config
-from arciv.db import Page, PageDatabase
+from arciv.db import Page, PageDatabase, Source
 from arciv.scrape import process_url, slug_for_url
 from arciv_api.app import app
 from arciv_api.jobs import ArchiveQueue, Job, Phase
@@ -202,8 +202,6 @@ class TestDashboards:
 
     def test_sources(self, client, archive):
         with PageDatabase(archive / "arciv.db") as db:
-            from arciv.db import Source
-
             db.add_source(Source("notes", "/vault/notes", "2026-06-11T00:00:00"))
         res = client.get("/sources")
         assert res.status_code == 200

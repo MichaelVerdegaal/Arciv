@@ -138,6 +138,24 @@ class TestSlugConstraint:
         check.close()
         assert "idx_pages_slug" in index_names
 
+    def test_preexisting_duplicate_slugs_raise_a_clear_error(self, tmp_path):
+        # An archive whose rows already collide on slug must fail to open with
+        # an actionable message, not a bare IntegrityError that hides the cause.
+        db_path = tmp_path / "legacy.db"
+        legacy = sqlite3.connect(db_path)
+        legacy.executescript(
+            "CREATE TABLE pages (url TEXT PRIMARY KEY, slug TEXT NOT NULL DEFAULT '');"
+        )
+        legacy.executemany(
+            "INSERT INTO pages (url, slug) VALUES (?, ?)",
+            [("https://a", "dup"), ("https://b", "dup")],
+        )
+        legacy.commit()
+        legacy.close()
+
+        with pytest.raises(RuntimeError, match="unique page slugs"):
+            PageDatabase(db_path)
+
 
 class TestStateQueries:
     def test_get_unfetched_is_pending_only(self, db):
