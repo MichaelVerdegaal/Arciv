@@ -5,33 +5,35 @@ description = "Your personal knowledge toolkit."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "aiofiles>=25.1.0", # Asynchronous file operations
+    "aiofiles>=25.1.0",     # Asynchronous file operations
     "python-dotenv>=1.2.1", # Environment variable management
-    "loguru>=0.7.3", # Logging
-    "tldextract>=5.3.1", # Extracting domain information from URLs
-    "trafilatura>=2.0.0", # HTML to markdown conversion
-    "patchright>=1.60.0", # Undetected Playwright fork for scraping
-    "liteparse>=2.0.3",
+    "loguru>=0.7.3",        # Logging
+    "tldextract>=5.3.1",    # Extracting domain information from URLs
+    "trafilatura>=2.0.0",   # HTML to markdown conversion
+    "patchright>=1.60.0",   # Undetected Playwright fork for scraping
+    "liteparse>=2.0.3",     # PDF parsing
     "platformdirs>=4.10.0", # OS-appropriate user data directory
-    "typer>=0.26.7", # CLI framework
+    "typer>=0.26.7",        # CLI framework
 ]
 
 [project.scripts]
 arciv = "arciv.scripts.cli:cli"
 
 [dependency-groups]
-dev = [
-    "ruff>=0.15.15", # Linting / formatting
-    "pytest>=8.3.0", # Test runner
-    "pytest-cov>=6.0.0", # Coverage reporting
-    "hypothesis>=6.120.0", # Property-based testing
-    "fastapi>=0.136.3", # Backend API framework (arciv_api)
+app = [
     "uvicorn[standard]>=0.49.0", # ASGI server for the backend
-    "httpx>=0.28.1", # Test client for the API
+    "fastapi>=0.136.3",          # Backend API framework (arciv_api)
     "jinja2>=3.1.6",
     "markdown>=3.10.2",
     "nh3>=0.3.5",
     "datastar-py>=1.0.2",
+]
+dev = [
+    "ruff>=0.15.15",       # Linting / formatting
+    "pytest>=8.3.0",       # Test runner
+    "pytest-cov>=6.0.0",   # Coverage reporting
+    "hypothesis>=6.120.0", # Property-based testing
+    "httpx>=0.28.1",       # Test client for the API
 ]
 
 [build-system]

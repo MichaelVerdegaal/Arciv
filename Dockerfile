@@ -16,7 +16,7 @@ WORKDIR /app
 # Install dependencies (and the arciv library) first, for layer caching.
 COPY pyproject.toml uv.lock README.md ./
 COPY arciv ./arciv
-RUN uv sync --frozen
+RUN uv sync --frozen --group app
 
 # Chrome plus its system libraries for the fetch stage. Cached above the app
 # copy so editing the web app does not re-run this heavy step.
