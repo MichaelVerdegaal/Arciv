@@ -71,6 +71,21 @@ def _fake_fetch_fail(db_path, url: str) -> None:
         db.upsert(page)
 
 
+def _fake_archive_urls(db_path, urls: list[str]) -> None:
+    """Stand in for the batch fetch+parse: mark each known URL fetched+parsed."""
+    with PageDatabase(db_path) as db:
+        for url in urls:
+            page = db.get(url)
+            if page is None:
+                continue
+            page.fetched_at = "2026-06-14T00:00:00+00:00"
+            page.content_type = "html"
+            page.parsed_at = "2026-06-14T00:01:00+00:00"
+            page.title = f"Archived {page.domain}"
+            page.fail_reason = None
+            db.upsert(page)
+
+
 @pytest.fixture
 def archive(tmp_path, monkeypatch):
     """Point the app at a temp archive (DB + saved/) and return its root."""
@@ -86,6 +101,9 @@ def client(archive):
     with TestClient(app) as test_client:
         app.state.archive._fetch = _fake_fetch
         app.state.archive._parse = _fake_parse
+        # Source archival runs a batch fetch+parse in the background; keep it
+        # off a real browser too.
+        app.state.archive._archive_urls = _fake_archive_urls
         yield test_client
 
 
@@ -137,6 +155,26 @@ class TestBrowse:
         assert client.get("/").status_code == 200
         assert config.DB_PATH.exists()
 
+    def test_fetched_page_shows_fetched_state(self, client, archive):
+        # The default page is fetched but not parsed, which is now "fetched".
+        _seed(archive, [_page("https://a.com/f", title="In flight")])
+        res = client.get("/")
+        assert ">fetched<" in res.text
+
+    def test_status_filter_fetched(self, client, archive):
+        _seed(
+            archive,
+            [
+                _page("https://a.com/f", title="Fetched One"),
+                _page(
+                    "https://a.com/d", title="Done One", parsed_at="2026-06-11T01:00:00"
+                ),
+            ],
+        )
+        res = client.get("/", params={"status": "fetched"})
+        assert "Fetched One" in res.text
+        assert "Done One" not in res.text
+
 
 class TestPageDetail:
     def test_done_page_renders_markdown_body(self, client, archive):
@@ -171,6 +209,16 @@ class TestPageDetail:
         res = client.get(f"/page/{page.slug}")
         assert "paywalled" in res.text
         assert "data-on-interval" not in res.text  # no polling once failed
+
+    def test_fetched_page_polls_for_parse(self, client, archive):
+        # Fetched but not parsed (e.g. CLI fetched, parse still pending): the
+        # detail keeps polling until parse lands, and shows the fetched badge.
+        page = _page("https://a.com/await")
+        _seed(archive, [page])
+        res = client.get(f"/page/{page.slug}")
+        assert res.status_code == 200
+        assert ">fetched<" in res.text
+        assert "data-on-interval" in res.text
 
     def test_unknown_slug_is_404(self, client, archive):
         _seed(archive, [])
@@ -414,6 +462,112 @@ class TestRules:
         )
         assert "Skipped" in res.text
         assert "blocked by rule" in res.text
+
+
+class TestSourcesUI:
+    def test_add_source_indexes_and_redirects(self, client, archive):
+        notes = archive / "vault"
+        notes.mkdir()
+        (notes / "a.md").write_text("[x](https://example.com/post)", encoding="utf-8")
+        res = client.post(
+            "/sources", json={"name": "notes", "path": str(notes)}, headers=_DS
+        )
+        assert res.status_code == 200
+        assert "/sources/notes" in res.text  # redirect to the new source
+        with PageDatabase(archive / "arciv.db", read_only=True) as db:
+            assert db.get_source("notes") is not None
+            # Indexing is synchronous, so the link is attributed right away.
+            assert db.get_urls_for_source("notes") == ["https://example.com/post"]
+
+    def test_add_source_rejects_missing_directory(self, client, archive):
+        # Validation fails before any DB write, so nothing is registered.
+        _seed(archive, [])  # create the DB so the check below can open it
+        res = client.post(
+            "/sources",
+            json={"name": "ghost", "path": str(archive / "nope")},
+            headers=_DS,
+        )
+        assert "Not a directory" in res.text
+        with PageDatabase(archive / "arciv.db", read_only=True) as db:
+            assert db.get_source("ghost") is None
+
+    def test_add_source_rejects_blank_name(self, client, archive):
+        notes = archive / "vault"
+        notes.mkdir()
+        res = client.post(
+            "/sources", json={"name": "  ", "path": str(notes)}, headers=_DS
+        )
+        assert "name" in res.text.lower()
+
+    def test_add_source_rejects_duplicate_name(self, client, archive):
+        notes = archive / "vault"
+        notes.mkdir()
+        with PageDatabase(archive / "arciv.db") as db:
+            db.add_source(Source("notes", str(notes), "2026-06-11T00:00:00+00:00"))
+        res = client.post(
+            "/sources", json={"name": "notes", "path": str(notes)}, headers=_DS
+        )
+        assert "already exists" in res.text
+
+    def test_source_detail_lists_files_and_links(self, client, archive):
+        with PageDatabase(archive / "arciv.db") as db:
+            db.add_source(Source("notes", "/vault/notes", "2026-06-11T00:00:00+00:00"))
+            db.upsert(_page("https://a.com/1", title="Linked Page"))
+            db.replace_links_for_files(
+                ["/vault/notes/x.md"],
+                [("https://a.com/1", "/vault/notes/x.md", "notes", "t1")],
+            )
+        res = client.get("/sources/notes")
+        assert res.status_code == 200
+        assert "/vault/notes/x.md" in res.text
+        assert "Linked Page" in res.text
+
+    def test_source_detail_unknown_is_404(self, client, archive):
+        _seed(archive, [])
+        res = client.get("/sources/ghost")
+        assert res.status_code == 404
+        assert "No source named" in res.text
+
+    def test_remove_source_redirects_and_deletes(self, client, archive):
+        with PageDatabase(archive / "arciv.db") as db:
+            db.add_source(Source("notes", "/vault/notes", "2026-06-11T00:00:00+00:00"))
+        res = client.post("/sources/notes/delete", json={}, headers=_DS)
+        assert res.status_code == 200
+        assert "/sources" in res.text
+        with PageDatabase(archive / "arciv.db", read_only=True) as db:
+            assert db.get_source("notes") is None
+
+    def test_rearchive_unknown_source_shows_error(self, client, archive):
+        _seed(archive, [])
+        res = client.post("/sources/ghost/archive", json={}, headers=_DS)
+        assert "No source named" in res.text
+
+
+class TestSourceArchiveWorker:
+    def test_archive_source_bg_fetches_and_parses(self, archive):
+        db_path = archive / "arciv.db"
+        with PageDatabase(db_path) as db:
+            db.add_source(Source("notes", "/vault/notes", "2026-06-11T00:00:00+00:00"))
+            db.upsert(_page("https://a.com/1", fetched_at=None))  # pending
+            db.replace_links_for_files(
+                ["/vault/notes/x.md"],
+                [("https://a.com/1", "/vault/notes/x.md", "notes", "t1")],
+            )
+
+        async def run():
+            queue = ArchiveQueue(db_path, archive_urls=_fake_archive_urls)
+            queue.archive_source_bg("notes", ["https://a.com/1"])
+            assert queue.is_archiving("notes")  # set before the task runs
+            await asyncio.gather(*queue._source_tasks)
+            await queue.stop()
+
+        asyncio.run(run())
+        with PageDatabase(db_path, read_only=True) as db:
+            assert db.get("https://a.com/1").parsed_at is not None
+
+    def test_is_archiving_false_when_idle(self, archive):
+        queue = ArchiveQueue(archive / "arciv.db")
+        assert queue.is_archiving("notes") is False
 
 
 class TestHealth:

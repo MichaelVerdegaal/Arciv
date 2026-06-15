@@ -45,12 +45,21 @@ stage also has a dedicated command, which makes developing the library easier:
 A "Source" is a registered file directory (entirely limited to directories for now):
 
 ```bash
-arciv add <directory> <name>   # register a source (both args required)
+arciv add <directory> <name>   # register a source and archive it
+arciv archive <name>           # re-index, fetch, and parse one source
+arciv archive --all            # archive every registered source
 arciv remove <name>            # unregister it (indexed pages are kept)
 arciv sources                  # list registered sources
-arciv index <name>             # index a single source
-arciv index --all              # index every registered source
+arciv index <name>             # index a single source (stage only)
+arciv index --all              # index every registered source (stage only)
 ```
+
+`add` archives the source after registering (pass `--no-archive` to skip);
+`archive` re-runs the whole pipeline as one batched fetch, so adding or
+re-syncing a source is a single command instead of `add` + `index` + `fetch` +
+`parse`. The web app exposes the same: add/remove a source, view its indexed
+files and the links found in each, and re-archive, with the slow fetch+parse
+running in a background batch.
 
 ### Data directory — ✅ implemented
 
@@ -77,12 +86,16 @@ builds against is documented in AGENTS.md. It renders its own HTML (page markdow
 to HTML in Python and sanitized), so there is no separate frontend runtime. It gets a
 dedicated container (the CLI does not).
 
-Routes: `GET /` (browse), `/page/{slug}` (+ `/progress` poll), `/domains`, `/sources`,
-`/status`, and `POST /archive`. Page views (status):
+Routes: `GET /` (browse), `/page/{slug}` (+ `/progress` poll), `/domains`, `/sources`
+(+ `/sources/{name}` detail, `POST /sources`, `/sources/{name}/archive`,
+`/sources/{name}/delete`), `/status`, `/rules`, and `POST /archive`. Source writes use a
+short-lived read-write connection in a thread (the rules pattern); the slow fetch+parse runs
+in a background batch off the request. Page views (status):
 
 - **Archive index** — ✅ sortable/filterable list: title, domain, word count, fetch date, link
 - **Page detail** — ✅ rendered markdown, source files, fetch metadata, live archive status
-- **Sources** — ✅ pages per registered source, plus a **Status** dashboard
+- **Sources** — ✅ add/remove a source, view its indexed files and the links found in each,
+  and re-archive; plus a **Status** dashboard
 - **Search** — parked (client-side over titles, or SQLite FTS5 once the gap is felt)
 
 The DB runs in WAL mode; the web app opens it read-only (a `mode=ro` connection that skips the

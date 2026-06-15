@@ -1,7 +1,10 @@
 {% from "_macros.html" import state_badge %}
-{# Shared by GET /page/{slug} and the /progress poll. While pending it carries
-   the polling interval; done/failed drop it, so the browser stops polling. #}
-<div id="page-main"{% if page.state == 'pending' %} data-on-interval__duration.1500ms="@get('/page/{{ page.slug }}/progress')"{% endif %}>
+{# Shared by GET /page/{slug} and the /progress poll. While still in flight
+   (pending = not fetched, fetched = awaiting parse) it carries the polling
+   interval; done/skipped/failed drop it, so the browser stops polling. The
+   live archive flow passes through 'fetched' during the worker's parse phase,
+   so both in-flight states must keep polling for it to reach 'done'. #}
+<div id="page-main"{% if page.state in ('pending', 'fetched') %} data-on-interval__duration.1500ms="@get('/page/{{ page.slug }}/progress')"{% endif %}>
   <p class="muted"><a href="/">← Archive</a></p>
   <h1>{{ page.title or page.url }}</h1>
   <p class="muted">
@@ -27,9 +30,9 @@
     <a href="{{ page.url }}" target="_blank" rel="noopener noreferrer">original</a>
     to judge.
   </div>
-  {% elif page.state == 'pending' %}
+  {% elif page.state in ('pending', 'fetched') %}
   <div class="alert">
-    <span aria-busy="true">{{ (phase or 'queued')|capitalize }}… archiving
+    <span aria-busy="true">{% if phase %}{{ phase|capitalize }}… {% endif %}archiving
       <a href="{{ page.url }}" target="_blank" rel="noopener noreferrer">{{ page.url }}</a>.</span>
   </div>
   {% endif %}

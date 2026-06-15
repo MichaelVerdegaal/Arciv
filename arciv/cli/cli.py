@@ -7,9 +7,11 @@ Layered archiving with ``get`` (index → fetch → parse in one go):
     arciv get --dir ~/notes         # archive all links in a directory
     arciv list --json | jq -r .url | arciv get -   # archive piped URLs
 
-Sources (named directories that can be re-indexed any time):
+Sources (named directories that can be re-archived any time):
 
-    arciv add ~/vault/notes notes   # register directory as source "notes"
+    arciv add ~/vault/notes notes   # register source "notes" and archive it
+    arciv archive notes             # re-index, fetch, and parse one source
+    arciv archive --all             # archive every registered source
     arciv remove notes              # unregister it
     arciv sources                   # list registered sources
 
@@ -52,6 +54,9 @@ from arciv.settings import DATA_DIR, DB_PATH, SAVED_DIR, configure_logger
 from arciv.core.db import PageDatabase, Source
 from arciv.core.fetch import process_url
 from arciv.core.pipeline import (
+    ArchiveResult,
+    archive_source,
+    archive_urls,
     fetch_urls,
     parse_pending,
     report,
@@ -71,6 +76,7 @@ from .output import (
     json_output,
     set_json_output,
 )
+
 
 class GlobalOptionGroup(TyperGroup):
     """Let the global options work anywhere on the command line.
@@ -267,6 +273,14 @@ def _resolve_url_targets(url: str) -> list[str]:
     return [line.strip() for line in sys.stdin if line.strip()]
 
 
+def _report_archive(name: str, result: ArchiveResult) -> None:
+    """Log a one-line summary of a source archival run."""
+    logger.info(
+        f"Archived source '{name}': {len(result.urls)} indexed, "
+        f"{len(result.fetched)} fetched, {result.parsed} parsed"
+    )
+
+
 @cli.command()
 def add(
     directory: Path = typer.Argument(
@@ -276,8 +290,18 @@ def add(
         help="The directory to register (must exist).",
     ),
     name: str = typer.Argument(..., help="The unique name for this source."),
+    no_archive: bool = typer.Option(
+        False,
+        "--no-archive",
+        help="Only register the source; skip indexing/fetching/parsing it now.",
+    ),
 ) -> None:
-    """Register DIRECTORY as a source named NAME."""
+    """Register DIRECTORY as a source named NAME and archive it.
+
+    After registering, the source is indexed and every URL found is fetched
+    and parsed in one batch (index, then fetch, then parse). Pass --no-archive
+    to only register it, then archive later with ``arciv archive NAME``.
+    """
     source = Source(
         name=name,
         path=str(directory.resolve()),
@@ -286,7 +310,50 @@ def add(
     with PageDatabase(DB_PATH) as db:
         if not db.add_source(source):
             _fail(f"A source named '{name}' already exists.")
-    logger.info(f"Added source '{name}' -> {source.path}")
+        logger.info(f"Added source '{name}' -> {source.path}")
+        if no_archive:
+            return
+        _report_archive(name, archive_source(db, name))
+
+
+@cli.command()
+def archive(
+    source: str | None = typer.Argument(
+        None, help="Name of the registered source to archive."
+    ),
+    all_sources: bool = typer.Option(
+        False, "--all", help="Archive every registered source."
+    ),
+) -> None:
+    """Archive a source end to end: index, then batch-fetch and parse.
+
+    Re-indexes first so notes added or removed since last time are picked up,
+    then downloads and parses every URL found in one batch. Provide a source
+    name or --all, not both.
+    """
+    if bool(source) == all_sources:
+        _fail("Provide a source name or --all, not both.", code=EXIT_USAGE)
+
+    with PageDatabase(DB_PATH) as db:
+        if all_sources:
+            sources_list = db.list_sources()
+            if not sources_list:
+                logger.info(
+                    "No sources registered. Add one with: arciv add <dir> <name>"
+                )
+                return
+            # One batch across every source beats a browser launch per source.
+            result = archive_urls(db, index_all(db))
+            logger.info(
+                f"Archived {len(sources_list)} source(s): {len(result.urls)} "
+                f"indexed, {len(result.fetched)} fetched, {result.parsed} parsed"
+            )
+            return
+        try:
+            result = archive_source(db, source)
+        except KeyError as e:
+            _fail(str(e.args[0]), code=EXIT_NOINPUT)
+        _report_archive(source, result)
 
 
 @cli.command()
