@@ -223,8 +223,11 @@ class Fetcher:
         to_fetch_pdf: list[tuple[str, str, str, str]] = []
         seen_processed: set[str] = set()
 
+        # Re-process with the current rules so a rule added after indexing still
+        # applies (and re-canonicalises) before anything is downloaded.
+        rules = self.db.list_rules()
         for url in urls:
-            processed_url, skip_reason = process_url(url)
+            processed_url, skip_reason = process_url(url, rules)
             if processed_url is None:
                 logger.warning(f"Skipped {url}: {skip_reason}")
                 continue

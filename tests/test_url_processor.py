@@ -5,6 +5,7 @@ import re
 from hypothesis import given
 from hypothesis import strategies as st
 
+from arciv.core.db.models import Rule
 from arciv.core.fetch.url_processor import (
     canonicalize,
     is_pdf_url,
@@ -44,10 +45,6 @@ class TestProcessUrl:
         assert processed is None
         assert "HTTPS" in status
 
-    def test_skip_prefix_localhost(self):
-        processed, _ = process_url("https://localhost:8080/page")
-        assert processed is None
-
     def test_image_suffix_is_skipped(self):
         processed, _ = process_url("https://example.com/photo.png")
         assert processed is None
@@ -61,23 +58,6 @@ class TestProcessUrl:
     def test_ip_domain_is_skipped(self):
         processed, _ = process_url("https://192.168.2.13/dashboard")
         assert processed is None
-
-    def test_skip_domain_suffix(self):
-        processed, _ = process_url("https://my.sharepoint.com/sites/x")
-        assert processed is None
-
-    def test_skip_exact_domain(self):
-        processed, _ = process_url("https://claude.ai/chat/abc")
-        assert processed is None
-
-    def test_skip_domain_path_prefix(self):
-        processed, _ = process_url("https://google.com/search?q=test")
-        assert processed is None
-
-    def test_google_non_search_path_passes(self):
-        url = "https://google.com/maps"
-        processed, _ = process_url(url)
-        assert processed == url
 
     def test_github_blob_rewritten_to_repo_root(self):
         processed, status = process_url(
@@ -152,6 +132,70 @@ class TestProcessUrl:
         assert isinstance(status, str)
         if processed is not None:
             assert processed.startswith("https://")
+
+
+class TestProcessUrlRules:
+    """User rules drive skip/rewrite during process_url (the handler chain)."""
+
+    def test_no_rules_passes_content_through(self):
+        # Without rules, only the built-in code handlers run; ordinary content
+        # is kept (this is the behaviour migrated skips no longer provide).
+        url = "https://my.sharepoint.com/sites/x"
+        processed, _ = process_url(url)
+        assert processed == url
+
+    def test_starts_with_skip(self):
+        rules = [Rule("starts_with", "https://localhost", "skip", "local address")]
+        processed, status = process_url("https://localhost:8080/page", rules)
+        assert processed is None
+        assert status == "local address"
+
+    def test_domain_skip_matches_subdomain(self):
+        rules = [Rule("domain", "sharepoint.com", "skip", "not content")]
+        processed, _ = process_url("https://my.sharepoint.com/sites/x", rules)
+        assert processed is None
+
+    def test_domain_skip_exact(self):
+        rules = [Rule("domain", "claude.ai", "skip", None)]
+        processed, _ = process_url("https://claude.ai/chat/abc", rules)
+        assert processed is None
+
+    def test_starts_with_skip_is_path_aware(self):
+        rules = [Rule("starts_with", "https://google.com/search", "skip", None)]
+        skipped, _ = process_url("https://google.com/search?q=test", rules)
+        kept, _ = process_url("https://google.com/maps", rules)
+        assert skipped is None
+        assert kept == "https://google.com/maps"
+
+    def test_host_skip_is_exact_hostname(self):
+        rules = [Rule("host", "app.powerbi.com", "skip", None)]
+        skipped, _ = process_url("https://app.powerbi.com/report", rules)
+        # A different host on the same registered domain is not matched.
+        kept, _ = process_url("https://learn.powerbi.com/docs", rules)
+        assert skipped is None
+        assert kept == "https://learn.powerbi.com/docs"
+
+    def test_exact_skip(self):
+        rules = [Rule("exact", "https://example.com/one", "skip", None)]
+        skipped, _ = process_url("https://example.com/one", rules)
+        kept, _ = process_url("https://example.com/one/two", rules)
+        assert skipped is None
+        assert kept == "https://example.com/one/two"
+
+    def test_rewrite_swaps_host_and_keeps_path(self):
+        rules = [Rule("domain", "medium.com", "rewrite", "scribe.rip")]
+        processed, status = process_url("https://medium.com/@a/post-123", rules)
+        assert processed == "https://scribe.rip/@a/post-123"
+        assert "rewritten" in status
+
+    def test_first_matching_rule_wins(self):
+        rules = [
+            Rule("domain", "example.com", "skip", "first"),
+            Rule("domain", "example.com", "skip", "second"),
+        ]
+        processed, status = process_url("https://example.com/p", rules)
+        assert processed is None
+        assert status == "first"
 
 
 class TestCanonicalize:

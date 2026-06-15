@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Self
 
-from .models import SKIP_REASON_PREFIX, Page, Source
+from .models import SKIP_REASON_PREFIX, Page, Rule, Source
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS pages (
@@ -38,7 +38,39 @@ CREATE TABLE IF NOT EXISTS links (
 );
 
 CREATE INDEX IF NOT EXISTS idx_links_file_path ON links(file_path);
+
+CREATE TABLE IF NOT EXISTS rules (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_type  TEXT NOT NULL,
+    pattern     TEXT NOT NULL,
+    action      TEXT NOT NULL,
+    replacement TEXT,
+    position    INTEGER NOT NULL DEFAULT 0,
+    added_at    TEXT NOT NULL
+);
 """
+
+# URL rules seeded into a freshly created database. These migrate the skip
+# lists that used to be hardcoded in url_processor into the editable rule store,
+# so they show up in the web UI and can be removed there. Each tuple is
+# (match_type, pattern, action, replacement); position follows list order.
+# Plumbing skips (file extensions, image proxies, IP hosts) stay in code — they
+# are not policy anyone wants to edit — so they are deliberately absent here.
+_DEFAULT_RULES: tuple[tuple[str, str, str, str | None], ...] = (
+    ("starts_with", "https://localhost", "skip", "local address"),
+    ("domain", "sharepoint.com", "skip", "not content"),
+    ("domain", "getvirtualbrain.com", "skip", "not content"),
+    ("host", "content.powerapps.com", "skip", "not content"),
+    ("host", "app.fabric.microsoft.com", "skip", "not content"),
+    ("host", "app.powerbi.com", "skip", "not content"),
+    ("domain", "youtube.com", "skip", "video, not readable content"),
+    ("domain", "youtu.be", "skip", "video, not readable content"),
+    ("domain", "azure.com", "skip", "not content"),
+    ("domain", "claude.ai", "skip", "not content"),
+    ("domain", "lnkd.in", "skip", "link shortener"),
+    ("domain", "support.dfg.nl", "skip", "not content"),
+    ("starts_with", "https://google.com/search", "skip", "search results"),
+)
 
 # added_at is deliberately absent from the update clause: it marks when the
 # URL first entered the database and must survive refetches.
@@ -133,6 +165,11 @@ class PageDatabase:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
+        # Whether this is a brand-new database: the rules table is created by the
+        # schema below, so its prior absence means a first-ever open. Default
+        # rules are seeded only then, so deleting every rule in the UI sticks
+        # instead of being re-seeded on the next open.
+        rules_existed = self._table_exists("rules")
         self._conn.executescript(_SCHEMA)
         # executescript commits and resets pragmas set before it
         self._conn.execute("PRAGMA foreign_keys=ON")
@@ -140,7 +177,34 @@ class PageDatabase:
         # archive worker writes while the API (and CLI) may also be open on the
         # same WAL database.
         self._conn.execute("PRAGMA busy_timeout=5000")
+        if not rules_existed:
+            self._seed_default_rules()
         self._ensure_unique_slug_index()
+
+    def _table_exists(self, name: str) -> bool:
+        """Whether a table exists in the current database."""
+        row = self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (name,),
+        ).fetchone()
+        return row is not None
+
+    def _seed_default_rules(self) -> None:
+        """Populate a new database with the default URL rules (see
+        ``_DEFAULT_RULES``)."""
+        added_at = _now()
+        self._conn.executemany(
+            "INSERT INTO rules "
+            "(match_type, pattern, action, replacement, position, added_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                (match_type, pattern, action, replacement, position, added_at)
+                for position, (match_type, pattern, action, replacement) in enumerate(
+                    _DEFAULT_RULES
+                )
+            ],
+        )
+        self._conn.commit()
 
     def _ensure_unique_slug_index(self) -> None:
         """Enforce one page per slug, with an actionable error on collision.
@@ -590,3 +654,66 @@ class PageDatabase:
             )
             for row in rows
         ]
+
+    # -- rules --
+
+    @staticmethod
+    def _row_to_rule(row: sqlite3.Row) -> Rule:
+        """Convert a database row to a Rule object."""
+        return Rule(
+            id=row["id"],
+            match_type=row["match_type"],
+            pattern=row["pattern"],
+            action=row["action"],
+            replacement=row["replacement"],
+            position=row["position"],
+            added_at=row["added_at"],
+        )
+
+    def list_rules(self) -> list[Rule]:
+        """List URL rules in the order they are applied (position, then id).
+
+        This is the order ``process_url`` walks: the first rule whose pattern
+        matches a URL decides its fate, so the ordering is semantic, not
+        cosmetic.
+        """
+        rows = self._conn.execute(
+            "SELECT * FROM rules ORDER BY position, id"
+        ).fetchall()
+        return [self._row_to_rule(row) for row in rows]
+
+    def add_rule(self, rule: Rule) -> Rule:
+        """Append a URL rule, returning it with its assigned id and position.
+
+        New rules go to the end of the list (highest position) so adding one
+        never silently reorders the existing, already-tuned rules.
+        """
+        row = self._conn.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS next FROM rules"
+        ).fetchone()
+        position = row["next"]
+        added_at = rule.added_at or _now()
+        cursor = self._conn.execute(
+            "INSERT INTO rules "
+            "(match_type, pattern, action, replacement, position, added_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                rule.match_type,
+                rule.pattern,
+                rule.action,
+                rule.replacement,
+                position,
+                added_at,
+            ),
+        )
+        self._conn.commit()
+        rule.id = cursor.lastrowid
+        rule.position = position
+        rule.added_at = added_at
+        return rule
+
+    def remove_rule(self, rule_id: int) -> bool:
+        """Delete a URL rule by id; returns False if no rule had that id."""
+        cursor = self._conn.execute("DELETE FROM rules WHERE id = ?", (rule_id,))
+        self._conn.commit()
+        return cursor.rowcount > 0

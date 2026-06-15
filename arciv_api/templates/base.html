@@ -13,19 +13,20 @@
   </head>
   <body>
     <header class="topbar container-fluid">
+      {# One ul keeps the archive box just after the last link (left side):
+         on a wide monitor the old right-aligned box was a long mouse trip.
+         Datastar v1 separates a plugin's key from its name with a colon
+         (data-bind:url, data-on:click). The hyphen form silently no-ops:
+         the attribute parses to an unknown "bind-url"/"on-click" plugin and
+         is skipped, so the button fires no request at all. #}
       <nav>
         <ul>
           <li><a href="/" class="brand contrast">Arciv</a></li>
           <li><a href="/">Archive</a></li>
           <li><a href="/domains">Domains</a></li>
           <li><a href="/sources">Sources</a></li>
+          <li><a href="/rules">Rules</a></li>
           <li><a href="/status">Status</a></li>
-        </ul>
-        {# Datastar v1 separates a plugin's key from its name with a colon
-           (data-bind:url, data-on:click). The hyphen form silently no-ops:
-           the attribute parses to an unknown "bind-url"/"on-click" plugin and
-           is skipped, so the button fires no request at all. #}
-        <ul>
           <li class="archive-box" data-signals="{url: ''}">
             <input
               data-bind:url

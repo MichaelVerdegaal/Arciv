@@ -1,8 +1,17 @@
-"""url_processor.py - URL processing for scraping: skip, rewrite, or pass through."""
+"""url_processor.py - URL processing for scraping: skip, rewrite, or pass through.
+
+A URL runs through an ordered handler chain (see ``process_url``): fixed code
+skips for plumbing (file extensions, image proxies, IP hosts), then the
+user-editable :class:`~arciv.core.db.models.Rule` list, then the site-specific
+rewriters, and finally :func:`canonicalize`. Each handler returns a
+:class:`Skip`, a :class:`Rewrite`, or ``None`` ("no opinion, keep going"); the
+first ``Skip`` ends processing and a ``Rewrite`` swaps the URL and continues.
+"""
 
 import hashlib
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from urllib.parse import (
     parse_qsl,
     urlencode,
@@ -14,8 +23,7 @@ from urllib.parse import (
 
 import tldextract
 
-# URLs starting with these prefixes are skipped entirely
-SKIP_PREFIXES = ("https://localhost",)
+from arciv.core.db.models import Rule
 
 # URL's ending with these suffixes are skipped entirely (like images)
 SKIP_SUFFIXES = (
@@ -43,29 +51,6 @@ SKIP_SUFFIXES = (
 # a (resized) image, not archivable content, and otherwise trigger a browser
 # download (e.g. Next.js "/_next/image?url=...jpg").
 SKIP_PATH_SUBSTRINGS = ("/_next/image",)
-
-# Domains ending with these suffixes are skipped (handles subdomains)
-SKIP_DOMAIN_SUFFIXES = (
-    "sharepoint.com",
-    "getvirtualbrain.com",
-    "content.powerapps.com",
-    "app.fabric.microsoft.com",
-    "app.powerbi.com",
-    "youtube.com",
-    "youtu.be",
-    "azure.com",
-)
-
-# Exact domain + path prefix combinations that are not archivable content.
-# These get marked "skipped (not content)" instead of cluttering failure logs.
-SKIP_DOMAINS: set[str] = {
-    "claude.ai",
-    "lnkd.in",
-    "support.dfg.nl",
-}
-SKIP_DOMAIN_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
-    "google.com": ("/search",),
-}
 
 # Matches IP addresses as domain (e.g., "192.168.2.13", "10.0.0.1:8080")
 _IP_DOMAIN_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}(:\d+)?$")
@@ -308,14 +293,130 @@ def canonicalize(url: str) -> str:
     return urlunsplit((parts.scheme, netloc, path, query, ""))
 
 
-def process_url(url: str) -> tuple[str | None, str]:
-    """Process URL for scraping.
+@dataclass(frozen=True)
+class Skip:
+    """A handler's verdict to stop the chain: the URL is not archived."""
+
+    reason: str
+
+
+@dataclass(frozen=True)
+class Rewrite:
+    """A handler's verdict to replace the URL and keep processing the chain."""
+
+    url: str
+
+
+# A handler decides about one URL. None means "no opinion, keep going".
+UrlHandler = Callable[[str], Skip | Rewrite | None]
+
+
+def _skip_suffix_handler(url: str) -> Skip | None:
+    """Skip URLs ending in a non-content extension (.png, .json, …).
+
+    Plumbing, not policy: nobody wants to manage the image/media list by hand,
+    so it stays code rather than becoming an editable rule. ``.pdf`` is
+    deliberately absent — PDFs are archived (and arxiv PDFs get rewritten)."""
+    if urlparse(url).path.lower().endswith(SKIP_SUFFIXES):
+        return Skip("URL matches skip suffix")
+    return None
+
+
+def _image_proxy_handler(url: str) -> Skip | None:
+    """Skip image-proxy/optimizer endpoints (serve a resized image, not
+    content), e.g. Next.js ``/_next/image?url=...``."""
+    path_lower = urlparse(url).path.lower()
+    if any(sub in path_lower for sub in SKIP_PATH_SUBSTRINGS):
+        return Skip("URL is an image proxy endpoint")
+    return None
+
+
+def _ip_host_handler(url: str) -> Skip | None:
+    """Skip URLs whose host is a bare IP address (local network, etc.)."""
+    domain, _ = split_url(url)
+    if _IP_DOMAIN_RE.match(domain):
+        return Skip("URL domain is an IP address")
+    return None
+
+
+def _rewriter_handler(url: str) -> Rewrite | None:
+    """Apply a site-specific rewriter, if one is registered for this URL.
+
+    Tries the full host first (raw.githubusercontent.com), then the registered
+    domain (github.com, huggingface.co); tldextract collapses subdomains, so a
+    host-keyed rewriter never matches on the registered domain. Returns a
+    Rewrite only when the URL actually changes, so a no-op rewriter (e.g.
+    GitHub keeping a README) does not flip the status to "rewritten"."""
+    host = urlparse(url).netloc
+    domain = registered_domain(url) or split_url(url)[0]
+    rewriter = DOMAIN_REWRITERS.get(host) or DOMAIN_REWRITERS.get(domain)
+    if rewriter is None:
+        return None
+    new_url = rewriter(url)
+    return Rewrite(new_url) if new_url != url else None
+
+
+def _rule_matches(rule: Rule, url: str, netloc: str, domain: str) -> bool:
+    """Whether a user rule's pattern matches this URL, per its match_type."""
+    if rule.match_type == "domain":
+        return domain == rule.pattern
+    if rule.match_type == "host":
+        return netloc == rule.pattern
+    if rule.match_type == "starts_with":
+        return url.startswith(rule.pattern)
+    if rule.match_type == "exact":
+        return url == rule.pattern
+    return False
+
+
+def _rules_handler(rules: Sequence[Rule]) -> UrlHandler:
+    """Build a handler that applies the first matching user rule.
+
+    The rules are walked in order (``PageDatabase.list_rules`` returns them by
+    position); the first whose pattern matches wins, mirroring Bitwarden's
+    match-and-action model. A skip stops the chain; a rewrite swaps the host
+    and lets processing continue."""
+
+    def handler(url: str) -> Skip | Rewrite | None:
+        parsed = urlparse(url)
+        netloc = parsed.netloc
+        domain = registered_domain(url) or split_url(url)[0]
+        for rule in rules:
+            if not _rule_matches(rule, url, netloc, domain):
+                continue
+            if rule.action == "skip":
+                return Skip(rule.replacement or "skipped (not content)")
+            if rule.action == "rewrite" and rule.replacement:
+                return Rewrite(parsed._replace(netloc=rule.replacement).geturl())
+        return None
+
+    return handler
+
+
+# Fixed code handlers that run on every URL, before the user rules. These are
+# plumbing (file extensions, image proxies, IP hosts), not editable policy.
+_CODE_SKIP_HANDLERS: tuple[UrlHandler, ...] = (
+    _skip_suffix_handler,
+    _image_proxy_handler,
+    _ip_host_handler,
+)
+
+
+def process_url(url: str, rules: Sequence[Rule] = ()) -> tuple[str | None, str]:
+    """Process a URL for scraping: skip it, rewrite it, or pass it through.
+
+    Runs the URL through the handler chain (see the module docstring): cheap
+    guards and host normalisation first, then the fixed code skips, then the
+    user ``rules``, then the site rewriters, and finally :func:`canonicalize`.
 
     Args:
-        url: The URL to process
+        url: The URL to process.
+        rules: User-editable rules to apply, in order (see
+            ``PageDatabase.list_rules``). Defaults to none, so callers that
+            only want the built-in code handlers can omit it.
 
     Returns:
-        URL to scrape or None if skipped, and a status message.
+        The canonical URL to scrape (or None if skipped) and a status message.
     """
     # Only process https URLs
     if not url.startswith("https://"):
@@ -338,45 +439,22 @@ def process_url(url: str) -> tuple[str | None, str]:
     # Hosts are case-insensitive: lowercase so case variants dedupe to one page
     if not host.islower():
         url = f"https://{host.lower()}{url[len('https://') + len(host) :]}"
-        host = host.lower()
 
-    # Skip specific prefixes
-    if url.startswith(SKIP_PREFIXES):
-        return None, "URL matches skip prefix"
+    # Ordered handler chain. The first Skip ends processing; a Rewrite swaps the
+    # URL and the chain continues, so a rewritten URL is still canonicalised.
+    handlers: tuple[UrlHandler, ...] = (
+        *_CODE_SKIP_HANDLERS,
+        _rules_handler(rules),
+        _rewriter_handler,
+    )
+    rewritten = False
+    for handler in handlers:
+        result = handler(url)
+        if isinstance(result, Skip):
+            return None, result.reason
+        if isinstance(result, Rewrite):
+            url = result.url
+            rewritten = True
 
-    # Skip specific suffixes (but not .pdf; arxiv PDFs get rewritten)
-    path_lower = parsed.path.lower()
-    if path_lower.endswith(SKIP_SUFFIXES):
-        return None, "URL matches skip suffix"
-
-    # Skip image-proxy/optimizer endpoints (serve images, not content)
-    if any(sub in path_lower for sub in SKIP_PATH_SUBSTRINGS):
-        return None, "URL is an image proxy endpoint"
-
-    # Skip IP addresses (local network, etc.)
-    domain, _ = split_url(url)
-    if _IP_DOMAIN_RE.match(domain):
-        return None, "URL domain is an IP address"
-
-    # Skip domains by suffix (handles subdomains)
-    if domain.endswith(SKIP_DOMAIN_SUFFIXES):
-        return None, "URL domain matches skip suffix"
-
-    # Skip non-content domains (chat links, shorteners, internal tools)
-    if domain in SKIP_DOMAINS:
-        return None, "skipped (not content)"
-
-    # Skip domain + path prefix combos (e.g. google.com/search)
-    if domain in SKIP_DOMAIN_PATH_PREFIXES:
-        for prefix in SKIP_DOMAIN_PATH_PREFIXES[domain]:
-            if parsed.path.startswith(prefix):
-                return None, "skipped (not content)"
-
-    # Apply rewriters. Try the full host first (raw.githubusercontent.com),
-    # then the registered domain (github.com, huggingface.co); tldextract
-    # collapses subdomains, so host-keyed rewriters never match on domain.
-    rewriter = DOMAIN_REWRITERS.get(host) or DOMAIN_REWRITERS.get(domain)
-    if rewriter is not None:
-        return canonicalize(rewriter(url)), "Success (rewritten)"
-
-    return canonicalize(url), "Success"
+    status = "Success (rewritten)" if rewritten else "Success"
+    return canonicalize(url), status

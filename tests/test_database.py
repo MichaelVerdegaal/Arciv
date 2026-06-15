@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from arciv.core.db import Page, PageDatabase, Source
+from arciv.core.db import Page, PageDatabase, Rule, Source
 from arciv.core.fetch import slug_for_url
 
 
@@ -685,3 +685,43 @@ class TestReadOnly:
         with pytest.raises(sqlite3.OperationalError):
             PageDatabase(db_path, read_only=True)
         assert not db_path.exists()
+
+
+class TestRules:
+    def test_new_database_is_seeded_with_default_rules(self, db):
+        rules = db.list_rules()
+        assert rules  # not empty
+        # The migrated skips are present (e.g. youtube and localhost).
+        patterns = {r.pattern for r in rules}
+        assert "youtube.com" in patterns
+        assert "https://localhost" in patterns
+
+    def test_default_rules_keep_list_order_via_position(self, db):
+        rules = db.list_rules()
+        positions = [r.position for r in rules]
+        assert positions == sorted(positions)
+
+    def test_add_rule_appends_to_end(self, db):
+        before = db.list_rules()
+        added = db.add_rule(Rule("domain", "example.com", "skip", "mine"))
+        assert added.id is not None
+        assert added.position == max(r.position for r in before) + 1
+        assert db.list_rules()[-1].pattern == "example.com"
+
+    def test_remove_rule(self, db):
+        added = db.add_rule(Rule("domain", "example.com", "skip", None))
+        assert db.remove_rule(added.id) is True
+        assert all(r.id != added.id for r in db.list_rules())
+
+    def test_remove_unknown_rule_returns_false(self, db):
+        assert db.remove_rule(999_999) is False
+
+    def test_deleting_all_rules_survives_reopen(self, tmp_path):
+        db_path = tmp_path / "arciv.db"
+        with PageDatabase(db_path) as db:
+            for rule in db.list_rules():
+                db.remove_rule(rule.id)
+            assert db.list_rules() == []
+        # Re-opening must not re-seed the defaults: deletion is intentional.
+        with PageDatabase(db_path) as db:
+            assert db.list_rules() == []
