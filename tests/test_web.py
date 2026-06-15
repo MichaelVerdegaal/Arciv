@@ -128,9 +128,14 @@ class TestBrowse:
         assert res.status_code == 200
         assert "Still here" in res.text
 
-    def test_missing_database_is_503(self, client, archive):
-        # archive points DB_PATH at a file we never create
-        assert client.get("/").status_code == 503
+    def test_missing_database_is_created(self, client, archive):
+        # archive points DB_PATH at a file we never create; the request
+        # should initialise an empty database rather than erroring.
+        from arciv_api import config
+
+        assert not config.DB_PATH.exists()
+        assert client.get("/").status_code == 200
+        assert config.DB_PATH.exists()
 
 
 class TestPageDetail:
