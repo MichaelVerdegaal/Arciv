@@ -168,17 +168,18 @@ class TestCanonicalize:
         )
 
     def test_trailing_slash_removed(self):
-        assert canonicalize("https://example.com/post/") == (
-            "https://example.com/post"
-        )
+        assert canonicalize("https://example.com/post/") == ("https://example.com/post")
 
     def test_root_slash_kept(self):
         assert canonicalize("https://example.com/") == "https://example.com/"
 
     def test_tracking_params_dropped(self):
-        assert canonicalize(
-            "https://example.com/post?utm_source=newsletter&utm_medium=email"
-        ) == "https://example.com/post"
+        assert (
+            canonicalize(
+                "https://example.com/post?utm_source=newsletter&utm_medium=email"
+            )
+            == "https://example.com/post"
+        )
 
     def test_meaningful_query_kept_and_sorted(self):
         assert canonicalize("https://example.com/search?b=2&a=1") == (
@@ -186,9 +187,10 @@ class TestCanonicalize:
         )
 
     def test_mixed_tracking_and_real_params(self):
-        assert canonicalize(
-            "https://example.com/p?id=42&utm_campaign=x&fbclid=abc"
-        ) == "https://example.com/p?id=42"
+        assert (
+            canonicalize("https://example.com/p?id=42&utm_campaign=x&fbclid=abc")
+            == "https://example.com/p?id=42"
+        )
 
     def test_default_port_dropped(self):
         assert canonicalize("https://example.com:443/post") == (

@@ -3,7 +3,14 @@
 import hashlib
 import re
 from collections.abc import Callable
-from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunparse, urlunsplit
+from urllib.parse import (
+    parse_qsl,
+    urlencode,
+    urlparse,
+    urlsplit,
+    urlunparse,
+    urlunsplit,
+)
 
 import tldextract
 

@@ -2,8 +2,6 @@
 
 from collections.abc import Iterator
 
-from fastapi import HTTPException
-
 from arciv.core.db import PageDatabase
 
 from . import config
@@ -14,14 +12,14 @@ def get_db() -> Iterator[PageDatabase]:
 
     Per request (not one shared handle) because FastAPI serves the ``def``
     endpoints from a threadpool and SQLite connections are thread-affine. A
-    missing database file means the archive was never created, which is a
-    setup problem rather than an empty archive, so surface it as 503 instead
-    of a raw connection error.
+    missing database file means the archive was never created, so initialise
+    an empty one (with the schema in place) rather than erroring: the data
+    directory advertised by ``arciv db dir`` should always be backed by a
+    real database when the frontend is opened.
     """
     if not config.DB_PATH.exists():
-        raise HTTPException(
-            status_code=503,
-            detail="Archive database not found. Create it with the arciv CLI.",
-        )
+        # Opening in write mode creates the file and applies the schema.
+        with PageDatabase(config.DB_PATH):
+            pass
     with PageDatabase(config.DB_PATH, read_only=True) as db:
         yield db
