@@ -4,7 +4,7 @@ Uses patchright (undetected Playwright fork) with Chrome in persistent-context
 mode for stealth. Each page goes through: fetch HTML → write ``page.html`` to
 the slug folder → record in DB. PDF URLs are downloaded via direct HTTP and
 stored as ``page.pdf``. Validation and markdown conversion happen later, in
-the parse stage (see ``arciv.pipeline.parse``).
+the parse stage (see ``arciv.core.pipeline.parse``).
 """
 
 import asyncio
@@ -19,7 +19,7 @@ from patchright.async_api import TimeoutError as PlaywrightTimeoutError
 from patchright.async_api import async_playwright
 from patchright.sync_api import sync_playwright
 
-from arciv.db import Page, PageDatabase
+from arciv.core.db import Page, PageDatabase
 
 from .url_processor import (
     is_pdf_url,

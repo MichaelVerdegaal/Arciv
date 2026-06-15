@@ -14,9 +14,9 @@ from pathlib import Path
 
 from loguru import logger
 
-from arciv.convert import check_html, parse_html, pdf_to_text
-from arciv.db import Page, PageDatabase
-from arciv.scrape import is_raw_text_url
+from arciv.core.parse import check_html, parse_html, pdf_to_text
+from arciv.core.db import Page, PageDatabase
+from arciv.core.fetch import is_raw_text_url
 from arciv.settings import SAVED_DIR
 
 DEFAULT_MIN_WORDS = 150

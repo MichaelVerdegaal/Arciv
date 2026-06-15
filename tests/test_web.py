@@ -11,8 +11,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import arciv_api.config as api_config
-from arciv.db import Page, PageDatabase, Source
-from arciv.scrape import process_url, slug_for_url
+from arciv.core.db import Page, PageDatabase, Source
+from arciv.core.fetch import process_url, slug_for_url
 from arciv_api.app import app
 from arciv_api.jobs import ArchiveQueue, Job, Phase
 

@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 # Prefix of the fail_reason written when a page is rejected purely for being
-# below the word-count threshold (see arciv.pipeline.parse). Such a page was
+# below the word-count threshold (see arciv.core.pipeline.parse). Such a page was
 # fetched and extracted fine — it is just too small to be worth keeping — so
 # the UI surfaces it as "skipped" rather than lumping it in with real errors
 # (block pages, extraction failures, fetch timeouts). The classifier lives

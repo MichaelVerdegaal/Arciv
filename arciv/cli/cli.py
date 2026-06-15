@@ -48,17 +48,19 @@ import typer
 from loguru import logger
 
 from arciv.settings import DATA_DIR, DB_PATH, SAVED_DIR, configure_logger
-from arciv.db import PageDatabase, Source
-from arciv.scrape import process_url
-from arciv.pipeline import (
+from arciv.core.db import PageDatabase, Source
+from arciv.core.fetch import process_url
+from arciv.core.pipeline import (
     fetch_urls,
+    parse_pending,
+    report,
+)
+from arciv.core.index import (
     index_all,
     index_directory,
     index_file,
     index_source,
-    parse_pending,
     register_urls,
-    report,
 )
 from .output import (
     EXIT_NOINPUT,

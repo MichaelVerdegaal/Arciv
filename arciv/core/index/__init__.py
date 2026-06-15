@@ -3,7 +3,7 @@
 For every link found, a row is stored with the processed URL, the full
 normalized path of the file it was found in, and the time it was indexed.
 Pages are created in pending state; downloading them is the fetch stage's
-job (see ``arciv.pipeline.fetch``).
+job (see ``arciv.core.pipeline.fetch``).
 """
 
 from datetime import datetime, timezone
@@ -11,9 +11,9 @@ from pathlib import Path
 
 from loguru import logger
 
-from arciv.db import PageDatabase
-from arciv.notes import Note, load_note, load_notes
-from arciv.scrape import process_url, registered_domain, slug_for_url, split_url
+from arciv.core.db import PageDatabase
+from arciv.core.notes import Note, load_note, load_notes
+from arciv.core.fetch import process_url, registered_domain, slug_for_url, split_url
 
 
 def _page_entry(processed_url: str, original_url: str) -> tuple[str, str, str, str]:

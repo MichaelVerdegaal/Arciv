@@ -1,6 +1,6 @@
 """Tests for HTML content validation (block pages, size guards)."""
 
-from arciv.convert.validate import (
+from arciv.core.parse.validate import (
     MAX_HTML_BYTES,
     MIN_HTML_BYTES,
     check_html,

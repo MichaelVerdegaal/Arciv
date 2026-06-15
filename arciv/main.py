@@ -1,4 +1,4 @@
-from arciv.scripts.cli import cli
+from arciv.cli.cli import cli
 
 if __name__ == "__main__":
     cli()

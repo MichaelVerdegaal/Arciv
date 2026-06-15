@@ -2,7 +2,7 @@
 
 import pytest
 
-from arciv.notes import MarkdownNote, Note, load_note, load_notes
+from arciv.core.notes import MarkdownNote, Note, load_note, load_notes
 
 
 @pytest.fixture

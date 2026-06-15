@@ -2,7 +2,7 @@
 
 import itertools
 
-from arciv.convert.convert import (
+from arciv.core.parse.convert import (
     ConversionResult,
     count_words,
     extract_metadata,
