@@ -75,14 +75,15 @@ class Page:
     @property
     def state(self) -> str:
         """Coarse UI state for the web browse view: ``"done"``,
-        ``"skipped"``, ``"failed"``, or ``"pending"``.
+        ``"skipped"``, ``"failed"``, ``"fetched"``, or ``"pending"``.
 
         A coarsening of the pipeline states above into what the UI shows:
         ``done`` is parsed, ``skipped`` is content rejected only for being
         too short (a clean fetch+extract, just below the threshold),
-        ``failed`` is any other fetch or parse failure, and ``pending`` is
-        everything still in flight. A parse never both succeeds and fails,
-        so checking ``parsed_at`` first is just defensive ordering.
+        ``failed`` is any other fetch or parse failure, ``fetched`` is raw
+        content on disk still awaiting parse (no failure), and ``pending`` is
+        not fetched yet. A parse never both succeeds and fails, so checking
+        ``parsed_at`` first is just defensive ordering.
         """
         if self.parsed_at is not None:
             return "done"
@@ -90,6 +91,8 @@ class Page:
             return "skipped"
         if self.fail_reason is not None:
             return "failed"
+        if self.fetched_at is not None:
+            return "fetched"
         return "pending"
 
 

@@ -68,7 +68,7 @@ _DEFAULT_RULES: tuple[tuple[str, str, str, str | None], ...] = (
     ("domain", "claude.ai", "skip", "not content"),
     ("domain", "lnkd.in", "skip", "link shortener"),
     ("starts_with", "https://google.com/search", "skip", "search results"),
-    ("domain", "medium.com", "rewrite", "freedium-mirror.cfd/https://medium.com")
+    ("domain", "medium.com", "rewrite", "freedium-mirror.cfd/https://medium.com"),
 )
 
 # added_at is deliberately absent from the update clause: it marks when the
@@ -99,9 +99,10 @@ _SKIP_LIKE = f"{SKIP_REASON_PREFIX}%"
 
 # Maps a coarse UI state (see Page.state) to the SQL predicate that selects it,
 # so the row-level mapping in Page.state and the query-level filter in
-# list_pages stay a single definition. The four are mutually exclusive: a
-# parsed page is never also failed, and "skipped" carves the too-short
-# rejections out of "failed".
+# list_pages stay a single definition. The five are mutually exclusive: a
+# parsed page is never also failed, "skipped" carves the too-short rejections
+# out of "failed", and "fetched" (raw content on disk, still unparsed) is split
+# from "pending" (not fetched yet).
 _STATE_PREDICATES: dict[str, str] = {
     "done": "parsed_at IS NOT NULL",
     "skipped": f"parsed_at IS NULL AND fail_reason LIKE '{_SKIP_LIKE}'",
@@ -109,7 +110,8 @@ _STATE_PREDICATES: dict[str, str] = {
         "parsed_at IS NULL AND fail_reason IS NOT NULL "
         f"AND fail_reason NOT LIKE '{_SKIP_LIKE}'"
     ),
-    "pending": "parsed_at IS NULL AND fail_reason IS NULL",
+    "fetched": "fetched_at IS NOT NULL AND parsed_at IS NULL AND fail_reason IS NULL",
+    "pending": "fetched_at IS NULL AND fail_reason IS NULL",
 }
 
 # Maps an `arciv prune` mode to the WHERE clause selecting the rows it removes.
@@ -589,6 +591,23 @@ class PageDatabase:
             (source_name,),
         ).fetchall()
         return [row["url"] for row in rows]
+
+    def list_source_links(self, source_name: str) -> list[tuple[str, Page]]:
+        """List a source's indexed links as (file_path, Page) pairs.
+
+        Joins each link row of the source to its page, ordered by file path
+        then URL, so the web source-detail view can group links by the note
+        file they were found in and show each page's archival state. A URL
+        linked from two files in the source appears once per file.
+        """
+        rows = self._conn.execute(
+            "SELECT l.file_path AS file_path, p.* "
+            "FROM links l JOIN pages p ON p.url = l.url "
+            "WHERE l.source_name = ? "
+            "ORDER BY l.file_path, p.url",
+            (source_name,),
+        ).fetchall()
+        return [(row["file_path"], self._row_to_page(row)) for row in rows]
 
     # -- sources --
 

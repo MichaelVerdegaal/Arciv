@@ -22,7 +22,7 @@ from pathlib import Path
 from loguru import logger
 
 from arciv.core.db import Page, PageDatabase, Rule
-from arciv.core.pipeline import fetch_urls, parse_pending
+from arciv.core.pipeline import archive_urls, fetch_urls, parse_pending
 from arciv.core.index import register_urls
 from arciv.core.fetch import process_url, slug_for_url
 
@@ -72,6 +72,16 @@ def _default_parse(db_path: Path) -> None:
         parse_pending(db)
 
 
+def _default_archive_urls(db_path: Path, urls: list[str]) -> None:
+    """Fetch then parse a batch of URLs through one shared browser context.
+
+    The batch is the whole point: a source's URLs download concurrently under
+    a single Fetcher run, not a browser launch per URL.
+    """
+    with PageDatabase(db_path) as db:
+        archive_urls(db, urls)
+
+
 class ArchiveQueue:
     """A bounded, single-worker queue keyed by slug for idempotency.
 
@@ -87,6 +97,7 @@ class ArchiveQueue:
         register: Callable[[Path, str, str], Page | None] = _default_register,
         fetch: Callable[[Path, str], None] = _default_fetch,
         parse: Callable[[Path], None] = _default_parse,
+        archive_urls: Callable[[Path, list[str]], None] = _default_archive_urls,
         maxsize: int = 128,
     ) -> None:
         self._db_path = db_path
@@ -94,13 +105,46 @@ class ArchiveQueue:
         self._register = register
         self._fetch = fetch
         self._parse = parse
+        self._archive_urls = archive_urls
         self._queue: asyncio.Queue[str] = asyncio.Queue(maxsize=maxsize)
         self._jobs: dict[str, Job] = {}
         self._task: asyncio.Task[None] | None = None
+        # Background source archives run outside the single-slug worker: each
+        # fetches a whole source's URLs in one batch. Track the live ones so the
+        # UI can show "archiving" and keep task refs so they are not GC'd.
+        self._active_sources: set[str] = set()
+        self._source_tasks: set[asyncio.Task[None]] = set()
 
     def job_for(self, slug: str) -> Job | None:
         """The live job for a slug, or None if none is tracked."""
         return self._jobs.get(slug)
+
+    def is_archiving(self, name: str) -> bool:
+        """Whether a source's background archival is still running."""
+        return name in self._active_sources
+
+    def archive_source_bg(self, name: str, urls: list[str]) -> None:
+        """Fetch and parse a source's URLs in the background.
+
+        The caller registers and indexes the source first (so its files and
+        links are visible immediately); this runs only the slow fetch+parse,
+        off the request, as one batch.
+        """
+        self._active_sources.add(name)
+        task = asyncio.create_task(self._run_source_archive(name, urls))
+        self._source_tasks.add(task)
+        task.add_done_callback(self._source_tasks.discard)
+
+    async def _run_source_archive(self, name: str, urls: list[str]) -> None:
+        try:
+            if urls:
+                await asyncio.to_thread(self._archive_urls, self._db_path, urls)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - a failed archive must not crash the app
+            logger.exception(f"Background archival failed for source {name!r}")
+        finally:
+            self._active_sources.discard(name)
 
     async def submit(self, url: str) -> tuple[str | None, str]:
         """Register the URL and enqueue a job.
@@ -152,11 +196,15 @@ class ArchiveQueue:
             self._task = asyncio.create_task(self._run())
 
     async def stop(self) -> None:
-        """Cancel the worker and wait for it to unwind."""
-        if self._task is not None:
-            self._task.cancel()
+        """Cancel the worker and any background source archives, then wait."""
+        tasks = [t for t in (self._task, *self._source_tasks) if t is not None]
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
             try:
-                await self._task
+                await task
             except asyncio.CancelledError:
                 pass
-            self._task = None
+        self._task = None
+        self._source_tasks.clear()
+        self._active_sources.clear()

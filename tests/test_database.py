@@ -349,6 +349,30 @@ class TestLinks:
         )
         assert db.get_urls_for_source("notes") == ["https://example.com/a"]
 
+    def test_list_source_links_pairs_files_with_pages(self, db):
+        db.add_source(_source("notes"))
+        db.upsert(_page("https://example.com/a", title="Page A"))
+        db.upsert(_page("https://example.com/b", title="Page B"))
+        db.replace_links_for_files(
+            ["/vault/notes/one.md", "/vault/notes/two.md"],
+            [
+                ("https://example.com/a", "/vault/notes/one.md", "notes", "t1"),
+                ("https://example.com/b", "/vault/notes/one.md", "notes", "t1"),
+                ("https://example.com/a", "/vault/notes/two.md", "notes", "t1"),
+            ],
+        )
+        links = db.list_source_links("notes")
+        # Ordered by file path, then URL; each pair carries the full Page.
+        assert [(fp, page.url) for fp, page in links] == [
+            ("/vault/notes/one.md", "https://example.com/a"),
+            ("/vault/notes/one.md", "https://example.com/b"),
+            ("/vault/notes/two.md", "https://example.com/a"),
+        ]
+        assert links[0][1].title == "Page A"
+
+    def test_list_source_links_empty_for_unknown_source(self, db):
+        assert db.list_source_links("ghost") == []
+
     def test_link_requires_existing_page(self, db):
         # foreign_keys=ON: links cannot point at unknown pages
         with pytest.raises(sqlite3.IntegrityError):
@@ -420,9 +444,9 @@ class TestPageState:
     def test_unfetched_is_pending(self):
         assert _page("https://x.com/a", fetched_at=None).state == "pending"
 
-    def test_awaiting_parse_is_pending(self):
-        # fetched, not yet parsed, no failure
-        assert _page("https://x.com/a").state == "pending"
+    def test_awaiting_parse_is_fetched(self):
+        # fetched, not yet parsed, no failure: raw content is on disk
+        assert _page("https://x.com/a").state == "fetched"
 
 
 class TestGetBySlug:
@@ -463,6 +487,9 @@ class TestListPages:
                 fail_reason="too short (5 words from 2 KB html)",
             )
         )
+        # fetched but not parsed yet, no failure (on its own domain so the
+        # a.com domain filter test is unaffected)
+        db.upsert(_page("https://d.com/fetched", domain="d.com"))
 
     def test_includes_pending_failed_and_skipped(self, db):
         self._seed_mixed(db)
@@ -471,6 +498,7 @@ class TestListPages:
             "https://a.com/pending",
             "https://b.com/failed",
             "https://c.com/skipped",
+            "https://d.com/fetched",
         }
 
     def test_status_done(self, db):
@@ -492,15 +520,23 @@ class TestListPages:
 
     def test_status_pending(self, db):
         self._seed_mixed(db)
+        # pending is now only the not-yet-fetched page; the fetched-but-unparsed
+        # one is its own "fetched" state, not pending.
         assert [p.url for p in db.list_pages(status="pending")] == [
             "https://a.com/pending"
+        ]
+
+    def test_status_fetched(self, db):
+        self._seed_mixed(db)
+        assert [p.url for p in db.list_pages(status="fetched")] == [
+            "https://d.com/fetched"
         ]
 
     def test_status_filter_matches_page_state(self, db):
         # The SQL filter and Page.state are one definition: every row a
         # status returns must report that same state.
         self._seed_mixed(db)
-        for status in ("done", "failed", "skipped", "pending"):
+        for status in ("done", "fetched", "failed", "skipped", "pending"):
             for page in db.list_pages(status=status):
                 assert page.state == status
 

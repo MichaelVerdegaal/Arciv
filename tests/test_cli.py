@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 import arciv.cli.cli as cli_module
 from arciv.core.db import Page, PageDatabase, Source
 from arciv.core.fetch import slug_for_url
+from arciv.core.pipeline import ArchiveResult
 from arciv.cli import output
 from arciv.settings import configure_logger
 
@@ -337,6 +338,121 @@ class TestDbGroup:
         assert result.exit_code == 0
         assert not (data_dir / "arciv.db").exists()
         assert not (data_dir / "saved").exists()
+
+
+class TestAddAndArchive:
+    """`add` archives after registering; `archive` re-archives a source.
+
+    The real archival launches a browser, so these replace ``archive_source``
+    / ``archive_urls`` in the CLI module with fakes and assert the wiring.
+    """
+
+    def test_add_registers_and_archives(self, runner, data_dir, tmp_path, monkeypatch):
+        notes = tmp_path / "notes"
+        notes.mkdir()
+        called = {}
+
+        def fake_archive_source(db, name):
+            called["name"] = name
+            return ArchiveResult(urls=["https://a.com/1"], fetched=[], parsed=0)
+
+        monkeypatch.setattr(cli_module, "archive_source", fake_archive_source)
+        result = runner.invoke(cli_module.cli, ["add", str(notes), "notes"])
+        assert result.exit_code == 0
+        assert called["name"] == "notes"
+        with PageDatabase(data_dir / "arciv.db") as db:
+            assert db.get_source("notes") is not None
+
+    def test_add_no_archive_only_registers(
+        self, runner, data_dir, tmp_path, monkeypatch
+    ):
+        notes = tmp_path / "notes"
+        notes.mkdir()
+        called = {}
+
+        def fake_archive_source(db, name):
+            called["name"] = name
+            return ArchiveResult(urls=[], fetched=[], parsed=0)
+
+        monkeypatch.setattr(cli_module, "archive_source", fake_archive_source)
+        result = runner.invoke(
+            cli_module.cli, ["add", str(notes), "notes", "--no-archive"]
+        )
+        assert result.exit_code == 0
+        assert "name" not in called  # archival was not triggered
+        with PageDatabase(data_dir / "arciv.db") as db:
+            assert db.get_source("notes") is not None
+
+    def test_add_duplicate_name_fails(self, runner, data_dir, tmp_path, monkeypatch):
+        notes = tmp_path / "notes"
+        notes.mkdir()
+        monkeypatch.setattr(
+            cli_module,
+            "archive_source",
+            lambda db, name: ArchiveResult([], [], 0),
+        )
+        runner.invoke(cli_module.cli, ["add", str(notes), "notes", "--no-archive"])
+        result = runner.invoke(
+            cli_module.cli, ["add", str(notes), "notes", "--no-archive"]
+        )
+        assert result.exit_code != 0
+        assert "already exists" in result.output
+
+    def test_archive_source_invokes_pipeline(
+        self, runner, data_dir, tmp_path, monkeypatch
+    ):
+        notes = tmp_path / "notes"
+        notes.mkdir()
+        with PageDatabase(data_dir / "arciv.db") as db:
+            db.add_source(
+                Source("notes", str(notes), datetime.now(timezone.utc).isoformat())
+            )
+        called = {}
+
+        def fake_archive_source(db, name):
+            called["name"] = name
+            return ArchiveResult(urls=["https://a.com/1"], fetched=[], parsed=1)
+
+        monkeypatch.setattr(cli_module, "archive_source", fake_archive_source)
+        result = runner.invoke(cli_module.cli, ["archive", "notes"])
+        assert result.exit_code == 0
+        assert called["name"] == "notes"
+
+    def test_archive_all_batches_every_source(
+        self, runner, data_dir, tmp_path, monkeypatch
+    ):
+        notes = tmp_path / "notes"
+        notes.mkdir()
+        with PageDatabase(data_dir / "arciv.db") as db:
+            db.add_source(
+                Source("notes", str(notes), datetime.now(timezone.utc).isoformat())
+            )
+        captured = {}
+        monkeypatch.setattr(cli_module, "index_all", lambda db: ["https://a.com/1"])
+
+        def fake_archive_urls(db, urls):
+            captured["urls"] = urls
+            return ArchiveResult(urls=urls, fetched=[], parsed=0)
+
+        monkeypatch.setattr(cli_module, "archive_urls", fake_archive_urls)
+        result = runner.invoke(cli_module.cli, ["archive", "--all"])
+        assert result.exit_code == 0
+        assert captured["urls"] == ["https://a.com/1"]
+
+    def test_archive_all_with_no_sources_is_graceful(self, runner, data_dir):
+        result = runner.invoke(cli_module.cli, ["archive", "--all"])
+        assert result.exit_code == 0
+        assert "No sources registered" in result.output
+
+    def test_archive_unknown_source_is_noinput(self, runner, data_dir):
+        # No source registered: the real archive_source raises KeyError before
+        # any fetch, so no browser is launched.
+        result = runner.invoke(cli_module.cli, ["archive", "ghost"])
+        assert result.exit_code == output.EXIT_NOINPUT
+
+    def test_archive_name_and_all_is_usage(self, runner, data_dir):
+        result = runner.invoke(cli_module.cli, ["archive", "notes", "--all"])
+        assert result.exit_code == output.EXIT_USAGE
 
 
 class TestGlobalOptions:

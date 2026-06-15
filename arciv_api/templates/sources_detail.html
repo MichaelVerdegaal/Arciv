@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% from "_macros.html" import state_badge %}
+{% block title %}{{ source.name }} — Arciv{% endblock %}
+{% block main %}
+<p class="muted"><a href="/sources">← Sources</a></p>
+<h1>{{ source.name }}</h1>
+<p class="muted">
+  <code>{{ source.path }}</code>
+  {% if source.added_at %} · added {{ source.added_at[:10] }}{% endif %}
+  {% if archiving %} · <span aria-busy="true">archiving…</span>{% endif %}
+</p>
+
+<div id="source-result"></div>
+
+<div class="row">
+  <button
+    class="secondary"
+    data-on:click="@post('/sources/{{ source.name|urlencode }}/archive')"
+  >Re-archive</button>
+  <button
+    class="secondary"
+    data-on:click="@post('/sources/{{ source.name|urlencode }}/delete')"
+  >Remove</button>
+</div>
+
+{% if archiving %}
+<p class="muted">Fetching and parsing in the background. Reload to see progress.</p>
+{% endif %}
+
+{% if not files %}
+<p class="muted">
+  No links indexed from this source yet.
+  {%- if not archiving %} Its notes had no links, or it has not been indexed.{% endif %}
+</p>
+{% else %}
+<p class="muted">{{ files|length }} file(s) with links.</p>
+{% for file_path, pages in files.items() %}
+<section>
+  <h2><code>{{ file_path }}</code></h2>
+  <div class="overflow-x">
+    <table class="striped">
+      <thead><tr><th>Title</th><th>Domain</th><th>State</th><th>Link</th></tr></thead>
+      <tbody>
+        {% for p in pages %}
+        <tr>
+          <td><a href="/page/{{ p.slug }}">{{ p.title or p.url }}</a></td>
+          <td class="muted">{{ p.domain }}</td>
+          <td>{{ state_badge(p.state) }}</td>
+          <td><a href="{{ p.url }}" target="_blank" rel="noopener noreferrer">link ↗</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endfor %}
+{% endif %}
+{% endblock %}

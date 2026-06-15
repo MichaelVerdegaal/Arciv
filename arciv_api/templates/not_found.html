@@ -2,6 +2,6 @@
 {% block title %}Not found — Arciv{% endblock %}
 {% block main %}
 <h1>Not found</h1>
-<p class="muted">No archived page has the slug <code>{{ slug }}</code>.</p>
-<p><a href="/">← Back to archive</a></p>
+<p class="muted">{% if message %}{{ message }}{% else %}No archived page has the slug <code>{{ slug }}</code>.{% endif %}</p>
+<p><a href="{{ back_href or '/' }}">← {{ back_label or 'Back to archive' }}</a></p>
 {% endblock %}

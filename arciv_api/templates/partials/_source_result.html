@@ -1,0 +1,8 @@
+{# Patched into #source-result by POST /sources when a source is invalid. A
+   valid add (or a re-archive/delete) redirects instead, so this only carries
+   validation problems. #}
+<div id="source-result">
+  <div class="alert {{ {'error': 'alert-error', 'warning': 'alert-warning', 'info': 'alert-info'}.get(kind, '') }}">
+    {{ message }}
+  </div>
+</div>

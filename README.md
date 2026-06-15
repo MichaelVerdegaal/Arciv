@@ -29,12 +29,17 @@ arciv get --dir path/to/notes        # archive all links in a directory
 Register directories you index repeatedly as named sources:
 
 ```bash
-arciv add ~/vault/daily-notes notes  # register a source
+arciv add ~/vault/daily-notes notes  # register a source and archive it
+arciv add ~/vault/notes notes --no-archive  # register only, archive later
+arciv archive notes                  # re-index, fetch, and parse one source
+arciv archive --all                  # archive every registered source
 arciv sources                        # list registered sources
-arciv index notes                    # index one source
-arciv index --all                    # index every source
 arciv remove notes                   # unregister (archived pages are kept)
 ```
+
+`add` and `archive` run the whole pipeline (index, then a single batched fetch,
+then parse) so a source goes from registered to archived in one command. The
+individual `index`, `fetch`, and `parse` stages stay available for development.
 
 Run individual pipeline stages:
 
@@ -88,7 +93,9 @@ See [SETUP.md](SETUP.md) for installation and configuration.
 
 A single self-hosted web app browses the archive and archives new URLs from the browser with
 live status. It is a FastAPI service that imports this library directly and renders its own
-HTML (Jinja2 + Datastar, Pico CSS) — no separate frontend runtime.
+HTML (Jinja2 + Datastar, Pico CSS) — no separate frontend runtime. Sources are managed from
+the browser too: add a directory of notes, view the files indexed and the links found in each,
+re-archive to pick up changes, or remove a source.
 
 ```bash
 # With Docker, mounting the same data dir the CLI writes:
