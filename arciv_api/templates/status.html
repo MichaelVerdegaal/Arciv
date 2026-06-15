@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Arciv — Status{% endblock %}
 {% block main %}
-<h1 class="mb-4 text-2xl font-bold">Status</h1>
+<h1>Status</h1>
 
-<div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+<div class="stats">
   {% for label, key, tone in [
       ('Total', 'total', ''),
       ('Parsed', 'parsed', 'text-success'),
@@ -11,24 +11,24 @@
       ('Awaiting parse', 'awaiting_parse', ''),
       ('Fetch failed', 'fetch_failed', 'text-error'),
       ('Parse rejected', 'parse_rejected', 'text-error')] %}
-  <div class="rounded-box border border-base-300 bg-base-200 p-3">
-    <div class="text-xs opacity-60">{{ label }}</div>
-    <div class="text-2xl font-bold {{ tone }}">{{ counts[key] }}</div>
-  </div>
+  <article class="stat">
+    <div class="stat-label">{{ label }}</div>
+    <div class="stat-value {{ tone }}">{{ counts[key] }}</div>
+  </article>
   {% endfor %}
 </div>
 
-<h2 class="mb-2 text-lg font-semibold">Failures by domain</h2>
+<h2>Failures by domain</h2>
 {% if not failures %}
-<p class="opacity-60">No failures.</p>
+<p class="muted">No failures.</p>
 {% else %}
-<table class="table table-zebra table-sm">
+<table class="striped">
   <thead><tr><th>Domain</th><th>Reason</th><th>Count</th></tr></thead>
   <tbody>
     {% for domain, reason, count in failures %}
     <tr>
       <td>{{ domain }}</td>
-      <td class="opacity-70">{{ reason }}</td>
+      <td class="muted">{{ reason }}</td>
       <td>{{ count }}</td>
     </tr>
     {% endfor %}

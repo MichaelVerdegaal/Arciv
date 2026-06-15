@@ -88,7 +88,7 @@ See [SETUP.md](SETUP.md) for installation and configuration.
 
 A single self-hosted web app browses the archive and archives new URLs from the browser with
 live status. It is a FastAPI service that imports this library directly and renders its own
-HTML (Jinja2 + Datastar, Tailwind/DaisyUI) — no separate frontend runtime.
+HTML (Jinja2 + Datastar, Pico CSS) — no separate frontend runtime.
 
 ```bash
 # With Docker, mounting the same data dir the CLI writes:

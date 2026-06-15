@@ -1,7 +1,6 @@
 .git
 .github
 .venv
-.tooling
 .ruff_cache
 __pycache__
 *.pyc
@@ -23,7 +22,3 @@ AGENTS.md
 compose.yaml
 .env.example
 .python-version
-# Built CSS and self-hosted datastar.js (arciv_api/static) are intentionally
-# kept; only the CSS build inputs are dropped from the image.
-arciv_api/styles
-scripts

@@ -1,44 +1,47 @@
 <!doctype html>
-<html lang="en" data-theme="lofi">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}Arciv{% endblock %}</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.sand.min.css"
+    />
     <link rel="stylesheet" href="/static/app.css" />
     <script type="module" src="/static/datastar.js"></script>
   </head>
-  <body class="min-h-screen bg-base-100 text-base-content">
-    <header class="navbar gap-2 border-b border-base-300 bg-base-200 px-4">
-      <div class="flex flex-1 items-baseline gap-1">
-        <a href="/" class="btn btn-ghost text-lg font-bold">Arciv</a>
-        <nav class="flex gap-1">
-          <a href="/" class="btn btn-ghost btn-sm">Archive</a>
-          <a href="/domains" class="btn btn-ghost btn-sm">Domains</a>
-          <a href="/sources" class="btn btn-ghost btn-sm">Sources</a>
-          <a href="/status" class="btn btn-ghost btn-sm">Status</a>
-        </nav>
-      </div>
-      {# Datastar v1 separates a plugin's key from its name with a colon
-         (data-bind:url, data-on:click). The hyphen form silently no-ops:
-         the attribute parses to an unknown "bind-url"/"on-click" plugin and
-         is skipped, so the button fires no request at all. #}
-      <div class="flex flex-none items-center gap-2" data-signals="{url: ''}">
-        <input
-          data-bind:url
-          type="url"
-          placeholder="https://… archive a URL"
-          class="input input-sm input-bordered w-64 md:w-80"
-          data-on:keydown="evt.key === 'Enter' && @post('/archive')"
-        />
-        <button class="btn btn-primary btn-sm" data-on:click="@post('/archive')">
-          Archive
-        </button>
-      </div>
+  <body>
+    <header class="topbar container-fluid">
+      <nav>
+        <ul>
+          <li><a href="/" class="brand contrast">Arciv</a></li>
+          <li><a href="/">Archive</a></li>
+          <li><a href="/domains">Domains</a></li>
+          <li><a href="/sources">Sources</a></li>
+          <li><a href="/status">Status</a></li>
+        </ul>
+        {# Datastar v1 separates a plugin's key from its name with a colon
+           (data-bind:url, data-on:click). The hyphen form silently no-ops:
+           the attribute parses to an unknown "bind-url"/"on-click" plugin and
+           is skipped, so the button fires no request at all. #}
+        <ul>
+          <li class="archive-box" data-signals="{url: ''}">
+            <input
+              data-bind:url
+              type="url"
+              placeholder="https://… archive a URL"
+              data-on:keydown="evt.key === 'Enter' && @post('/archive')"
+            />
+            <button data-on:click="@post('/archive')">Archive</button>
+          </li>
+        </ul>
+      </nav>
     </header>
 
     <div id="archive-result"></div>
 
-    <main class="mx-auto max-w-5xl p-4">
+    <main class="container">
       {% block main %}{% endblock %}
     </main>
   </body>
