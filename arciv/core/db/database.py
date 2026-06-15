@@ -59,7 +59,6 @@ CREATE TABLE IF NOT EXISTS rules (
 _DEFAULT_RULES: tuple[tuple[str, str, str, str | None], ...] = (
     ("starts_with", "https://localhost", "skip", "local address"),
     ("domain", "sharepoint.com", "skip", "not content"),
-    ("domain", "getvirtualbrain.com", "skip", "not content"),
     ("host", "content.powerapps.com", "skip", "not content"),
     ("host", "app.fabric.microsoft.com", "skip", "not content"),
     ("host", "app.powerbi.com", "skip", "not content"),
@@ -68,8 +67,8 @@ _DEFAULT_RULES: tuple[tuple[str, str, str, str | None], ...] = (
     ("domain", "azure.com", "skip", "not content"),
     ("domain", "claude.ai", "skip", "not content"),
     ("domain", "lnkd.in", "skip", "link shortener"),
-    ("host", "support.dfg.nl", "skip", "not content"),
     ("starts_with", "https://google.com/search", "skip", "search results"),
+    ("domain", "medium.com", "rewrite", "freedium-mirror.cfd/https://medium.com")
 )
 
 # added_at is deliberately absent from the update clause: it marks when the
