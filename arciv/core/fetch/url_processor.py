@@ -356,6 +356,26 @@ def _rewriter_handler(url: str) -> Rewrite | None:
     return Rewrite(new_url) if new_url != url else None
 
 
+_DOLLAR_REF = re.compile(r"\$(?:(\$)|\{(\d+)\}|(\d+))")
+
+
+def _expand_dollar_refs(replacement: str) -> str:
+    r"""Translate a ``$1``-style replacement into ``re.sub``'s ``\1`` form.
+
+    Rules are documented to reference capture groups with ``$1``, ``$2`` (and
+    ``${1}``), but ``re.sub`` only understands ``\1``. Any backslashes in the
+    user's text are escaped first so they stay literal, and ``$$`` yields a
+    literal ``$``."""
+    escaped = replacement.replace("\\", "\\\\")
+
+    def repl(m: re.Match) -> str:
+        if m.group(1):  # $$ -> literal $
+            return "$"
+        return "\\" + (m.group(2) or m.group(3))  # $1 / ${1} -> \1
+
+    return _DOLLAR_REF.sub(repl, escaped)
+
+
 def _rule_matches(rule: Rule, url: str, netloc: str, domain: str) -> bool:
     """Whether a user rule's pattern matches this URL, per its match_type."""
     if rule.match_type == "domain":
@@ -394,11 +414,12 @@ def _rules_handler(rules: Sequence[Rule]) -> UrlHandler:
                 return Skip(rule.replacement or "skipped (not content)")
             if rule.action == "rewrite" and rule.replacement:
                 if rule.match_type == "regex":
-                    # Regex rewrite: use capture groups ($1, $2, etc)
+                    # Regex rewrite: capture groups are written as $1, $2 in
+                    # the rule; translate them to re.sub's \1, \2 form.
                     try:
                         new_url = re.sub(
                             rule.pattern,
-                            rule.replacement,
+                            _expand_dollar_refs(rule.replacement),
                             url,
                             count=1,
                             flags=re.IGNORECASE,
