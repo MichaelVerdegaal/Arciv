@@ -6,6 +6,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from arciv.core.fetch.url_processor import (
+    canonicalize,
     is_pdf_url,
     is_raw_text_url,
     process_url,
@@ -151,6 +152,85 @@ class TestProcessUrl:
         assert isinstance(status, str)
         if processed is not None:
             assert processed.startswith("https://")
+
+
+class TestCanonicalize:
+    """The canonicalize normaliser collapses equivalent URL forms."""
+
+    def test_strips_www(self):
+        assert canonicalize("https://www.example.com/post") == (
+            "https://example.com/post"
+        )
+
+    def test_www_and_apex_collapse(self):
+        assert canonicalize("https://www.example.com/post") == canonicalize(
+            "https://example.com/post"
+        )
+
+    def test_trailing_slash_removed(self):
+        assert canonicalize("https://example.com/post/") == (
+            "https://example.com/post"
+        )
+
+    def test_root_slash_kept(self):
+        assert canonicalize("https://example.com/") == "https://example.com/"
+
+    def test_tracking_params_dropped(self):
+        assert canonicalize(
+            "https://example.com/post?utm_source=newsletter&utm_medium=email"
+        ) == "https://example.com/post"
+
+    def test_meaningful_query_kept_and_sorted(self):
+        assert canonicalize("https://example.com/search?b=2&a=1") == (
+            "https://example.com/search?a=1&b=2"
+        )
+
+    def test_mixed_tracking_and_real_params(self):
+        assert canonicalize(
+            "https://example.com/p?id=42&utm_campaign=x&fbclid=abc"
+        ) == "https://example.com/p?id=42"
+
+    def test_default_port_dropped(self):
+        assert canonicalize("https://example.com:443/post") == (
+            "https://example.com/post"
+        )
+
+    def test_non_default_port_kept(self):
+        assert canonicalize("https://example.com:8443/post") == (
+            "https://example.com:8443/post"
+        )
+
+    def test_path_is_opaque(self):
+        # Case and the encoded parens of the Wikipedia bug must survive
+        url = "https://en.wikipedia.org/wiki/Leakage_(machine_learning)"
+        assert canonicalize(url) == url
+
+    def test_all_four_dupe_forms_collapse(self):
+        forms = [
+            "https://example.com/post",
+            "https://example.com/post/",
+            "https://www.example.com/post",
+            "https://example.com/post?utm_source=newsletter",
+        ]
+        canon = {canonicalize(f) for f in forms}
+        assert len(canon) == 1
+
+    def test_unparseable_returned_unchanged(self):
+        assert canonicalize("https://[") == "https://["
+
+
+class TestProcessUrlCanonicalization:
+    """process_url applies canonicalize to its result."""
+
+    def test_dupe_forms_get_same_slug(self):
+        forms = [
+            "https://example.com/post",
+            "https://example.com/post/",
+            "https://www.example.com/post",
+            "https://example.com/post?utm_source=newsletter",
+        ]
+        slugs = {slug_for_url(process_url(f)[0]) for f in forms}
+        assert len(slugs) == 1
 
 
 class TestSplitUrl:
