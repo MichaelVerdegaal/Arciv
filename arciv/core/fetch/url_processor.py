@@ -3,7 +3,7 @@
 import hashlib
 import re
 from collections.abc import Callable
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunparse, urlunsplit
 
 import tldextract
 
@@ -247,6 +247,60 @@ def slug_for_url(url: str) -> str:
     return f"{safe_domain}-{url_hash}"
 
 
+# Query parameters that only carry tracking/analytics state, never identity.
+# Matched case-insensitively against the parameter name.
+_TRACKING_PARAM_RE = re.compile(
+    r"^(?:utm_|fbclid$|gclid$|gclsrc$|dclid$|msclkid$|mc_eid$|mc_cid$"
+    r"|igshid$|ref$|ref_src$|ref_url$|source$|spm$|_hsenc$|_hsmi$"
+    r"|vero_id$|yclid$|wt_mc$|cmpid$|campaign$)",
+    re.IGNORECASE,
+)
+
+
+def canonicalize(url: str) -> str:
+    """Collapse equivalent URL forms to one canonical string.
+
+    Applies the always-safe normalisations (lowercase host, drop default
+    ports) plus the widely-safe heuristics (strip ``www.``, drop a trailing
+    slash, remove tracking parameters, sort the query) so that forms which
+    serve the same page resolve to a single identity, primary key, and slug.
+
+    The path is treated as opaque (other than the trailing-slash trim):
+    site-specific path rewrites are the rewriter's job, not this function's,
+    which keeps unsafe per-site path transforms out of the always-on layer.
+
+    Args:
+        url: A processed https URL (post skip/rewrite).
+
+    Returns:
+        The canonical URL used as the page identity and slug input. Returns
+        the input unchanged if it cannot be parsed.
+    """
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").removeprefix("www.")
+        port = parts.port
+    except ValueError:
+        # Malformed netloc (e.g. a non-numeric port): leave the URL as-is
+        # rather than risk producing a different identity from a guess.
+        return url
+
+    netloc = host if port in (None, 80, 443) else f"{host}:{port}"
+
+    path = parts.path
+    if path.endswith("/") and path != "/":
+        path = path.rstrip("/")
+
+    kept = [
+        (k, v)
+        for k, v in parse_qsl(parts.query, keep_blank_values=True)
+        if not _TRACKING_PARAM_RE.match(k)
+    ]
+    query = urlencode(sorted(kept))
+
+    return urlunsplit((parts.scheme, netloc, path, query, ""))
+
+
 def process_url(url: str) -> tuple[str | None, str]:
     """Process URL for scraping.
 
@@ -316,6 +370,6 @@ def process_url(url: str) -> tuple[str | None, str]:
     # collapses subdomains, so host-keyed rewriters never match on domain.
     rewriter = DOMAIN_REWRITERS.get(host) or DOMAIN_REWRITERS.get(domain)
     if rewriter is not None:
-        return rewriter(url), "Success (rewritten)"
+        return canonicalize(rewriter(url)), "Success (rewritten)"
 
-    return url, "Success"
+    return canonicalize(url), "Success"
