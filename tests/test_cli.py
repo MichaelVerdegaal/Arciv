@@ -9,7 +9,7 @@ from loguru import logger
 from typer.testing import CliRunner
 
 import arciv.cli.cli as cli_module
-from arciv.core.db import Page, PageDatabase, Source
+from arciv.core.db import Page, PageDatabase, Rule, Source
 from arciv.core.fetch import slug_for_url
 from arciv.core.pipeline import ArchiveResult
 from arciv.cli import output
@@ -453,6 +453,108 @@ class TestAddAndArchive:
     def test_archive_name_and_all_is_usage(self, runner, data_dir):
         result = runner.invoke(cli_module.cli, ["archive", "notes", "--all"])
         assert result.exit_code == output.EXIT_USAGE
+
+
+class TestRules:
+    """`rules list/add/remove` give the CLI parity with the web rule view.
+
+    A fresh database is seeded with built-in default rules, so these tests
+    target a distinctive pattern of their own rather than asserting on the
+    whole (defaulted) table.
+    """
+
+    PATTERN = "cli-test.example.com"
+
+    def _added_rule(self, data_dir):
+        with PageDatabase(data_dir / "arciv.db") as db:
+            matches = [r for r in db.list_rules() if r.pattern == self.PATTERN]
+        return matches
+
+    def test_add_inserts_rule_at_the_end(self, runner, data_dir):
+        result = runner.invoke(
+            cli_module.cli, ["rules", "add", "domain", self.PATTERN, "skip"]
+        )
+        assert result.exit_code == 0
+        matches = self._added_rule(data_dir)
+        assert len(matches) == 1
+        assert matches[0].match_type == "domain"
+        assert matches[0].action == "skip"
+        # Appended, never reordering the seeded defaults.
+        with PageDatabase(data_dir / "arciv.db") as db:
+            assert db.list_rules()[-1].pattern == self.PATTERN
+
+    def test_add_rewrite_with_replacement(self, runner, data_dir):
+        result = runner.invoke(
+            cli_module.cli,
+            ["rules", "add", "domain", self.PATTERN, "rewrite", "-r", "scribe.rip"],
+        )
+        assert result.exit_code == 0
+        matches = self._added_rule(data_dir)
+        assert matches[0].action == "rewrite"
+        assert matches[0].replacement == "scribe.rip"
+
+    def test_add_rewrite_without_replacement_is_usage(self, runner, data_dir):
+        result = runner.invoke(
+            cli_module.cli, ["rules", "add", "domain", self.PATTERN, "rewrite"]
+        )
+        assert result.exit_code == output.EXIT_USAGE
+        assert "replacement" in result.output
+        assert self._added_rule(data_dir) == []
+
+    def test_add_unknown_match_type_is_usage(self, runner, data_dir):
+        result = runner.invoke(
+            cli_module.cli, ["rules", "add", "bogus", self.PATTERN, "skip"]
+        )
+        assert result.exit_code == output.EXIT_USAGE
+        assert "match type" in result.output
+
+    def test_add_unknown_action_is_usage(self, runner, data_dir):
+        result = runner.invoke(
+            cli_module.cli, ["rules", "add", "domain", self.PATTERN, "bogus"]
+        )
+        assert result.exit_code == output.EXIT_USAGE
+        assert "action" in result.output
+
+    def test_list_is_tab_separated_with_id_first(self, runner, data_dir):
+        with PageDatabase(data_dir / "arciv.db") as db:
+            rule = db.add_rule(
+                Rule(match_type="domain", pattern=self.PATTERN, action="skip")
+            )
+        result = runner.invoke(cli_module.cli, ["rules", "list"])
+        assert result.exit_code == 0
+        row = next(
+            line for line in result.stdout.splitlines() if self.PATTERN in line
+        ).split("\t")
+        assert row == [str(rule.id), "domain", self.PATTERN, "skip", ""]
+
+    def test_list_emits_jsonl(self, runner, data_dir):
+        with PageDatabase(data_dir / "arciv.db") as db:
+            rule = db.add_rule(
+                Rule(
+                    match_type="domain",
+                    pattern=self.PATTERN,
+                    action="rewrite",
+                    replacement="scribe.rip",
+                )
+            )
+        result = runner.invoke(cli_module.cli, ["--json", "rules", "list"])
+        records = [json.loads(line) for line in result.stdout.splitlines()]
+        record = next(r for r in records if r["pattern"] == self.PATTERN)
+        assert record["replacement"] == "scribe.rip"
+        assert record["id"] == rule.id
+
+    def test_remove_deletes_rule(self, runner, data_dir):
+        with PageDatabase(data_dir / "arciv.db") as db:
+            rule = db.add_rule(
+                Rule(match_type="domain", pattern=self.PATTERN, action="skip")
+            )
+        result = runner.invoke(cli_module.cli, ["rules", "remove", str(rule.id)])
+        assert result.exit_code == 0
+        assert self._added_rule(data_dir) == []
+
+    def test_remove_unknown_id_is_noinput(self, runner, data_dir):
+        result = runner.invoke(cli_module.cli, ["rules", "remove", "999999"])
+        assert result.exit_code == output.EXIT_NOINPUT
 
 
 class TestGlobalOptions:
