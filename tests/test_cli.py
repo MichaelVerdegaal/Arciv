@@ -316,6 +316,51 @@ class TestDbGroup:
         assert result.exit_code == 0
         assert "No database" in result.output
 
+    def test_remove_keeps_saved_files_by_default(self, runner, data_dir):
+        _seed(data_dir, [_page("https://example.com/a")])
+        saved = data_dir / "saved" / "post"
+        saved.mkdir(parents=True)
+        (saved / "page.md").write_text("x", encoding="utf-8")
+        result = runner.invoke(cli_module.cli, ["db", "remove", "--force"])
+        assert result.exit_code == 0
+        assert not (data_dir / "arciv.db").exists()
+        assert saved.exists()
+
+    def test_remove_files_deletes_saved_dir(self, runner, data_dir):
+        _seed(data_dir, [_page("https://example.com/a")])
+        saved = data_dir / "saved" / "post"
+        saved.mkdir(parents=True)
+        (saved / "page.md").write_text("x", encoding="utf-8")
+        result = runner.invoke(
+            cli_module.cli, ["db", "remove", "--force", "--remove-files"]
+        )
+        assert result.exit_code == 0
+        assert not (data_dir / "arciv.db").exists()
+        assert not (data_dir / "saved").exists()
+
+
+class TestGlobalOptions:
+    """Global options must work both before and after the command."""
+
+    def test_json_after_command(self, runner, data_dir):
+        result = runner.invoke(cli_module.cli, ["status", "--json"])
+        assert result.exit_code == 0
+        assert json.loads(result.output)["total"] == 0
+
+    def test_json_before_command(self, runner, data_dir):
+        result = runner.invoke(cli_module.cli, ["--json", "status"])
+        assert result.exit_code == 0
+        assert json.loads(result.output)["total"] == 0
+
+    def test_json_after_subgroup_command(self, runner, data_dir):
+        result = runner.invoke(cli_module.cli, ["db", "dir", "--json"])
+        assert result.exit_code == 0
+        assert result.output.strip() == str(data_dir)
+
+    def test_quiet_after_command(self, runner, data_dir):
+        result = runner.invoke(cli_module.cli, ["status", "-q"])
+        assert result.exit_code == 0
+
 
 class TestStreams:
     def test_data_on_stdout_logs_on_stderr(self, runner, data_dir):

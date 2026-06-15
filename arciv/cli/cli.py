@@ -29,11 +29,11 @@ Inspection:
     arciv db dir                    # print the data directory path
     arciv db remove                 # delete the database (asks first)
 
-Global options (before the command): ``-v``/``-vv`` for more detail,
-``-q`` for errors only, ``--color auto|always|never``, and ``--json`` to
-switch every command to machine-readable output on stdout. Data goes to
-stdout; all logs and diagnostics go to stderr, so ``arciv list | cat``
-shows only data.
+Global options work before or after the command: ``-v``/``-vv`` for more
+detail, ``-q`` for errors only, ``--color auto|always|never``, and
+``--json`` to switch every command to machine-readable output on stdout.
+Data goes to stdout; all logs and diagnostics go to stderr, so
+``arciv list | cat`` shows only data.
 """
 
 import json
@@ -46,6 +46,7 @@ from typing import NoReturn
 
 import typer
 from loguru import logger
+from typer.core import TyperGroup
 
 from arciv.settings import DATA_DIR, DB_PATH, SAVED_DIR, configure_logger
 from arciv.core.db import PageDatabase, Source
@@ -71,12 +72,56 @@ from .output import (
     set_json_output,
 )
 
+class GlobalOptionGroup(TyperGroup):
+    """Let the global options work anywhere on the command line.
+
+    Typer/Click only accept group-level options *before* the subcommand
+    (``arciv --json status``). Users naturally write them after the command
+    (``arciv status --json``), which Click otherwise rejects as an unknown
+    option. This group hoists the recognized global tokens to the front
+    before parsing, so both orders work.
+    """
+
+    # Global flags that take no value, and the long options that take one.
+    _GLOBAL_FLAGS = frozenset({"-v", "--verbose", "-q", "--quiet", "--json"})
+    _GLOBAL_VALUE_OPTS = frozenset({"--color"})
+
+    def parse_args(self, ctx, args):
+        hoisted: list[str] = []
+        rest: list[str] = []
+        i = 0
+        while i < len(args):
+            token = args[i]
+            name = token.split("=", 1)[0]
+            if token in self._GLOBAL_FLAGS:
+                hoisted.append(token)
+            elif (
+                token.startswith("-")
+                and not token.startswith("--")
+                and len(token) > 1
+                and all(c in "vq" for c in token[1:])
+            ):
+                # Bundled short flags made only of global ones, e.g. -vv, -qv.
+                hoisted.append(token)
+            elif name in self._GLOBAL_VALUE_OPTS:
+                hoisted.append(token)
+                # Pull along a separately-spelled value, e.g. "--color never".
+                if "=" not in token and i + 1 < len(args):
+                    i += 1
+                    hoisted.append(args[i])
+            else:
+                rest.append(token)
+            i += 1
+        return super().parse_args(ctx, hoisted + rest)
+
+
 # add_completion=False keeps the CLI surface identical to the old click one
 # (no extra --install-completion/--show-completion options).
 cli = typer.Typer(
     help="Arciv: personal knowledge archive.",
     no_args_is_help=True,
     add_completion=False,
+    cls=GlobalOptionGroup,
 )
 db_app = typer.Typer(help="Inspect or manage the database file.", no_args_is_help=True)
 cli.add_typer(db_app, name="db")
@@ -509,18 +554,33 @@ def db_remove(
     force: bool = typer.Option(
         False, "--force", help="Delete without asking for confirmation."
     ),
+    remove_files: bool = typer.Option(
+        False,
+        "--remove-files",
+        help="Also delete the archived files under saved/.",
+    ),
 ) -> None:
-    """Delete the SQLite database; archived files under saved/ are kept."""
-    if not DB_PATH.exists():
+    """Delete the SQLite database.
+
+    By default the archived files under saved/ are kept; pass --remove-files
+    to delete those too.
+    """
+    if not DB_PATH.exists() and not (remove_files and SAVED_DIR.is_dir()):
         # Diagnostic, not data: keep it on stderr
         logger.info(f"No database at {DB_PATH}")
         return
     if not force:
-        typer.confirm(f"Delete {DB_PATH}? All page/source tracking is lost", abort=True)
+        prompt = f"Delete {DB_PATH}? All page/source tracking is lost"
+        if remove_files:
+            prompt += f" (and all archived files under {SAVED_DIR})"
+        typer.confirm(prompt, abort=True)
     # The WAL sidecar files belong to the main file and must go with it
     for suffix in ("", "-wal", "-shm"):
         DB_PATH.with_name(DB_PATH.name + suffix).unlink(missing_ok=True)
     emit(f"Deleted {DB_PATH}")
+    if remove_files and SAVED_DIR.is_dir():
+        shutil.rmtree(SAVED_DIR)
+        emit(f"Removed archived files under {SAVED_DIR}")
 
 
 if __name__ == "__main__":
