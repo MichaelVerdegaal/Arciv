@@ -35,6 +35,7 @@ def _index_notes(
     source_name is the registered source the notes belong to, if any.
     """
     indexed_at = datetime.now(timezone.utc).isoformat()
+    rules = db.list_rules()
     file_paths: list[str] = []
     original_urls: dict[str, str] = {}
     link_entries: list[tuple[str, str, str | None, str]] = []
@@ -44,7 +45,7 @@ def _index_notes(
         file_path = str(note.note_path.resolve())
         file_paths.append(file_path)
         for link in note.extract_urls():
-            processed, _ = process_url(link)
+            processed, _ = process_url(link, rules)
             if processed is None:
                 continue
             if (processed, file_path) in seen_links:
@@ -108,9 +109,10 @@ def register_urls(db: PageDatabase, urls: list[str]) -> list[str]:
     Used by ``arciv get <URL>``, where the URL doesn't come from a file.
     Returns the processed URLs that were registered; skipped URLs excluded.
     """
+    rules = db.list_rules()
     registered: dict[str, None] = {}
     for url in urls:
-        processed, skip_reason = process_url(url)
+        processed, skip_reason = process_url(url, rules)
         if processed is None:
             logger.warning(f"Skipped {url}: {skip_reason}")
             continue

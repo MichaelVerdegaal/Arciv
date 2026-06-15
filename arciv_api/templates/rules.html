@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Arciv — Rules{% endblock %}
+{% block main %}
+<h1>Rules</h1>
+<p class="muted">
+  URL rules run top to bottom; the first match wins. <strong>skip</strong> drops
+  a URL (the reason is shown when archiving); <strong>rewrite</strong> swaps the
+  host for the replacement and keeps processing. File-extension, image-proxy,
+  and IP-host skips are built in and not listed here.
+</p>
+
+<div id="rule-result"></div>
+
+{# Plain div, not a form: the inputs bind to Datastar signals and the button
+   POSTs them as JSON, so there is no native form submission to suppress. #}
+<div class="filters" data-signals="{match_type: 'domain', pattern: '', action: 'skip', replacement: ''}">
+  <label>
+    Match
+    <select data-bind:match_type>
+      {% for mt in match_types %}
+      <option value="{{ mt }}">{{ mt }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    Pattern
+    <input data-bind:pattern placeholder="youtube.com" />
+  </label>
+  <label>
+    Action
+    <select data-bind:action>
+      {% for a in actions %}
+      <option value="{{ a }}">{{ a }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    Reason / new host
+    <input data-bind:replacement placeholder="not content / scribe.rip" />
+  </label>
+  <button type="button" data-on:click="@post('/rules')">Add rule</button>
+</div>
+
+{% if not rules %}
+<p class="muted">No rules.</p>
+{% else %}
+<div class="overflow-x">
+  <table class="striped">
+    <thead>
+      <tr>
+        <th>#</th><th>Match</th><th>Pattern</th>
+        <th>Action</th><th>Reason / host</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for rule in rules %}
+      <tr>
+        <td class="muted">{{ loop.index }}</td>
+        <td>{{ rule.match_type }}</td>
+        <td><code>{{ rule.pattern }}</code></td>
+        <td>{{ rule.action }}</td>
+        <td class="muted">{{ rule.replacement or '—' }}</td>
+        <td>
+          <button
+            class="secondary"
+            data-on:click="@post('/rules/{{ rule.id }}/delete')"
+          >Delete</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

@@ -344,6 +344,78 @@ class TestWorker:
         assert outcome == "existing"
 
 
+class TestRules:
+    def test_rules_page_lists_seeded_defaults(self, client, archive):
+        _seed(archive, [])  # creates the DB, which seeds the default rules
+        res = client.get("/rules")
+        assert res.status_code == 200
+        assert "youtube.com" in res.text
+
+    def test_add_rule_redirects_and_persists(self, client, archive):
+        _seed(archive, [])
+        res = client.post(
+            "/rules",
+            json={
+                "match_type": "domain",
+                "pattern": "newsite.com",
+                "action": "skip",
+                "replacement": "not content",
+            },
+            headers=_DS,
+        )
+        assert res.status_code == 200
+        assert "/rules" in res.text  # redirect back to the list
+        with PageDatabase(archive / "arciv.db", read_only=True) as db:
+            assert any(r.pattern == "newsite.com" for r in db.list_rules())
+
+    def test_add_rule_rejects_missing_pattern(self, client, archive):
+        _seed(archive, [])
+        res = client.post(
+            "/rules",
+            json={"match_type": "domain", "pattern": "", "action": "skip"},
+            headers=_DS,
+        )
+        assert "pattern" in res.text.lower()
+        with PageDatabase(archive / "arciv.db", read_only=True) as db:
+            assert all(r.pattern for r in db.list_rules())
+
+    def test_add_rewrite_rule_requires_replacement(self, client, archive):
+        _seed(archive, [])
+        res = client.post(
+            "/rules",
+            json={"match_type": "domain", "pattern": "medium.com", "action": "rewrite"},
+            headers=_DS,
+        )
+        assert "replacement" in res.text.lower()
+
+    def test_delete_rule_removes_it(self, client, archive):
+        _seed(archive, [])
+        with PageDatabase(archive / "arciv.db") as db:
+            rule_id = db.list_rules()[0].id
+        res = client.post(f"/rules/{rule_id}/delete", json={}, headers=_DS)
+        assert res.status_code == 200
+        with PageDatabase(archive / "arciv.db", read_only=True) as db:
+            assert all(r.id != rule_id for r in db.list_rules())
+
+    def test_added_skip_rule_takes_effect_on_archive(self, client, archive):
+        _seed(archive, [])
+        client.post(
+            "/rules",
+            json={
+                "match_type": "domain",
+                "pattern": "blocked.com",
+                "action": "skip",
+                "replacement": "blocked by rule",
+            },
+            headers=_DS,
+        )
+        res = client.post(
+            "/archive", json={"url": "https://blocked.com/page"}, headers=_DS
+        )
+        assert "Skipped" in res.text
+        assert "blocked by rule" in res.text
+
+
 class TestHealth:
     def test_health_ok_without_a_database(self, client, archive):
         res = client.get("/health")

@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config
 from .jobs import ArchiveQueue
-from .routers import archive, browse, domains, page, sources, status
+from .routers import archive, browse, domains, page, rules, sources, status
 
 
 @asynccontextmanager
@@ -42,7 +42,7 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    for module in (browse, page, domains, sources, status, archive):
+    for module in (browse, page, domains, sources, status, rules, archive):
         app.include_router(module.router)
     return app
 

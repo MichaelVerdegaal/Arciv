@@ -61,6 +61,11 @@ body > header.topbar nav a {
 .filters button {
   margin: 0;
 }
+/* Pico makes form buttons full-width; size the action button to its label so
+   it sits snugly after the last field instead of stretching across the row. */
+.filters button {
+  width: auto;
+}
 
 /* --- Status stat cards ---------------------------------------------------- */
 .stats {
@@ -135,4 +140,7 @@ body > header.topbar nav a {
 }
 .overflow-x {
   overflow-x: auto;
+  /* Breathing room so the table isn't flush against the filter/add controls
+     above it (and the pager below). */
+  margin-block: var(--pico-block-spacing-vertical);
 }

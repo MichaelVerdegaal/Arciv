@@ -21,7 +21,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from arciv.core.db import Page, PageDatabase
+from arciv.core.db import Page, PageDatabase, Rule
 from arciv.core.pipeline import fetch_urls, parse_pending
 from arciv.core.index import register_urls
 from arciv.core.fetch import process_url, slug_for_url
@@ -46,6 +46,13 @@ class Job:
     url: str
     phase: Phase = Phase.queued
     error: str | None = None
+
+
+def _default_load_rules(db_path: Path) -> tuple[Rule, ...]:
+    """Load the URL rules. Opens read-write so a never-created archive gets its
+    schema (and default rules) before the first submitted URL is processed."""
+    with PageDatabase(db_path) as db:
+        return tuple(db.list_rules())
 
 
 def _default_register(db_path: Path, url: str, processed: str) -> Page | None:
@@ -76,12 +83,14 @@ class ArchiveQueue:
         self,
         db_path: Path,
         *,
+        load_rules: Callable[[Path], tuple[Rule, ...]] = _default_load_rules,
         register: Callable[[Path, str, str], Page | None] = _default_register,
         fetch: Callable[[Path, str], None] = _default_fetch,
         parse: Callable[[Path], None] = _default_parse,
         maxsize: int = 128,
     ) -> None:
         self._db_path = db_path
+        self._load_rules = load_rules
         self._register = register
         self._fetch = fetch
         self._parse = parse
@@ -100,7 +109,8 @@ class ArchiveQueue:
         parsed), ``"existing"`` (a job is in flight), or ``"queued"``; or
         ``(None, skip_reason)`` when ``process_url`` rejects the URL.
         """
-        processed, reason = process_url(url)
+        rules = await asyncio.to_thread(self._load_rules, self._db_path)
+        processed, reason = process_url(url, rules)
         if processed is None:
             return None, reason
         slug = slug_for_url(processed)

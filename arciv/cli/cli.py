@@ -478,7 +478,7 @@ def path(
         if page is None:
             # The archive keys pages by processed URL; normalize the input
             # the same way so e.g. #fragment variants still resolve
-            processed, _ = process_url(url)
+            processed, _ = process_url(url, db.list_rules())
             if processed is not None and processed != url:
                 page = db.get(processed)
     if page is None:

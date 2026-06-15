@@ -93,6 +93,54 @@ class Page:
         return "pending"
 
 
+# Recognised rule match types and actions. Defined next to Rule so the URL
+# processor, the database seeder, and the web form all validate against one
+# list instead of three drifting copies.
+RULE_MATCH_TYPES = ("domain", "host", "starts_with", "exact")
+RULE_ACTIONS = ("skip", "rewrite")
+
+
+@dataclass
+class Rule:
+    """A user-editable URL-processing rule (a match plus an action).
+
+    Rules run as an ordered list while a URL is processed (see
+    ``arciv.core.fetch.process_url``); the first rule whose pattern matches
+    wins. ``match_type`` decides how ``pattern`` is compared to the URL:
+
+    - ``domain``: the registered domain — ``youtube.com`` also matches
+      ``m.youtube.com`` and ``www.youtube.com``.
+    - ``host``: the exact hostname (port included), e.g.
+      ``raw.githubusercontent.com``.
+    - ``starts_with``: a URL prefix, e.g. ``https://localhost``.
+    - ``exact``: the whole URL.
+
+    ``action`` is what happens on a match:
+
+    - ``skip``: the URL is not archived; ``replacement`` holds the reason
+      shown to the user (optional, a generic reason is used if blank).
+    - ``rewrite``: the URL's host is swapped for ``replacement`` (path and
+      query kept) and processing continues down the chain.
+
+    Attributes:
+        match_type: One of RULE_MATCH_TYPES.
+        pattern: The string compared against the URL per match_type.
+        action: One of RULE_ACTIONS.
+        replacement: For skip, the reason (optional); for rewrite, the new host.
+        position: Sort key for ordering; lower positions run first.
+        id: Database row id, or None before the rule is inserted.
+        added_at: ISO timestamp of when the rule was created.
+    """
+
+    match_type: str
+    pattern: str
+    action: str
+    replacement: str | None = None
+    position: int = 0
+    id: int | None = None
+    added_at: str | None = None
+
+
 @dataclass
 class Source:
     """A registered source: a named directory of files to index.

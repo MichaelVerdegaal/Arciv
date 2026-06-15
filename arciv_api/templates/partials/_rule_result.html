@@ -1,0 +1,8 @@
+{# Patched into #rule-result by POST /rules when a rule is invalid. A valid
+   add (or any delete) redirects to /rules instead, so this only carries
+   validation problems. #}
+<div id="rule-result">
+  <div class="alert {{ {'error': 'alert-error', 'warning': 'alert-warning', 'info': 'alert-info'}.get(kind, '') }}">
+    {{ message }}
+  </div>
+</div>
