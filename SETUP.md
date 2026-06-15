@@ -32,8 +32,7 @@ this by manually installing Chrome.
 
 ## Configuration
 
-Everything works out of the box — the browser user-agent pool refreshes itself on the first run.
-Point Arciv at your notes by registering them as a source:
+Everything works out of the box. Point Arciv at your notes by registering them as a source:
 
 ```bash
 arciv add "/path/to/your/vault/Daily notes" notes

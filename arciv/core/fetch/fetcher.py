@@ -28,7 +28,6 @@ from .url_processor import (
     slug_for_url,
     split_url,
 )
-from .user_agents import random_user_agent
 
 TIMEOUT_MS = 30_000
 # Extra time to let JS-rendered pages (SPAs) finish loading after
@@ -63,8 +62,6 @@ class Fetcher:
         page_timeout: Playwright page load timeout in milliseconds.
         max_concurrency: Maximum concurrent page fetches for batch operations.
         max_retries: Maximum retry attempts for transient failures.
-        headless: Run the browser without a visible window. Disable only when a
-            site needs the extra stealth of a headed browser.
     """
 
     def __init__(
@@ -74,23 +71,12 @@ class Fetcher:
         page_timeout: int = TIMEOUT_MS,
         max_concurrency: int = DEFAULT_CONCURRENCY,
         max_retries: int = DEFAULT_MAX_RETRIES,
-        headless: bool = True,
     ):
         self.db = db
         self.saved_dir = saved_dir
         self.page_timeout = page_timeout
         self.max_concurrency = max_concurrency
         self.max_retries = max_retries
-        self.headless = headless
-        # User-Agent for raw HTTP (PDF) downloads, refreshed per session.
-        # Drawing from the pool here triggers the once-per-process UA pool
-        # refresh. The browser uses real Chrome's own UA, not this one.
-        self._session_user_agent: str = random_user_agent()
-
-    def _start_session(self) -> None:
-        """Pick a fresh User-Agent for the upcoming fetch session."""
-        self._session_user_agent = random_user_agent()
-        logger.debug(f"Session User-Agent: {self._session_user_agent}")
 
     # -- internal helpers --
 
@@ -200,9 +186,7 @@ class Fetcher:
     def _download_pdf(self, url: str) -> bytes | None:
         """Download a PDF via HTTP from a direct .pdf URL. Returns the raw
         bytes, or None if the download failed."""
-        request = urllib.request.Request(
-            url, headers={"User-Agent": self._session_user_agent}
-        )
+        request = urllib.request.Request(url)
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
                 return response.read()
@@ -234,7 +218,6 @@ class Fetcher:
         """Fetch a single URL synchronously (re-downloading if refetch) and
         archive its raw content. Returns the Page, or None if skipped or
         failed."""
-        self._start_session()
         processed_url, skip_reason = process_url(url)
         if processed_url is None:
             logger.warning(f"Skipped {url}: {skip_reason}")
@@ -283,7 +266,7 @@ class Fetcher:
                 context = p.chromium.launch_persistent_context(
                     user_data_dir=user_data_dir,
                     channel="chrome",
-                    headless=self.headless,
+                    headless=True,
                     no_viewport=True,
                     ignore_https_errors=True,
                 )
@@ -338,7 +321,6 @@ class Fetcher:
         PDF URLs are downloaded directly (no browser needed). HTML URLs go
         through patchright.
         """
-        self._start_session()
         to_fetch_html: list[tuple[str, str, str, str]] = []
         to_fetch_pdf: list[tuple[str, str, str, str]] = []
         seen_processed: set[str] = set()
@@ -394,7 +376,7 @@ class Fetcher:
                 context = await p.chromium.launch_persistent_context(
                     user_data_dir=user_data_dir,
                     channel="chrome",
-                    headless=self.headless,
+                    headless=True,
                     no_viewport=True,
                     ignore_https_errors=True,
                 )
