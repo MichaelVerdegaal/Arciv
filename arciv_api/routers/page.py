@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from datastar_py.fastapi import DatastarResponse, ServerSentEventGenerator
@@ -48,6 +50,42 @@ def page_detail(
     return HTMLResponse(
         render("page.html", sources=sources, **_main_context(page, job))
     )
+
+
+def _redirect_to_page(slug: str) -> DatastarResponse:
+    """Redirect back to the page so its detail re-renders and the poll picks up
+    the freshly enqueued job."""
+    return DatastarResponse(
+        ServerSentEventGenerator.redirect(f"/page/{quote(slug, safe='')}")
+    )
+
+
+@router.post("/page/{slug}/refetch")
+async def page_refetch(
+    slug: str, request: Request, db: PageDatabase = Depends(get_db)
+) -> DatastarResponse:
+    """Re-download this page from the network and re-parse it, then reload.
+
+    A dev aid for trying out URL/parse changes against a real re-fetch. The
+    redirect lands back on the detail view, which starts polling on the queued
+    job; an unknown slug just reloads into its 404.
+    """
+    page = db.get_by_slug(slug)
+    if page is not None:
+        await request.app.state.archive.resubmit(slug, page.url, refetch=True)
+    return _redirect_to_page(slug)
+
+
+@router.post("/page/{slug}/reparse")
+async def page_reparse(
+    slug: str, request: Request, db: PageDatabase = Depends(get_db)
+) -> DatastarResponse:
+    """Re-parse this page from the raw file already on disk (no network), then
+    reload. The fast loop for trying out parse/cleanup rules."""
+    page = db.get_by_slug(slug)
+    if page is not None:
+        await request.app.state.archive.resubmit(slug, page.url, refetch=False)
+    return _redirect_to_page(slug)
 
 
 @router.get("/page/{slug}/progress")
