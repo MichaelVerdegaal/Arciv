@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% set active = 'rules' %}
 {% block title %}Arciv — Rules{% endblock %}
 {% block main %}
 <h1>Rules</h1>
@@ -11,8 +12,8 @@
 
 <details>
   <summary>Match types explained</summary>
-  <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 4px; margin-top: 1rem;">
-    <h3 style="margin-top: 0;">domain</h3>
+  <div class="help">
+    <h3>domain</h3>
     <p>Matches a site and all its subdomains (registered domain level).</p>
     <p><strong>Pattern format:</strong> Just the domain, no <code>https://</code> or path.
       Example: <code>youtube.com</code> matches <code>youtube.com</code>,

@@ -19,14 +19,19 @@
          (data-bind:url, data-on:click). The hyphen form silently no-ops:
          the attribute parses to an unknown "bind-url"/"on-click" plugin and
          is skipped, so the button fires no request at all. #}
+      {# `active` is set by each page template (e.g. {% set active = 'domains' %})
+         and highlights the matching tab; detail/404 pages leave it unset. #}
       <nav>
         <ul>
           <li><a href="/" class="brand contrast">Arciv</a></li>
-          <li><a href="/">Archive</a></li>
-          <li><a href="/domains">Domains</a></li>
-          <li><a href="/sources">Sources</a></li>
-          <li><a href="/rules">Rules</a></li>
-          <li><a href="/status">Status</a></li>
+          {% for href, label, key in [
+              ('/', 'Archive', 'archive'),
+              ('/domains', 'Domains', 'domains'),
+              ('/sources', 'Sources', 'sources'),
+              ('/rules', 'Rules', 'rules'),
+              ('/status', 'Status', 'status')] %}
+          <li><a href="{{ href }}"{% if active == key %} aria-current="page"{% endif %}>{{ label }}</a></li>
+          {% endfor %}
           <li class="archive-box" data-signals="{url: ''}">
             <input
               data-bind:url

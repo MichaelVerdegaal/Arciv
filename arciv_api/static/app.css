@@ -1,34 +1,155 @@
-/* App-specific tweaks layered on top of Pico CSS (sand theme, dark mode).
-   Pico itself is loaded from the CDN in base.html and styles all the semantic
-   HTML (nav, table, form, article, headings…). This file only adds the few
-   things Pico has no primitive for: the full-bleed top bar, status cards,
-   badges, and inline alerts. Keep it small. */
+/* App styling layered on top of Pico CSS (sand theme, dark mode).
+
+   Pico is loaded from the CDN in base.html and styles all the semantic HTML
+   (nav, table, form, article, headings…). This file does two jobs:
+
+   1. Re-skin Pico by overriding its `--pico-*` design tokens, so the whole app
+      gets one cohesive "warm ink + amber" archival look instead of the stock
+      sand palette — no per-element overrides needed for the common cases.
+   2. Add the few components Pico has no primitive for: the full-bleed top bar,
+      status cards, badges, inline alerts, and the rules help panel.
+
+   Keep it small; lean on the tokens before writing component CSS. */
+
+/* --- Design tokens -------------------------------------------------------- */
+/* Override Pico's dark palette. Everything Pico styles (links, buttons, tables,
+   forms, code) picks these up automatically, so the re-skin is mostly here. */
+:root {
+  --pico-border-radius: 0.5rem;
+  --pico-font-family-sans-serif: system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", sans-serif;
+  --pico-line-height: 1.6;
+  --pico-transition: 0.15s ease;
+
+  /* Shared accent (amber) and status hues, used by the components below. */
+  --accent: #e3a93c;
+  --accent-soft: rgba(227, 169, 60, 0.16);
+  --c-green: #7bc47f;
+  --c-blue: #74b4e6;
+  --c-amber: #e3a93c;
+  --c-red: #e88b8b;
+}
+
+[data-theme="dark"] {
+  /* Warm near-black surfaces, layered from page → card → elevated. */
+  --pico-background-color: #15130f;
+  --pico-color: #ece7dd;
+  --pico-h1-color: #fbf8f2;
+  --pico-h2-color: #f6f1e8;
+  --pico-h3-color: #f1ebe1;
+  --pico-h4-color: #ece7dd;
+  --pico-h5-color: #ece7dd;
+  --pico-h6-color: #ece7dd;
+  --pico-muted-color: #a39c8d;
+  --pico-muted-border-color: #322e26;
+  --pico-border-color: #322e26;
+
+  --pico-card-background-color: #1d1a14;
+  --pico-card-border-color: #2c2820;
+  --pico-card-sectioning-background-color: #221e17;
+  --pico-card-box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+
+  /* Amber accent: links and primary buttons. Inverse is the dark text that
+     sits on a filled amber button. */
+  --pico-primary: var(--accent);
+  --pico-primary-background: var(--accent);
+  --pico-primary-border: var(--accent);
+  --pico-primary-hover: #f0bb57;
+  --pico-primary-hover-background: #f0bb57;
+  --pico-primary-hover-border: #f0bb57;
+  --pico-primary-focus: rgba(227, 169, 60, 0.3);
+  --pico-primary-inverse: #1a160e;
+  --pico-primary-underline: rgba(227, 169, 60, 0.4);
+
+  /* Secondary = the quiet outline buttons (Re-archive, Delete, pager). */
+  --pico-secondary: #c4bcab;
+  --pico-secondary-background: #2c2820;
+  --pico-secondary-border: #2c2820;
+  --pico-secondary-hover: #ece7dd;
+  --pico-secondary-hover-background: #38332a;
+  --pico-secondary-hover-border: #38332a;
+  --pico-secondary-inverse: #ece7dd;
+
+  /* Forms. */
+  --pico-form-element-background-color: #1a1712;
+  --pico-form-element-border-color: #38332a;
+  --pico-form-element-color: #ece7dd;
+  --pico-form-element-placeholder-color: #847d6f;
+  --pico-form-element-active-background-color: #1a1712;
+  --pico-form-element-active-border-color: var(--accent);
+  --pico-form-element-focus-color: var(--accent);
+
+  --pico-code-background-color: #221e17;
+  --pico-code-color: #d9cbb0;
+  --pico-blockquote-border-color: var(--accent);
+  --pico-text-selection-color: rgba(227, 169, 60, 0.28);
+}
+
+/* Snappier interactive feedback than Pico's defaults. */
+a,
+button,
+[role="button"],
+input,
+select,
+.stat {
+  transition: background-color var(--pico-transition),
+    border-color var(--pico-transition), color var(--pico-transition),
+    transform var(--pico-transition);
+}
 
 /* --- Top bar -------------------------------------------------------------- */
-/* A full-width header (via .container-fluid) with a divider under it. */
+/* A full-width, sticky header with a blurred backdrop and a divider under it. */
 body > header.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   border-bottom: 1px solid var(--pico-muted-border-color);
-  background: var(--pico-card-background-color);
+  background: color-mix(in srgb, var(--pico-background-color) 88%, transparent);
+  backdrop-filter: blur(8px);
   margin-bottom: var(--pico-block-spacing-vertical);
   padding-top: 0.4rem;
   padding-bottom: 0.4rem;
 }
 body > header.topbar nav {
   flex-wrap: wrap;
-  gap: 0.25rem 0.5rem;
+  gap: 0.25rem 0.35rem;
 }
+/* Nav links read as quiet pills that warm up on hover. */
 body > header.topbar nav a {
-  padding: 0.25rem 0.5rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--pico-border-radius);
+  color: var(--pico-muted-color);
+  text-decoration: none;
+}
+body > header.topbar nav a:hover {
+  background: var(--accent-soft);
+  color: var(--pico-color);
+}
+/* Current section: filled accent pill. */
+body > header.topbar nav a[aria-current="page"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
 }
 .brand {
-  font-size: 1.15rem;
+  font-size: 1.2rem;
   font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--accent) !important;
 }
-/* Compact archive-a-URL group in the bar. */
+.brand:hover {
+  background: transparent !important;
+}
+/* Compact archive-a-URL group in the bar, pushed to the right on wide screens. */
 .archive-box {
   display: flex;
   gap: 0.5rem;
   align-items: center;
+}
+@media (min-width: 768px) {
+  .archive-box {
+    margin-left: auto;
+  }
 }
 .archive-box input {
   margin: 0;
@@ -44,17 +165,27 @@ body > header.topbar nav a {
   margin-bottom: var(--pico-block-spacing-vertical);
 }
 
-/* --- Filter bar (browse) -------------------------------------------------- */
-/* Pico stacks labels; for the filter row we want them inline and compact. */
+/* --- Headings ------------------------------------------------------------- */
+main h1 {
+  letter-spacing: -0.01em;
+}
+main > h1:first-child {
+  margin-bottom: 1rem;
+}
+
+/* --- Filter bar (browse / add forms) -------------------------------------- */
+/* Pico stacks labels; for these rows we want them inline, compact, bottom-aligned. */
 .filters {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 0.75rem;
+  margin-bottom: var(--pico-block-spacing-vertical);
 }
 .filters label {
   margin: 0;
   font-size: 0.8rem;
+  color: var(--pico-muted-color);
 }
 .filters input,
 .filters select,
@@ -67,6 +198,21 @@ body > header.topbar nav a {
   width: auto;
 }
 
+/* --- Tables --------------------------------------------------------------- */
+/* Quieter header (small caps-ish, muted) and a subtle row hover for scanability. */
+table thead th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--pico-muted-color);
+}
+table tbody tr {
+  transition: background-color var(--pico-transition);
+}
+table tbody tr:hover {
+  background: var(--accent-soft);
+}
+
 /* --- Status stat cards ---------------------------------------------------- */
 .stats {
   display: grid;
@@ -74,64 +220,137 @@ body > header.topbar nav a {
   gap: 0.75rem;
 }
 @media (min-width: 576px) {
-  .stats { grid-template-columns: repeat(3, 1fr); }
+  .stats {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }
 @media (min-width: 992px) {
-  .stats { grid-template-columns: repeat(6, 1fr); }
+  .stats {
+    grid-template-columns: repeat(6, 1fr);
+  }
 }
 .stat {
   margin: 0;
-  padding: 0.75rem;
+  padding: 0.9rem 1rem;
+}
+.stat:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--pico-card-border-color));
+  transform: translateY(-2px);
 }
 .stat .stat-label {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: var(--pico-muted-color);
 }
 .stat .stat-value {
-  font-size: 1.6rem;
+  font-size: 1.7rem;
   font-weight: 700;
   line-height: 1.2;
+  font-variant-numeric: tabular-nums;
 }
-.text-success { color: var(--pico-color-green-500, #2e7d32); }
-.text-error { color: var(--pico-color-red-500, #c62828); }
-.muted { color: var(--pico-muted-color); }
+.text-success {
+  color: var(--c-green);
+}
+.text-error {
+  color: var(--c-red);
+}
+.muted {
+  color: var(--pico-muted-color);
+}
 
 /* --- Badges (page state) -------------------------------------------------- */
+/* Soft, translucent pills: a tinted background with matching text, rather than
+   loud solid blocks. */
 .badge {
   display: inline-block;
-  padding: 0.1rem 0.45rem;
-  border-radius: var(--pico-border-radius);
-  font-size: 0.75rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
   font-weight: 600;
+  letter-spacing: 0.02em;
   line-height: 1.4;
   background: var(--pico-muted-border-color);
   color: var(--pico-color);
 }
-.badge-success { background: #2e7d32; color: #fff; }
-.badge-info { background: #1565c0; color: #fff; }
-.badge-warning { background: #f9a825; color: #000; }
-.badge-error { background: #c62828; color: #fff; }
-.badge-ghost { background: var(--pico-muted-border-color); color: var(--pico-muted-color); }
+.badge-success {
+  background: rgba(123, 196, 127, 0.16);
+  color: var(--c-green);
+}
+.badge-info {
+  background: rgba(116, 180, 230, 0.16);
+  color: var(--c-blue);
+}
+.badge-warning {
+  background: var(--accent-soft);
+  color: var(--c-amber);
+}
+.badge-error {
+  background: rgba(232, 139, 139, 0.16);
+  color: var(--c-red);
+}
+.badge-ghost {
+  background: var(--pico-muted-border-color);
+  color: var(--pico-muted-color);
+}
 
 /* --- Inline alerts -------------------------------------------------------- */
+/* A tinted panel with a thick left accent bar keyed to the severity. */
 .alert {
   padding: 0.75rem 1rem;
   border-radius: var(--pico-border-radius);
   border: 1px solid var(--pico-muted-border-color);
+  border-left: 3px solid var(--pico-muted-border-color);
   background: var(--pico-card-background-color);
   margin: 0.5rem 0;
 }
-.alert-error { border-color: #c62828; }
-.alert-warning { border-color: #f9a825; }
-.alert-info { border-color: var(--pico-primary); }
+.alert-error {
+  border-left-color: var(--c-red);
+  background: rgba(232, 139, 139, 0.08);
+}
+.alert-warning {
+  border-left-color: var(--c-amber);
+  background: rgba(227, 169, 60, 0.08);
+}
+.alert-info {
+  border-left-color: var(--c-blue);
+  background: rgba(116, 180, 230, 0.08);
+}
+
+/* --- Rules help panel ----------------------------------------------------- */
+/* The "Match types explained" disclosure. Styled here instead of inline so the
+   markup stays clean and uses the real theme tokens. */
+.help {
+  padding: 0.5rem 1.25rem 1.25rem;
+  margin-top: 0.75rem;
+  background: var(--pico-card-sectioning-background-color);
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: var(--pico-border-radius);
+}
+.help h3 {
+  margin-bottom: 0.25rem;
+  color: var(--accent);
+  font-size: 1rem;
+}
+.help h3:not(:first-child) {
+  margin-top: 1.5rem;
+}
+.help p {
+  margin-bottom: 0.4rem;
+}
 
 /* --- Archived article body ------------------------------------------------ */
 /* Pico styles headings/p/lists/code/table inside <article> already; only nudge
-   line-height and let it use the full container width. */
+   line-height and cap the measure for comfortable reading. */
 .article {
-  line-height: 1.7;
+  line-height: 1.75;
+  max-width: 70ch;
 }
-.article img { max-width: 100%; height: auto; }
+.article img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--pico-border-radius);
+}
 
 /* --- Small helpers -------------------------------------------------------- */
 .row {
@@ -144,4 +363,18 @@ body > header.topbar nav a {
   /* Breathing room so the table isn't flush against the filter/add controls
      above it (and the pager below). */
   margin-block: var(--pico-block-spacing-vertical);
+}
+
+/* Quiet, theme-matched scrollbars (WebKit/Blink). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--pico-muted-border-color) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--pico-muted-border-color);
+  border-radius: 999px;
 }
