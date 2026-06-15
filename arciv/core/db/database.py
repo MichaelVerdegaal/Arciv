@@ -68,7 +68,7 @@ _DEFAULT_RULES: tuple[tuple[str, str, str, str | None], ...] = (
     ("domain", "azure.com", "skip", "not content"),
     ("domain", "claude.ai", "skip", "not content"),
     ("domain", "lnkd.in", "skip", "link shortener"),
-    ("domain", "support.dfg.nl", "skip", "not content"),
+    ("host", "support.dfg.nl", "skip", "not content"),
     ("starts_with", "https://google.com/search", "skip", "search results"),
 )
 
