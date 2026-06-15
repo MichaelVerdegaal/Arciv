@@ -2,8 +2,8 @@
 
 import pytest
 
-from arciv.db import Page, PageDatabase
-from arciv.pipeline.parse import parse_pending
+from arciv.core.db import Page, PageDatabase
+from arciv.core.pipeline.parse import parse_pending
 
 
 def _make_html(tag: str) -> str:

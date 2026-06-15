@@ -54,5 +54,5 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv sync --frozen
-      - run: uv run python -c "import arciv.scripts.cli"
+      - run: uv run python -c "import arciv.cli.cli"
       - run: uv run arciv --help

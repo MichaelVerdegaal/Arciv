@@ -17,15 +17,15 @@ which each get a dedicated container.
 Three stages, no writeback into the notes. Each stage has a dedicated CLI command;
 `arciv get` runs all three in order on a URL, a file (`--file`), or a directory (`--dir`).
 
-1. **Indexing** (`arciv index`, `arciv/pipeline/index.py`) — Parse note files (`.md`,
+1. **Indexing** (`arciv index`, `arciv/core/index/`) — Parse note files (`.md`,
    `.txt`, `.rst`), extract all links, deduplicate, apply filtering/rewrite rules, register
    pending pages. Each link
    gets a row with the URL, the full normalized filepath it was found in, and an indexed-at
    timestamp. Indexing operates on registered sources (`arciv add <dir> <name>`).
-2. **Fetching** (`arciv fetch`, `arciv/pipeline/fetch.py` + `arciv/scrape/`) — Download raw
+2. **Fetching** (`arciv fetch`, `arciv/core/pipeline/fetch.py` + `arciv/core/fetch/`) — Download raw
    content with patchright (async, concurrency-controlled); PDFs via direct HTTP. Writes
    `page.html` / `page.pdf` to disk, no conversion.
-3. **Parsing** (`arciv parse`, `arciv/pipeline/parse.py` + `arciv/convert/`) — Validate
+3. **Parsing** (`arciv parse`, `arciv/core/pipeline/parse.py` + `arciv/core/parse/`) — Validate
    fetched HTML, convert to markdown via trafilatura (HTML) or liteparse (PDF), write
    `page.md` next to the raw file, fill in title/author/word count.
 

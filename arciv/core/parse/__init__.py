@@ -1,5 +1,5 @@
 from .clean_markdown import MarkdownCleaner, clean_markdown
-from .convert import (
+from .parser import (
     ConversionResult,
     count_words,
     extract_metadata,

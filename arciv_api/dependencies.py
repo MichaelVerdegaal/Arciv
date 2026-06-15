@@ -4,7 +4,7 @@ from collections.abc import Iterator
 
 from fastapi import HTTPException
 
-from arciv.db import PageDatabase
+from arciv.core.db import PageDatabase
 
 from . import config
 

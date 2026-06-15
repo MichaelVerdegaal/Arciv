@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from datastar_py.fastapi import DatastarResponse, ServerSentEventGenerator
 
-from arciv.db import Page, PageDatabase
+from arciv.core.db import Page, PageDatabase
 
 from .. import config
 from ..dependencies import get_db

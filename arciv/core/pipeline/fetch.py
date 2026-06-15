@@ -1,9 +1,9 @@
 """Fetch stage: download indexed URLs and archive their raw content.
 
-Thin orchestration around :class:`arciv.scrape.Fetcher`, which does the
+Thin orchestration around :class:`arciv.core.fetch.Fetcher`, which does the
 patchright browser work (and direct HTTP for PDFs). Raw content lands in
 ``saved/<slug>/page.html`` or ``page.pdf``; converting it to markdown is
-the parse stage's job (see ``arciv.pipeline.parse``).
+the parse stage's job (see ``arciv.core.pipeline.parse``).
 """
 
 from collections import Counter
@@ -11,8 +11,8 @@ from collections import Counter
 from loguru import logger
 
 from arciv.settings import SAVED_DIR
-from arciv.db import Page, PageDatabase
-from arciv.scrape import Fetcher
+from arciv.core.db import Page, PageDatabase
+from arciv.core.fetch import Fetcher
 
 
 def fetch_urls(db: PageDatabase, urls: list[str], refetch: bool = False) -> list[Page]:

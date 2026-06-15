@@ -5,7 +5,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
 
-from arciv.db import PageDatabase
+from arciv.core.db import PageDatabase
 
 from ..dependencies import get_db
 from ..rendering import render

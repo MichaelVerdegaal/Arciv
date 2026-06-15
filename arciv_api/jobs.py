@@ -21,9 +21,10 @@ from pathlib import Path
 
 from loguru import logger
 
-from arciv.db import Page, PageDatabase
-from arciv.pipeline import fetch_urls, parse_pending, register_urls
-from arciv.scrape import process_url, slug_for_url
+from arciv.core.db import Page, PageDatabase
+from arciv.core.pipeline import fetch_urls, parse_pending
+from arciv.core.index import register_urls
+from arciv.core.fetch import process_url, slug_for_url
 
 
 class Phase(str, Enum):

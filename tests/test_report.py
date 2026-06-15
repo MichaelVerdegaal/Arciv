@@ -3,9 +3,9 @@
 import pytest
 from loguru import logger
 
-from arciv.db import Page, PageDatabase
-from arciv.pipeline import report
-from arciv.scrape import slug_for_url
+from arciv.core.db import Page, PageDatabase
+from arciv.core.pipeline import report
+from arciv.core.fetch import slug_for_url
 
 
 @pytest.fixture

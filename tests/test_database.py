@@ -4,8 +4,8 @@ import sqlite3
 
 import pytest
 
-from arciv.db import Page, PageDatabase, Source
-from arciv.scrape import slug_for_url
+from arciv.core.db import Page, PageDatabase, Source
+from arciv.core.fetch import slug_for_url
 
 
 @pytest.fixture

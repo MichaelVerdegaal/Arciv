@@ -2,8 +2,8 @@
 
 import pytest
 
-from arciv.db import PageDatabase, Source
-from arciv.pipeline.index import (
+from arciv.core.db import PageDatabase, Source
+from arciv.core.index import (
     index_all,
     index_directory,
     index_file,
