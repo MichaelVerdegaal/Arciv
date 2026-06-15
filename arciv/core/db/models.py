@@ -96,13 +96,13 @@ class Page:
 # Recognised rule match types and actions. Defined next to Rule so the URL
 # processor, the database seeder, and the web form all validate against one
 # list instead of three drifting copies.
-RULE_MATCH_TYPES = ("domain", "host", "starts_with", "exact")
+RULE_MATCH_TYPES = ("domain", "host", "starts_with", "exact", "regex")
 RULE_ACTIONS = ("skip", "rewrite")
 
 
 @dataclass
 class Rule:
-    """A user-editable URL-processing rule (a match plus an action).
+    r"""A user-editable URL-processing rule (a match plus an action).
 
     Rules run as an ordered list while a URL is processed (see
     ``arciv.core.fetch.process_url``); the first rule whose pattern matches
@@ -114,13 +114,19 @@ class Rule:
       ``raw.githubusercontent.com``.
     - ``starts_with``: a URL prefix, e.g. ``https://localhost``.
     - ``exact``: the whole URL.
+    - ``regex``: a regular expression (case-insensitive). Supports capture
+      groups in ``replacement`` as ``$1``, ``$2``, etc., e.g. pattern
+      ``^https://arxiv\.org/abs/(.*)$`` with replacement
+      ``https://arxiv.org/pdf/$1``.
 
     ``action`` is what happens on a match:
 
     - ``skip``: the URL is not archived; ``replacement`` holds the reason
       shown to the user (optional, a generic reason is used if blank).
-    - ``rewrite``: the URL's host is swapped for ``replacement`` (path and
-      query kept) and processing continues down the chain.
+    - ``rewrite``: replaces the URL. For most match types, swaps the hostname.
+      For ``regex`` match type, ``replacement`` can use ``$1``, ``$2``, etc.
+      to refer to captured groups, enabling full URL rewrites like
+      ``^https://arxiv\.org/abs/(.*)$`` → ``https://arxiv.org/pdf/$1``.
 
     Attributes:
         match_type: One of RULE_MATCH_TYPES.

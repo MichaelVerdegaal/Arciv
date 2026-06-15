@@ -197,6 +197,39 @@ class TestProcessUrlRules:
         assert processed is None
         assert status == "first"
 
+    def test_regex_skip(self):
+        rules = [Rule("regex", r"^https://example\.com/admin.*", "skip", None)]
+        skipped, _ = process_url("https://example.com/admin/panel", rules)
+        kept, _ = process_url("https://example.com/public", rules)
+        assert skipped is None
+        assert kept == "https://example.com/public"
+
+    def test_regex_rewrite_with_capture_group(self):
+        rules = [
+            Rule("regex", r"^https://arxiv\.org/abs/(.*)$", "rewrite", r"https://arxiv.org/pdf/\1")
+        ]
+        processed, status = process_url("https://arxiv.org/abs/2606.14647", rules)
+        assert processed == "https://arxiv.org/pdf/2606.14647"
+        assert "rewritten" in status
+
+    def test_regex_rewrite_preserves_path_segments(self):
+        rules = [
+            Rule("regex", r"^https://example\.com/old/(.*?)(?:\?|$)", "rewrite", r"https://example.com/new/\1")
+        ]
+        processed, _ = process_url("https://example.com/old/page123", rules)
+        assert processed == "https://example.com/new/page123"
+
+    def test_regex_case_insensitive(self):
+        rules = [Rule("regex", r"example\.com", "skip", None)]
+        skipped, _ = process_url("https://EXAMPLE.COM/page", rules)
+        assert skipped is None
+
+    def test_regex_invalid_pattern_is_skipped(self):
+        rules = [Rule("regex", r"(?P<invalid", "skip", None)]
+        # Invalid regex should not crash; rule is skipped
+        kept, status = process_url("https://example.com/page", rules)
+        assert kept == "https://example.com/page"
+
 
 class TestCanonicalize:
     """The canonicalize normaliser collapses equivalent URL forms."""
