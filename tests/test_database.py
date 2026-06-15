@@ -696,6 +696,16 @@ class TestRules:
         assert "youtube.com" in patterns
         assert "https://localhost" in patterns
 
+    def test_default_subdomain_rule_skips_via_host_match(self, db):
+        # support.dfg.nl is a subdomain, so its registered domain is dfg.nl;
+        # the rule must be a host match or it never fires.
+        from arciv.core.fetch import process_url
+
+        rules = db.list_rules()
+        for url in ("https://support.dfg.nl/", "https://support.dfg.nl/support/x"):
+            processed, _ = process_url(url, rules)
+            assert processed is None
+
     def test_default_rules_keep_list_order_via_position(self, db):
         rules = db.list_rules()
         positions = [r.position for r in rules]
