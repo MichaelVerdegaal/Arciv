@@ -58,6 +58,3 @@ target/
 *.db
 *.db-shm
 *.db-wal
-
-# Local build tooling (Tailwind standalone binary, downloaded asset tarballs)
-.tooling/

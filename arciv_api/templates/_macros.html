@@ -1,3 +1,3 @@
 {% macro state_badge(state) -%}
-<span class="badge badge-sm {{ {'done': 'badge-success', 'pending': 'badge-warning', 'skipped': 'badge-ghost', 'failed': 'badge-error'}.get(state, '') }}">{{ state }}</span>
+<span class="badge {{ {'done': 'badge-success', 'pending': 'badge-warning', 'skipped': 'badge-ghost', 'failed': 'badge-error'}.get(state, '') }}">{{ state }}</span>
 {%- endmacro %}

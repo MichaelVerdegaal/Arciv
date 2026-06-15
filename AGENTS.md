@@ -85,11 +85,12 @@ underway. PLAN.md is the live roadmap.
 
 - The web app is built: a single FastAPI service (`arciv_api/`) imports the arciv library (it
   never shells out), reads through short-lived read-only connections, and renders its own HTML
-  with Jinja2 + Datastar (Tailwind/DaisyUI) — there is no separate frontend runtime. It serves
+  with Jinja2 + Datastar (Pico CSS) — there is no separate frontend runtime. It serves
   browse, page detail, domains, sources, and status, plus a `POST /archive` job flow run by a
   single in-process worker started in the app lifespan. Page markdown is rendered to HTML and
-  sanitized in Python. Assets are self-hosted: `datastar.js` and a Tailwind/DaisyUI-built
-  `app.css` (rebuild with `scripts/build_css.sh`).
+  sanitized in Python. Styling is Pico CSS (sand theme, dark mode) loaded from the jsDelivr CDN,
+  plus a small self-hosted `static/app.css` for app-specific tweaks; `datastar.js` is
+  self-hosted. There is no CSS build step.
 
 ## Context
 

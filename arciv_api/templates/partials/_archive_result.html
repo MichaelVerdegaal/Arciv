@@ -1,7 +1,7 @@
 {# Patched into #archive-result by POST /archive for skipped/empty submissions.
    A successful archive redirects instead, so this only carries problems. #}
-<div id="archive-result" class="px-4 py-2">
+<div id="archive-result" class="container-fluid">
   <div class="alert {{ {'error': 'alert-error', 'warning': 'alert-warning', 'info': 'alert-info'}.get(kind, '') }}">
-    <span>{{ message }}</span>
+    {{ message }}
   </div>
 </div>
