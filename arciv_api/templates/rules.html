@@ -41,11 +41,25 @@
     <p><strong>Use case:</strong> Target one specific URL.</p>
     <p><strong>Example:</strong> Skip <code>https://example.com/login</code> but allow <code>https://example.com/article</code>.</p>
 
-    <h3>Rewrite action note</h3>
-    <p><strong>Rewrite</strong> only swaps the hostname, not the path. For example, rewriting <code>medium.com</code> to
-      <code>scribe.rip</code> transforms <code>https://medium.com/@user/post</code> to
-      <code>https://scribe.rip/@user/post</code>. The path and query string are preserved.</p>
-    <p><strong>Limitation:</strong> To change paths (e.g., arXiv's <code>/abs/</code> to <code>/pdf/</code>), you'd need a dedicated path rewrite feature, which isn't yet supported. Consider skipping those URLs instead, or check if there's a direct PDF URL.</p>
+    <h3>regex</h3>
+    <p>Matches using a regular expression (case-insensitive). Advanced pattern matching with capture group support.</p>
+    <p><strong>Pattern format:</strong> A valid regular expression.
+      Examples: <code>^https://arxiv\.org/abs/(.*)$</code> or <code>example\.com/admin.*</code></p>
+    <p><strong>Use case:</strong> Match complex URL patterns with path manipulation using capture groups.</p>
+    <p><strong>Example with rewrite:</strong> Pattern <code>^https://arxiv\.org/abs/(.*)$</code>, replacement <code>https://arxiv.org/pdf/$1</code>
+      transforms <code>https://arxiv.org/abs/2606.14647</code> to <code>https://arxiv.org/pdf/2606.14647</code>.
+      Use <code>$1</code>, <code>$2</code>, etc. to reference captured groups.</p>
+
+    <h3>Rewrite action</h3>
+    <p><strong>Rewrite</strong> replaces the URL. Behavior depends on the match type:</p>
+    <ul>
+      <li><strong>domain/host/starts_with/exact:</strong> Replacement is treated as a hostname; the full URL host is swapped
+        while path and query are preserved. E.g., <code>medium.com</code> → <code>scribe.rip</code>
+        transforms <code>https://medium.com/@user/post</code> to <code>https://scribe.rip/@user/post</code>.</li>
+      <li><strong>regex:</strong> Replacement is a rewrite pattern that can use <code>$1</code>, <code>$2</code>, etc.
+        to reference captured groups. E.g., <code>^https://arxiv\.org/abs/(.*)$</code> → <code>https://arxiv.org/pdf/$1</code>
+        enables full URL transformation including path changes.</li>
+    </ul>
   </div>
 </details>
 

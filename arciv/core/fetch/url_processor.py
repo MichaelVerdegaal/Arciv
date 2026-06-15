@@ -366,6 +366,11 @@ def _rule_matches(rule: Rule, url: str, netloc: str, domain: str) -> bool:
         return url.startswith(rule.pattern)
     if rule.match_type == "exact":
         return url == rule.pattern
+    if rule.match_type == "regex":
+        try:
+            return bool(re.search(rule.pattern, url, re.IGNORECASE))
+        except re.error:
+            return False
     return False
 
 
@@ -375,7 +380,8 @@ def _rules_handler(rules: Sequence[Rule]) -> UrlHandler:
     The rules are walked in order (``PageDatabase.list_rules`` returns them by
     position); the first whose pattern matches wins, mirroring Bitwarden's
     match-and-action model. A skip stops the chain; a rewrite swaps the host
-    and lets processing continue."""
+    (for non-regex matches) or applies a full URL rewrite with capture groups
+    (for regex matches), then lets processing continue."""
 
     def handler(url: str) -> Skip | Rewrite | None:
         parsed = urlparse(url)
@@ -387,7 +393,24 @@ def _rules_handler(rules: Sequence[Rule]) -> UrlHandler:
             if rule.action == "skip":
                 return Skip(rule.replacement or "skipped (not content)")
             if rule.action == "rewrite" and rule.replacement:
-                return Rewrite(parsed._replace(netloc=rule.replacement).geturl())
+                if rule.match_type == "regex":
+                    # Regex rewrite: use capture groups ($1, $2, etc)
+                    try:
+                        new_url = re.sub(
+                            rule.pattern,
+                            rule.replacement,
+                            url,
+                            count=1,
+                            flags=re.IGNORECASE,
+                        )
+                        # Only rewrite if the pattern actually matched and produced a change
+                        return Rewrite(new_url) if new_url != url else None
+                    except re.error:
+                        # Invalid regex: skip this rule
+                        continue
+                else:
+                    # Non-regex rewrite: swap only the hostname
+                    return Rewrite(parsed._replace(netloc=rule.replacement).geturl())
         return None
 
     return handler
