@@ -1,10 +1,13 @@
 {% from "_macros.html" import state_badge %}
-{# Shared by GET /page/{slug} and the /progress poll. While still in flight
-   (pending = not fetched, fetched = awaiting parse) it carries the polling
-   interval; done/skipped/failed drop it, so the browser stops polling. The
-   live archive flow passes through 'fetched' during the worker's parse phase,
-   so both in-flight states must keep polling for it to reach 'done'. #}
-<div id="page-main"{% if page.state in ('pending', 'fetched') %} data-on-interval__duration.1500ms="@get('/page/{{ page.slug }}/progress')"{% endif %}>
+{# Shared by GET /page/{slug} and the /progress poll. It polls while the page is
+   in flight: either still mid-pipeline by its durable state (pending = not
+   fetched, fetched = awaiting parse) or with a live job phase from a re-fetch /
+   re-parse of an already-finished page (whose state never leaves done/skipped/
+   failed). Once nothing is active the interval is dropped, so the browser stops
+   polling on its own. #}
+{% set active = phase in ('queued', 'fetching', 'parsing') %}
+{% set in_flight = active or page.state in ('pending', 'fetched') %}
+<div id="page-main"{% if in_flight %} data-on-interval__duration.1500ms="@get('/page/{{ page.slug }}/progress')"{% endif %}>
   <p class="muted"><a href="/">← Archive</a></p>
   <h4>{{ page.title or page.url }}</h4>
   <p class="muted">
@@ -15,7 +18,32 @@
     {% if page.fetched_at %} · fetched {{ page.fetched_at[:10] }}{% endif %}
   </p>
 
-  {% if page.state == 'failed' %}
+  {# Re-run controls (dev aid for trying out rules). Hidden while in flight so
+     a job can't be double-submitted; the poll brings them back when it ends.
+     Re-parse needs raw content on disk, so it only shows once fetched. #}
+  {% if not in_flight %}
+  <div class="row">
+    <button
+      class="secondary"
+      data-on:click="@post('/page/{{ page.slug }}/refetch')"
+      title="Re-download from the network, then re-parse"
+    >Re-fetch</button>
+    {% if page.fetched %}
+    <button
+      class="secondary"
+      data-on:click="@post('/page/{{ page.slug }}/reparse')"
+      title="Re-parse the saved page from disk (no network)"
+    >Re-parse</button>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if in_flight %}
+  <div class="alert">
+    <span aria-busy="true">{% if phase %}{{ phase|capitalize }}… {% endif %}archiving
+      <a href="{{ page.url }}" target="_blank" rel="noopener noreferrer">{{ page.url }}</a>.</span>
+  </div>
+  {% elif page.state == 'failed' %}
   <div class="alert alert-error">
     Archiving failed: {{ page.fail_reason }}. The original is at
     <a href="{{ page.url }}" target="_blank" rel="noopener noreferrer">{{ page.url }}</a>.

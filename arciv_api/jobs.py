@@ -22,7 +22,7 @@ from pathlib import Path
 from loguru import logger
 
 from arciv.core.db import Page, PageDatabase, Rule
-from arciv.core.pipeline import archive_urls, fetch_urls, parse_pending
+from arciv.core.pipeline import archive_urls, fetch_urls, parse_page, parse_pending
 from arciv.core.index import register_urls
 from arciv.core.fetch import process_url, slug_for_url
 
@@ -37,6 +37,21 @@ class Phase(str, Enum):
     failed = "failed"
 
 
+class Action(str, Enum):
+    """What an enqueued job should run for its slug.
+
+    ``archive`` is the first-time flow (fetch the pending URL, then parse the
+    new pages). ``refetch`` and ``reparse`` re-run an already-known page from
+    the page detail view: ``refetch`` re-downloads from the network then
+    re-parses that one page, while ``reparse`` re-parses the raw file already
+    on disk with no network traffic — the fast loop for trying out parse rules.
+    """
+
+    archive = "archive"
+    refetch = "refetch"
+    reparse = "reparse"
+
+
 _ACTIVE = (Phase.queued, Phase.fetching, Phase.parsing)
 
 
@@ -45,6 +60,7 @@ class Job:
     slug: str
     url: str
     phase: Phase = Phase.queued
+    action: Action = Action.archive
     error: str | None = None
 
 
@@ -67,9 +83,28 @@ def _default_fetch(db_path: Path, url: str) -> None:
         fetch_urls(db, [url])
 
 
+def _default_refetch(db_path: Path, url: str) -> None:
+    """Re-download a single known page, replacing its raw file on disk."""
+    with PageDatabase(db_path) as db:
+        fetch_urls(db, [url], refetch=True)
+
+
 def _default_parse(db_path: Path) -> None:
     with PageDatabase(db_path) as db:
         parse_pending(db)
+
+
+def _default_reparse(db_path: Path, url: str) -> None:
+    """Re-parse one page from its raw file on disk, whatever its parse state.
+
+    ``parse_pending`` only touches unparsed pages, so a re-parse (or the parse
+    after a re-fetch, which leaves ``parsed_at`` set) has to target the single
+    page directly. No network traffic — everything is read from disk.
+    """
+    with PageDatabase(db_path) as db:
+        page = db.get(url)
+        if page is not None:
+            parse_page(db, page)
 
 
 def _default_archive_urls(db_path: Path, urls: list[str]) -> None:
@@ -96,7 +131,9 @@ class ArchiveQueue:
         load_rules: Callable[[Path], tuple[Rule, ...]] = _default_load_rules,
         register: Callable[[Path, str, str], Page | None] = _default_register,
         fetch: Callable[[Path, str], None] = _default_fetch,
+        refetch: Callable[[Path, str], None] = _default_refetch,
         parse: Callable[[Path], None] = _default_parse,
+        reparse: Callable[[Path, str], None] = _default_reparse,
         archive_urls: Callable[[Path, list[str]], None] = _default_archive_urls,
         maxsize: int = 128,
     ) -> None:
@@ -104,7 +141,9 @@ class ArchiveQueue:
         self._load_rules = load_rules
         self._register = register
         self._fetch = fetch
+        self._refetch = refetch
         self._parse = parse
+        self._reparse = reparse
         self._archive_urls = archive_urls
         self._queue: asyncio.Queue[str] = asyncio.Queue(maxsize=maxsize)
         self._jobs: dict[str, Job] = {}
@@ -168,6 +207,22 @@ class ArchiveQueue:
         await self._queue.put(slug)
         return slug, "queued"
 
+    async def resubmit(self, slug: str, url: str, *, refetch: bool) -> str:
+        """Re-run a known page: ``refetch`` re-downloads then re-parses, else
+        re-parses the raw file on disk only.
+
+        Idempotent — if a job for the slug is already in flight, nothing new is
+        enqueued. Returns the outcome (``"refetch"``, ``"reparse"``, or
+        ``"existing"``) for the caller to surface or ignore.
+        """
+        existing = self._jobs.get(slug)
+        if existing is not None and existing.phase in _ACTIVE:
+            return "existing"
+        action = Action.refetch if refetch else Action.reparse
+        self._jobs[slug] = Job(slug=slug, url=url, action=action)
+        await self._queue.put(slug)
+        return action.value
+
     async def _run(self) -> None:
         while True:
             slug = await self._queue.get()
@@ -176,10 +231,7 @@ class ArchiveQueue:
                 self._queue.task_done()
                 continue
             try:
-                job.phase = Phase.fetching
-                await asyncio.to_thread(self._fetch, self._db_path, job.url)
-                job.phase = Phase.parsing
-                await asyncio.to_thread(self._parse, self._db_path)
+                await self._run_job(job)
                 job.phase = Phase.done
             except asyncio.CancelledError:
                 raise
@@ -189,6 +241,28 @@ class ArchiveQueue:
                 logger.exception(f"Archive job failed for {slug}")
             finally:
                 self._queue.task_done()
+
+    async def _run_job(self, job: Job) -> None:
+        """Run one job's stages by action, advancing its phase as it goes.
+
+        A re-parse skips the network entirely; a re-fetch re-downloads then
+        re-parses that one page (its row is still parsed, so the batch parse
+        would skip it); a first-time archive fetches the pending URL then parses
+        whatever became fetched.
+        """
+        if job.action is Action.reparse:
+            job.phase = Phase.parsing
+            await asyncio.to_thread(self._reparse, self._db_path, job.url)
+            return
+        job.phase = Phase.fetching
+        if job.action is Action.refetch:
+            await asyncio.to_thread(self._refetch, self._db_path, job.url)
+            job.phase = Phase.parsing
+            await asyncio.to_thread(self._reparse, self._db_path, job.url)
+        else:
+            await asyncio.to_thread(self._fetch, self._db_path, job.url)
+            job.phase = Phase.parsing
+            await asyncio.to_thread(self._parse, self._db_path)
 
     def start(self) -> None:
         """Start the worker task (idempotent)."""

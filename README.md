@@ -61,6 +61,16 @@ arciv db dir                         # where the archive lives on disk
 arciv db remove                      # delete the database (asks first)
 ```
 
+Manage URL rules — skip or rewrite URLs before they are fetched (the same
+rules the web app edits):
+
+```bash
+arciv rules list                                   # rules, in the order they apply
+arciv rules add domain medium.com rewrite -r scribe.rip  # rewrite a host
+arciv rules add domain youtube.com skip            # skip a domain
+arciv rules remove 3                               # remove a rule by id
+```
+
 ### Global options and pipes
 
 Data goes to stdout; all logs and diagnostics go to stderr, so `arciv list | cat`
@@ -73,8 +83,9 @@ arciv --color never list
 arciv --json status    # machine-readable output on stdout
 ```
 
-With `--json`, `status` and `path` emit one JSON object, while `list` and
-`sources` emit JSONL (one object per line) so they stream into `head`/`grep`/`jq`.
+With `--json`, `status` and `path` emit one JSON object, while `list`,
+`sources`, and `rules list` emit JSONL (one object per line) so they stream
+into `head`/`grep`/`jq`.
 The commands compose with standard Unix tools:
 
 ```bash
@@ -95,7 +106,9 @@ A single self-hosted web app browses the archive and archives new URLs from the 
 live status. It is a FastAPI service that imports this library directly and renders its own
 HTML (Jinja2 + Datastar, BeerCSS) — no separate frontend runtime. Sources are managed from
 the browser too: add a directory of notes, view the files indexed and the links found in each,
-re-archive to pick up changes, or remove a source.
+re-archive to pick up changes, or remove a source. Any page's detail view can re-fetch
+(re-download then re-parse) or re-parse from disk, so URL and parse rules can be tried out
+without dropping to the CLI.
 
 ```bash
 # With Docker, mounting the same data dir the CLI writes:
