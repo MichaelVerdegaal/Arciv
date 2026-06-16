@@ -384,6 +384,8 @@ def _rule_matches(rule: Rule, url: str, netloc: str, domain: str) -> bool:
         return netloc == rule.pattern
     if rule.match_type == "starts_with":
         return url.startswith(rule.pattern)
+    if rule.match_type == "ends_with":
+        return url.endswith(rule.pattern)
     if rule.match_type == "exact":
         return url == rule.pattern
     if rule.match_type == "regex":
@@ -394,14 +396,33 @@ def _rule_matches(rule: Rule, url: str, netloc: str, domain: str) -> bool:
     return False
 
 
+def _nonregex_rewrite(rule: Rule, url: str, parsed) -> str:
+    """Compute the rewritten URL for a non-regex rewrite rule.
+
+    Rewrite replaces whatever the match selected, so the replacement stands in
+    for a different span per match type: the netloc for ``domain``/``host``,
+    the matched prefix for ``starts_with``, the matched suffix for
+    ``ends_with``, or the whole URL for ``exact``. (regex rewrites are handled
+    separately, with capture-group expansion.) The ``ends_with`` slice is safe
+    because validation guarantees a non-empty pattern."""
+    if rule.match_type in ("domain", "host"):
+        return parsed._replace(netloc=rule.replacement).geturl()
+    if rule.match_type == "starts_with":
+        return rule.replacement + url[len(rule.pattern) :]
+    if rule.match_type == "ends_with":
+        return url[: -len(rule.pattern)] + rule.replacement
+    # exact: replace the whole URL
+    return rule.replacement
+
+
 def _rules_handler(rules: Sequence[Rule]) -> UrlHandler:
     """Build a handler that applies the first matching user rule.
 
     The rules are walked in order (``PageDatabase.list_rules`` returns them by
-    position); the first whose pattern matches wins, mirroring Bitwarden's
-    match-and-action model. A skip stops the chain; a rewrite swaps the host
-    (for non-regex matches) or applies a full URL rewrite with capture groups
-    (for regex matches), then lets processing continue."""
+    position); the first whose pattern matches wins. A skip stops the chain; a
+    rewrite replaces the matched span (see :func:`_nonregex_rewrite`) or, for a
+    regex match, applies a full URL rewrite with capture groups, then lets
+    processing continue."""
 
     def handler(url: str) -> Skip | Rewrite | None:
         parsed = urlparse(url)
@@ -430,8 +451,7 @@ def _rules_handler(rules: Sequence[Rule]) -> UrlHandler:
                         # Invalid regex: skip this rule
                         continue
                 else:
-                    # Non-regex rewrite: swap only the hostname
-                    return Rewrite(parsed._replace(netloc=rule.replacement).geturl())
+                    return Rewrite(_nonregex_rewrite(rule, url, parsed))
         return None
 
     return handler
