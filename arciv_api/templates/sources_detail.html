@@ -1,27 +1,26 @@
 {% extends "base.html" %}
+{% set active = 'sources' %}
 {% from "_macros.html" import state_badge %}
 {% block title %}{{ source.name }} — Arciv{% endblock %}
 {% block main %}
 <p class="muted"><a href="/sources">← Sources</a></p>
-<h1>{{ source.name }}</h1>
+<h4>{{ source.name }}</h4>
 <p class="muted">
   <code>{{ source.path }}</code>
   {% if source.added_at %} · added {{ source.added_at[:10] }}{% endif %}
-  {% if archiving %} · <span aria-busy="true">archiving…</span>{% endif %}
+  {% if archiving %} · archiving <progress class="circle small"></progress>{% endif %}
 </p>
 
 <div id="source-result"></div>
 
-<div class="row">
-  <button
-    class="secondary"
-    data-on:click="@post('/sources/{{ source.name|urlencode }}/archive')"
-  >Re-archive</button>
-  <button
-    class="secondary"
-    data-on:click="@post('/sources/{{ source.name|urlencode }}/delete')"
-  >Remove</button>
-</div>
+<nav class="no-space">
+  <button class="small" data-on:click="@post('/sources/{{ source.name|urlencode }}/archive')">
+    <i>refresh</i><span>Re-archive</span>
+  </button>
+  <button class="small" data-on:click="@post('/sources/{{ source.name|urlencode }}/delete')">
+    <i>delete</i><span>Remove</span>
+  </button>
+</nav>
 
 {% if archiving %}
 <p class="muted">Fetching and parsing in the background. Reload to see progress.</p>
@@ -35,10 +34,10 @@
 {% else %}
 <p class="muted">{{ files|length }} file(s) with links.</p>
 {% for file_path, pages in files.items() %}
-<section>
-  <h2><code>{{ file_path }}</code></h2>
+<article class="border round">
+  <h6><code>{{ file_path }}</code></h6>
   <div class="overflow-x">
-    <table class="striped">
+    <table>
       <thead><tr><th>Title</th><th>Domain</th><th>State</th><th>Link</th></tr></thead>
       <tbody>
         {% for p in pages %}
@@ -52,7 +51,7 @@
       </tbody>
     </table>
   </div>
-</section>
+</article>
 {% endfor %}
 {% endif %}
 {% endblock %}

@@ -1,7 +1,8 @@
 {% extends "base.html" %}
+{% set active = 'rules' %}
 {% block title %}Arciv — Rules{% endblock %}
 {% block main %}
-<h1>Rules</h1>
+<h4>Rules</h4>
 <p class="muted">
   URL rules run top to bottom; the first match wins. <strong>skip</strong> drops
   a URL (the reason is shown when archiving); <strong>rewrite</strong> swaps the
@@ -11,8 +12,8 @@
 
 <details>
   <summary>Match types explained</summary>
-  <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 4px; margin-top: 1rem;">
-    <h3 style="margin-top: 0;">domain</h3>
+  <article class="border round">
+    <h6>domain</h6>
     <p>Matches a site and all its subdomains (registered domain level).</p>
     <p><strong>Pattern format:</strong> Just the domain, no <code>https://</code> or path.
       Example: <code>youtube.com</code> matches <code>youtube.com</code>,
@@ -20,28 +21,28 @@
     <p><strong>Use case:</strong> Skip or rewrite an entire site and all subdomains.</p>
     <p><strong>Example:</strong> Skip all Medium articles: pattern <code>medium.com</code>, action <code>skip</code>.</p>
 
-    <h3>host</h3>
+    <h6>host</h6>
     <p>Matches one exact hostname (including port if specified).</p>
     <p><strong>Pattern format:</strong> The hostname only, no <code>https://</code> or path. Include port if needed.
       Examples: <code>api.github.com</code> or <code>localhost:3000</code></p>
     <p><strong>Use case:</strong> Target a specific subdomain without affecting others on the same registered domain.</p>
     <p><strong>Example:</strong> Skip <code>app.powerbi.com</code> but allow <code>learn.powerbi.com</code>.</p>
 
-    <h3>starts_with</h3>
+    <h6>starts_with</h6>
     <p>Matches URLs that begin with the pattern string (path-aware).</p>
     <p><strong>Pattern format:</strong> Include <code>https://</code> and any path prefix.
       Examples: <code>https://github.com/pytorch</code> or <code>https://localhost:8000</code></p>
     <p><strong>Use case:</strong> Match a specific path or subdirectory, or all URLs from a local server.</p>
     <p><strong>Example:</strong> Skip <code>https://localhost</code> to exclude local development URLs.</p>
 
-    <h3>exact</h3>
+    <h6>exact</h6>
     <p>Matches the complete URL exactly (including path, query, and scheme).</p>
     <p><strong>Pattern format:</strong> The full URL with <code>https://</code>, path, and query.
       Example: <code>https://example.com/page</code></p>
     <p><strong>Use case:</strong> Target one specific URL.</p>
     <p><strong>Example:</strong> Skip <code>https://example.com/login</code> but allow <code>https://example.com/article</code>.</p>
 
-    <h3>regex</h3>
+    <h6>regex</h6>
     <p>Matches using a regular expression (case-insensitive). Advanced pattern matching with capture group support.</p>
     <p><strong>Pattern format:</strong> A valid regular expression.
       Examples: <code>^https://arxiv\.org/abs/(.*)$</code> or <code>example\.com/admin.*</code></p>
@@ -50,7 +51,7 @@
       transforms <code>https://arxiv.org/abs/2606.14647</code> to <code>https://arxiv.org/pdf/2606.14647</code>.
       Use <code>$1</code>, <code>$2</code>, etc. to reference captured groups.</p>
 
-    <h3>Rewrite action</h3>
+    <h6>Rewrite action</h6>
     <p><strong>Rewrite</strong> replaces the URL. Behavior depends on the match type:</p>
     <ul>
       <li><strong>domain/host/starts_with/exact:</strong> Replacement is treated as a hostname; the full URL host is swapped
@@ -60,7 +61,7 @@
         to reference captured groups. E.g., <code>^https://arxiv\.org/abs/(.*)$</code> → <code>https://arxiv.org/pdf/$1</code>
         enables full URL transformation including path changes.</li>
     </ul>
-  </div>
+  </article>
 </details>
 
 <div id="rule-result"></div>
@@ -68,38 +69,38 @@
 {# Plain div, not a form: the inputs bind to Datastar signals and the button
    POSTs them as JSON, so there is no native form submission to suppress. #}
 <div class="filters" data-signals="{match_type: 'domain', pattern: '', action: 'skip', replacement: ''}">
-  <label>
-    Match
+  <div class="field label border small">
     <select data-bind:match_type>
       {% for mt in match_types %}
       <option value="{{ mt }}">{{ mt }}</option>
       {% endfor %}
     </select>
-  </label>
-  <label>
-    Pattern
-    <input data-bind:pattern placeholder="youtube.com" />
-  </label>
-  <label>
-    Action
+    <label class="active">Match</label>
+  </div>
+  <div class="field label border small">
+    <input data-bind:pattern placeholder=" " />
+    <label>Pattern</label>
+  </div>
+  <div class="field label border small">
     <select data-bind:action>
       {% for a in actions %}
       <option value="{{ a }}">{{ a }}</option>
       {% endfor %}
     </select>
-  </label>
-  <label>
-    Reason / new host
-    <input data-bind:replacement placeholder="not content / scribe.rip" />
-  </label>
-  <button type="button" data-on:click="@post('/rules')">Add rule</button>
+    <label class="active">Action</label>
+  </div>
+  <div class="field label border small max">
+    <input data-bind:replacement placeholder=" " />
+    <label>Reason / new host</label>
+  </div>
+  <button data-on:click="@post('/rules')"><i>add</i><span>Add rule</span></button>
 </div>
 
 {% if not rules %}
 <p class="muted">No rules.</p>
 {% else %}
 <div class="overflow-x">
-  <table class="striped">
+  <table>
     <thead>
       <tr>
         <th>#</th><th>Match</th><th>Pattern</th>
@@ -115,10 +116,9 @@
         <td>{{ rule.action }}</td>
         <td class="muted">{{ rule.replacement or '—' }}</td>
         <td>
-          <button
-            class="secondary"
-            data-on:click="@post('/rules/{{ rule.id }}/delete')"
-          >Delete</button>
+          <button class="small" data-on:click="@post('/rules/{{ rule.id }}/delete')">
+            <i>delete</i><span>Delete</span>
+          </button>
         </td>
       </tr>
       {% endfor %}

@@ -1,20 +1,23 @@
 {% extends "base.html" %}
+{% set active = 'domains' %}
 {% block title %}Arciv — Domains{% endblock %}
 {% block main %}
-<h1>Domains</h1>
+<h4>Domains</h4>
 {% if not domains %}
 <p class="muted">No domains yet.</p>
 {% else %}
-<table class="striped">
-  <thead><tr><th>Domain</th><th>Pages</th></tr></thead>
-  <tbody>
-    {% for name, count in domains %}
-    <tr>
-      <td><a href="/?domain={{ name|urlencode }}">{{ name or '(unknown)' }}</a></td>
-      <td class="muted">{{ count }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="overflow-x">
+  <table>
+    <thead><tr><th>Domain</th><th>Pages</th></tr></thead>
+    <tbody>
+      {% for name, count in domains %}
+      <tr>
+        <td><a href="/?domain={{ name|urlencode }}">{{ name or '(unknown)' }}</a></td>
+        <td class="muted">{{ count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endif %}
 {% endblock %}

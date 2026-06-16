@@ -1,38 +1,41 @@
 {% extends "base.html" %}
+{% set active = 'status' %}
 {% block title %}Arciv — Status{% endblock %}
 {% block main %}
-<h1>Status</h1>
+<h4>Status</h4>
 
-<div class="stats">
+<div class="grid">
   {% for label, key, tone in [
       ('Total', 'total', ''),
-      ('Parsed', 'parsed', 'text-success'),
+      ('Parsed', 'parsed', 'green-text'),
       ('Pending', 'pending', ''),
       ('Awaiting parse', 'awaiting_parse', ''),
-      ('Fetch failed', 'fetch_failed', 'text-error'),
-      ('Parse rejected', 'parse_rejected', 'text-error')] %}
-  <article class="stat">
-    <div class="stat-label">{{ label }}</div>
-    <div class="stat-value {{ tone }}">{{ counts[key] }}</div>
+      ('Fetch failed', 'fetch_failed', 'red-text'),
+      ('Parse rejected', 'parse_rejected', 'red-text')] %}
+  <article class="s6 m4 l2 center-align">
+    <div class="muted small-text upper">{{ label }}</div>
+    <h4 class="no-margin {{ tone }}">{{ counts[key] }}</h4>
   </article>
   {% endfor %}
 </div>
 
-<h2>Failures by domain</h2>
+<h5>Failures by domain</h5>
 {% if not failures %}
 <p class="muted">No failures.</p>
 {% else %}
-<table class="striped">
-  <thead><tr><th>Domain</th><th>Reason</th><th>Count</th></tr></thead>
-  <tbody>
-    {% for domain, reason, count in failures %}
-    <tr>
-      <td>{{ domain }}</td>
-      <td class="muted">{{ reason }}</td>
-      <td>{{ count }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="overflow-x">
+  <table>
+    <thead><tr><th>Domain</th><th>Reason</th><th>Count</th></tr></thead>
+    <tbody>
+      {% for domain, reason, count in failures %}
+      <tr>
+        <td>{{ domain }}</td>
+        <td class="muted">{{ reason }}</td>
+        <td>{{ count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endif %}
 {% endblock %}

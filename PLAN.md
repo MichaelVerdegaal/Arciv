@@ -13,7 +13,7 @@ The project splits into two deployables to keep responsibilities isolated:
    tool (`uv tool install`), deliberately **not** containerized.
 2. **Web app** (`arciv_api/`) — one Python (FastAPI) service that imports the arciv library
    (never shells out), reads through read-only connections, and renders its own HTML with
-   Jinja2 + Datastar (Pico CSS). Gets a dedicated container. (Originally planned as a
+   Jinja2 + Datastar (BeerCSS). Gets a dedicated container. (Originally planned as a
    separate backend plus an Astro frontend; collapsing to one server-rendered service dropped
    the second runtime and the internal-vs-public URL juggling the split needed.)
 
@@ -73,7 +73,7 @@ from a clone).
 
 A web UI is a must-have: the CLI alone is too annoying for viewing stored results, and
 browsing the archive is the best way to gain insight into what was fetched earlier. Built as a
-single server-rendered FastAPI service (Jinja2 + Datastar, Pico CSS), deliberately not
+single server-rendered FastAPI service (Jinja2 + Datastar, BeerCSS), deliberately not
 Astro: Arciv is heading toward CLI parity in the browser (archive a URL with live status),
 which is a reactive webapp, not a static content showcase. References:
 

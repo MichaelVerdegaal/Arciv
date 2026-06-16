@@ -1,7 +1,8 @@
 {% extends "base.html" %}
+{% set active = 'sources' %}
 {% block title %}Arciv — Sources{% endblock %}
 {% block main %}
-<h1>Sources</h1>
+<h4>Sources</h4>
 <p class="muted">
   A source is a directory of notes (<code>.md</code>, <code>.txt</code>,
   <code>.rst</code>) Arciv indexes for links. Adding one indexes it and
@@ -14,41 +15,41 @@
 {# Plain div, not a form: the inputs bind to Datastar signals and the button
    POSTs them as JSON, so there is no native form submission to suppress. #}
 <div class="filters" data-signals="{name: '', path: ''}">
-  <label>
-    Name
-    <input data-bind:name placeholder="notes" />
-  </label>
-  <label>
-    Directory path
-    <input data-bind:path placeholder="/home/me/vault/notes" />
-  </label>
-  <button type="button" data-on:click="@post('/sources')">Add &amp; archive</button>
+  <div class="field label border small">
+    <input data-bind:name placeholder=" " />
+    <label>Name</label>
+  </div>
+  <div class="field label border small max">
+    <input data-bind:path placeholder=" " />
+    <label>Directory path</label>
+  </div>
+  <button data-on:click="@post('/sources')"><i>add</i><span>Add &amp; archive</span></button>
 </div>
 
 {% if not sources %}
 <p class="muted">No sources registered.</p>
 {% else %}
 <div class="overflow-x">
-  <table class="striped">
+  <table>
     <thead><tr><th>Name</th><th>Path</th><th>Pages</th><th></th></tr></thead>
     <tbody>
       {% for source, count in sources %}
       <tr>
         <td>
           <a href="/sources/{{ source.name|urlencode }}">{{ source.name }}</a>
-          {% if source.name in archiving %}<span class="muted" aria-busy="true"> archiving…</span>{% endif %}
+          {% if source.name in archiving %}<progress class="circle small"></progress>{% endif %}
         </td>
         <td class="muted"><code>{{ source.path }}</code></td>
         <td class="muted">{{ count }}</td>
-        <td class="row">
-          <button
-            class="secondary"
-            data-on:click="@post('/sources/{{ source.name|urlencode }}/archive')"
-          >Re-archive</button>
-          <button
-            class="secondary"
-            data-on:click="@post('/sources/{{ source.name|urlencode }}/delete')"
-          >Remove</button>
+        <td>
+          <nav class="no-space">
+            <button class="small" data-on:click="@post('/sources/{{ source.name|urlencode }}/archive')">
+              <i>refresh</i><span>Re-archive</span>
+            </button>
+            <button class="small" data-on:click="@post('/sources/{{ source.name|urlencode }}/delete')">
+              <i>delete</i><span>Remove</span>
+            </button>
+          </nav>
         </td>
       </tr>
       {% endfor %}

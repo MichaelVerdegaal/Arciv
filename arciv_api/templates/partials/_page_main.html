@@ -9,7 +9,7 @@
 {% set in_flight = active or page.state in ('pending', 'fetched') %}
 <div id="page-main"{% if in_flight %} data-on-interval__duration.1500ms="@get('/page/{{ page.slug }}/progress')"{% endif %}>
   <p class="muted"><a href="/">← Archive</a></p>
-  <h1>{{ page.title or page.url }}</h1>
+  <h4>{{ page.title or page.url }}</h4>
   <p class="muted">
     {{ state_badge(page.state) }}
     · <a href="{{ page.url }}" target="_blank" rel="noopener noreferrer">{{ page.domain }} ↗</a>
@@ -39,9 +39,12 @@
   {% endif %}
 
   {% if in_flight %}
-  <div class="alert">
-    <span aria-busy="true">{% if phase %}{{ phase|capitalize }}… {% endif %}archiving
-      <a href="{{ page.url }}" target="_blank" rel="noopener noreferrer">{{ page.url }}</a>.</span>
+  <div class="alert alert-info">
+    <div class="row">
+      <progress class="circle small"></progress>
+      <span>{% if phase %}{{ phase|capitalize }}… {% endif %}archiving
+        <a href="{{ page.url }}" target="_blank" rel="noopener noreferrer">{{ page.url }}</a>.</span>
+    </div>
   </div>
   {% elif page.state == 'failed' %}
   <div class="alert alert-error">
