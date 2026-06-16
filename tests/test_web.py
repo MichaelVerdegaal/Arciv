@@ -14,7 +14,7 @@ import arciv_api.config as api_config
 from arciv.core.db import Page, PageDatabase, Source
 from arciv.core.fetch import process_url, slug_for_url
 from arciv_api.app import app
-from arciv_api.jobs import ArchiveQueue, Job, Phase
+from arciv_api.jobs import Action, ArchiveQueue, Job, Phase
 
 # The Datastar client always sends this header; the backend reads signals only
 # when it is present, so the tests simulate it.
@@ -64,6 +64,33 @@ def _fake_parse(db_path) -> None:
             md.write_text("# Archived\n\nBody text.", encoding="utf-8")
 
 
+def _fake_refetch(db_path, url: str) -> None:
+    """Stand in for a network re-download: bump fetched_at, leave parsed_at."""
+    with PageDatabase(db_path) as db:
+        page = db.get(url)
+        if page is None:
+            return
+        page.fetched_at = "2026-06-15T00:00:00+00:00"
+        page.content_type = "html"
+        db.upsert(page)
+
+
+def _fake_reparse(db_path, url: str) -> None:
+    """Stand in for a from-disk re-parse of one page, whatever its parse state."""
+    with PageDatabase(db_path) as db:
+        page = db.get(url)
+        if page is None:
+            return
+        page.title = f"Reparsed {page.domain}"
+        page.word_count = 321
+        page.parsed_at = "2026-06-15T00:01:00+00:00"
+        page.fail_reason = None
+        db.upsert(page)
+        md = api_config.SAVED_DIR / page.slug / "page.md"
+        md.parent.mkdir(parents=True, exist_ok=True)
+        md.write_text("# Reparsed\n\nFresh body.", encoding="utf-8")
+
+
 def _fake_fetch_fail(db_path, url: str) -> None:
     with PageDatabase(db_path) as db:
         page = db.get(url)
@@ -101,6 +128,8 @@ def client(archive):
     with TestClient(app) as test_client:
         app.state.archive._fetch = _fake_fetch
         app.state.archive._parse = _fake_parse
+        app.state.archive._refetch = _fake_refetch
+        app.state.archive._reparse = _fake_reparse
         # Source archival runs a batch fetch+parse in the background; keep it
         # off a real browser too.
         app.state.archive._archive_urls = _fake_archive_urls
@@ -238,6 +267,25 @@ class TestPageDetail:
         assert "event: datastar-patch-elements" in res.text
         assert 'id="page-main"' in res.text
 
+    def test_done_page_shows_refetch_and_reparse_buttons(self, client, archive):
+        page = _page(
+            "https://a.com/post", parsed_at="2026-06-11T01:00:00", title="Post"
+        )
+        _seed(archive, [page])
+        _write_md(archive, page, "# Heading\n\nbody")
+        res = client.get(f"/page/{page.slug}")
+        assert f"/page/{page.slug}/refetch" in res.text
+        assert f"/page/{page.slug}/reparse" in res.text
+
+    def test_unfetched_page_hides_reparse_button(self, client, archive):
+        # Re-parse needs raw content on disk; a never-fetched (failed) page has
+        # none, so only Re-fetch is offered.
+        page = _page("https://a.com/x", fetched_at=None, fail_reason="timeout")
+        _seed(archive, [page])
+        res = client.get(f"/page/{page.slug}")
+        assert f"/page/{page.slug}/refetch" in res.text
+        assert f"/page/{page.slug}/reparse" not in res.text
+
 
 class TestDashboards:
     def test_domains(self, client, archive):
@@ -297,6 +345,108 @@ class TestArchivePost:
         _seed(archive, [])
         res = client.post("/archive", json={"url": "  "}, headers=_DS)
         assert "Enter a URL" in res.text
+
+
+class TestPageRerun:
+    def test_refetch_redirects_and_enqueues_job(self, client, archive):
+        page = _page(
+            "https://a.com/post", parsed_at="2026-06-11T01:00:00", title="Post"
+        )
+        _seed(archive, [page])
+        res = client.post(f"/page/{page.slug}/refetch", json={}, headers=_DS)
+        assert res.status_code == 200
+        assert f"/page/{page.slug}" in res.text  # redirect back to the detail
+        assert app.state.archive.job_for(page.slug) is not None
+
+    def test_reparse_redirects_and_enqueues_job(self, client, archive):
+        page = _page(
+            "https://a.com/post", parsed_at="2026-06-11T01:00:00", title="Post"
+        )
+        _seed(archive, [page])
+        res = client.post(f"/page/{page.slug}/reparse", json={}, headers=_DS)
+        assert res.status_code == 200
+        assert f"/page/{page.slug}" in res.text
+
+    def test_rerun_unknown_slug_redirects_without_a_job(self, client, archive):
+        _seed(archive, [])
+        res = client.post("/page/nope-00000000/reparse", json={}, headers=_DS)
+        assert res.status_code == 200
+        assert "/page/nope-00000000" in res.text
+        assert app.state.archive.job_for("nope-00000000") is None
+
+
+class TestRerunWorker:
+    def test_refetch_redownloads_then_reparses(self, archive):
+        db_path = archive / "arciv.db"
+        url = "https://example.com/post"
+        _seed(archive, [_page(url, parsed_at="2026-06-11T01:00:00", title="Old")])
+        calls: list[str] = []
+
+        def rec_refetch(db_path, url):
+            calls.append("refetch")
+            _fake_refetch(db_path, url)
+
+        def rec_reparse(db_path, url):
+            calls.append("reparse")
+            _fake_reparse(db_path, url)
+
+        async def run():
+            queue = ArchiveQueue(db_path, refetch=rec_refetch, reparse=rec_reparse)
+            queue.start()
+            slug = slug_for_url(url)
+            outcome = await queue.resubmit(slug, url, refetch=True)
+            assert outcome == "refetch"
+            await queue._queue.join()
+            await queue.stop()
+            return slug, queue.job_for(slug)
+
+        slug, job = asyncio.run(run())
+        assert job.phase is Phase.done
+        assert calls == ["refetch", "reparse"]
+        with PageDatabase(db_path, read_only=True) as db:
+            assert db.get_by_slug(slug).title == "Reparsed example.com"
+
+    def test_reparse_skips_fetch(self, archive):
+        db_path = archive / "arciv.db"
+        url = "https://example.com/post"
+        _seed(archive, [_page(url, parsed_at="2026-06-11T01:00:00")])
+
+        def boom_fetch(db_path, url):
+            raise AssertionError("re-parse must not touch the network")
+
+        async def run():
+            queue = ArchiveQueue(
+                db_path,
+                fetch=boom_fetch,
+                refetch=boom_fetch,
+                reparse=_fake_reparse,
+            )
+            queue.start()
+            slug = slug_for_url(url)
+            outcome = await queue.resubmit(slug, url, refetch=False)
+            assert outcome == "reparse"
+            await queue._queue.join()
+            await queue.stop()
+            return slug, queue.job_for(slug)
+
+        slug, job = asyncio.run(run())
+        assert job.phase is Phase.done
+        with PageDatabase(db_path, read_only=True) as db:
+            assert db.get_by_slug(slug).title == "Reparsed example.com"
+
+    def test_resubmit_in_flight_is_not_requeued(self, archive):
+        db_path = archive / "arciv.db"
+        url = "https://example.com/inflight"
+        slug = slug_for_url(url)
+
+        async def run():
+            queue = ArchiveQueue(db_path)
+            queue._jobs[slug] = Job(
+                slug=slug, url=url, phase=Phase.parsing, action=Action.reparse
+            )
+            return await queue.resubmit(slug, url, refetch=False)
+
+        assert asyncio.run(run()) == "existing"
 
 
 class TestWorker:
