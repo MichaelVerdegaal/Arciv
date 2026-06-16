@@ -39,9 +39,12 @@
   {% endif %}
 
   {% if in_flight %}
-  <div class="alert">
-    <span aria-busy="true">{% if phase %}{{ phase|capitalize }}… {% endif %}archiving
-      <a href="{{ page.url }}" target="_blank" rel="noopener noreferrer">{{ page.url }}</a>.</span>
+  <div class="alert alert-info">
+    <div class="row">
+      <progress class="circle small"></progress>
+      <span>{% if phase %}{{ phase|capitalize }}… {% endif %}archiving
+        <a href="{{ page.url }}" target="_blank" rel="noopener noreferrer">{{ page.url }}</a>.</span>
+    </div>
   </div>
   {% elif page.state == 'failed' %}
   <div class="alert alert-error">
@@ -57,14 +60,6 @@
     content) rather than genuinely short text. Open the
     <a href="{{ page.url }}" target="_blank" rel="noopener noreferrer">original</a>
     to judge.
-  </div>
-  {% elif page.state in ('pending', 'fetched') %}
-  <div class="alert alert-info">
-    <div class="row">
-      <progress class="circle small"></progress>
-      <span>{% if phase %}{{ phase|capitalize }}… {% endif %}archiving
-        <a href="{{ page.url }}" target="_blank" rel="noopener noreferrer">{{ page.url }}</a>.</span>
-    </div>
   </div>
   {% endif %}
 
