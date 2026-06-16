@@ -22,6 +22,13 @@ Individual pipeline stages, mainly for development:
     arciv fetch                     # download pending indexed URLs
     arciv parse                     # convert fetched pages to markdown
 
+URL rules (skip or rewrite URLs before they are fetched):
+
+    arciv rules list                # list rules in the order they apply
+    arciv rules add domain x.com skip            # add a skip rule
+    arciv rules add domain medium.com rewrite -r scribe.rip
+    arciv rules remove 3            # remove the rule with that id
+
 Inspection:
 
     arciv status                    # pipeline counts + failure summary
@@ -51,7 +58,8 @@ from loguru import logger
 from typer.core import TyperGroup
 
 from arciv.settings import DATA_DIR, DB_PATH, SAVED_DIR, configure_logger
-from arciv.core.db import PageDatabase, Source
+from arciv.core.db import PageDatabase, Rule, Source
+from arciv.core.db.models import RULE_ACTIONS, RULE_MATCH_TYPES
 from arciv.core.fetch import process_url
 from arciv.core.pipeline import (
     ArchiveResult,
@@ -131,6 +139,10 @@ cli = typer.Typer(
 )
 db_app = typer.Typer(help="Inspect or manage the database file.", no_args_is_help=True)
 cli.add_typer(db_app, name="db")
+rules_app = typer.Typer(
+    help="View, add, and remove URL-processing rules.", no_args_is_help=True
+)
+cli.add_typer(rules_app, name="rules")
 
 
 class ColorWhen(str, Enum):
@@ -648,6 +660,122 @@ def db_remove(
     if remove_files and SAVED_DIR.is_dir():
         shutil.rmtree(SAVED_DIR)
         emit(f"Removed archived files under {SAVED_DIR}")
+
+
+@rules_app.command(name="list")
+def rules_list() -> None:
+    """List URL rules in the order they are applied (first match wins).
+
+    Columns are tab-separated — id, match type, pattern, action, and the
+    replacement/reason — so the output pipes cleanly into grep/cut/awk. The
+    leading id is what ``arciv rules remove`` takes. With --json, emits JSONL
+    (one object per line).
+    """
+    with PageDatabase(DB_PATH) as db:
+        rules = db.list_rules()
+    if json_output():
+        for rule in rules:
+            emit_json(
+                {
+                    "id": rule.id,
+                    "match_type": rule.match_type,
+                    "pattern": rule.pattern,
+                    "action": rule.action,
+                    "replacement": rule.replacement,
+                    "position": rule.position,
+                }
+            )
+        return
+    if not rules:
+        # A hint, not data: keep it off stdout so pipes stay clean
+        logger.info(
+            "No rules defined. Add one with: arciv rules add <match> <pattern> <action>"
+        )
+        return
+    for rule in rules:
+        emit(
+            f"{rule.id}\t{rule.match_type}\t{rule.pattern}\t"
+            f"{rule.action}\t{rule.replacement or ''}"
+        )
+
+
+@rules_app.command(name="add")
+def rules_add(
+    match_type: str = typer.Argument(
+        ..., help=f"How to match the URL: one of {', '.join(RULE_MATCH_TYPES)}."
+    ),
+    pattern: str = typer.Argument(..., help="The string compared against the URL."),
+    action: str = typer.Argument(
+        ..., help=f"What to do on a match: one of {', '.join(RULE_ACTIONS)}."
+    ),
+    replacement: str | None = typer.Option(
+        None,
+        "--replacement",
+        "-r",
+        help=(
+            "For rewrite: the new host (or regex replacement). "
+            "For skip: the reason shown when archiving (optional)."
+        ),
+    ),
+) -> None:
+    """Append a URL rule (a match plus an action).
+
+    New rules go to the end of the list, so adding one never reorders the
+    existing rules. See ``arciv rules list`` for the order they are applied.
+    """
+    pattern = pattern.strip()
+    replacement = (replacement or "").strip() or None
+
+    if match_type not in RULE_MATCH_TYPES:
+        _fail(
+            f"Unknown match type: {match_type!r}. "
+            f"Choose one of: {', '.join(RULE_MATCH_TYPES)}.",
+            code=EXIT_USAGE,
+        )
+    if action not in RULE_ACTIONS:
+        _fail(
+            f"Unknown action: {action!r}. Choose one of: {', '.join(RULE_ACTIONS)}.",
+            code=EXIT_USAGE,
+        )
+    if not pattern:
+        _fail("Enter a pattern to match.", code=EXIT_USAGE)
+    if action == "rewrite" and not replacement:
+        _fail("A rewrite rule needs a replacement host.", code=EXIT_USAGE)
+
+    with PageDatabase(DB_PATH) as db:
+        rule = db.add_rule(
+            Rule(
+                match_type=match_type,
+                pattern=pattern,
+                action=action,
+                replacement=replacement,
+            )
+        )
+    logger.info(f"Added rule {rule.id}: {match_type} {pattern!r} -> {action}")
+    if json_output():
+        emit_json(
+            {
+                "id": rule.id,
+                "match_type": rule.match_type,
+                "pattern": rule.pattern,
+                "action": rule.action,
+                "replacement": rule.replacement,
+                "position": rule.position,
+            }
+        )
+
+
+@rules_app.command(name="remove")
+def rules_remove(
+    rule_id: int = typer.Argument(
+        ..., help="The id of the rule to remove (see 'arciv rules list')."
+    ),
+) -> None:
+    """Remove a URL rule by its id."""
+    with PageDatabase(DB_PATH) as db:
+        if not db.remove_rule(rule_id):
+            _fail(f"No rule with id {rule_id}.", code=EXIT_NOINPUT)
+    logger.info(f"Removed rule {rule_id}")
 
 
 if __name__ == "__main__":
