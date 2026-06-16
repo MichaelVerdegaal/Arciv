@@ -2,17 +2,17 @@
 
 import pytest
 
-from arciv.core.notes import MarkdownNote, Note, load_note, load_notes
+from arciv.core.notes import Note, load_note, load_notes
 
 
 @pytest.fixture
 def make_note(tmp_path):
-    """Factory writing a markdown note to disk and returning a MarkdownNote."""
+    """Factory writing a note to disk and returning a Note."""
 
-    def _make(body: str, name: str = "note.md") -> MarkdownNote:
+    def _make(body: str, name: str = "note.txt") -> Note:
         path = tmp_path / name
         path.write_text(body, encoding="utf-8")
-        return MarkdownNote(path)
+        return Note(path)
 
     return _make
 
@@ -52,37 +52,7 @@ class TestExtractUrls:
         assert note.extract_urls() == []
 
 
-class TestNoteContent:
-    def test_frontmatter_is_stripped(self, make_note):
-        note = make_note(
-            "---\ntags: [daily]\nurl: https://frontmatter.example.com\n---\n"
-            "# Daily\nhttps://example.com/real"
-        )
-        assert note.extract_urls() == ["https://example.com/real"]
-
-    def test_content_before_first_h1_is_ignored(self, make_note):
-        note = make_note(
-            "preamble https://example.com/preamble\n# Heading\nhttps://example.com/body"
-        )
-        assert note.extract_urls() == ["https://example.com/body"]
-
-    def test_non_markdown_file_is_rejected(self, tmp_path):
-        path = tmp_path / "note.txt"
-        path.write_text("text", encoding="utf-8")
-        with pytest.raises(ValueError):
-            MarkdownNote(path)
-
-
 class TestLoadNotes:
-    def test_load_note_dispatches_by_extension(self, tmp_path):
-        md = tmp_path / "note.md"
-        md.write_text("# Title\ntext", encoding="utf-8")
-        txt = tmp_path / "note.txt"
-        txt.write_text("text", encoding="utf-8")
-
-        assert isinstance(load_note(md), MarkdownNote)
-        assert type(load_note(txt)) is Note
-
     def test_txt_note_extracts_urls(self, tmp_path):
         path = tmp_path / "note.txt"
         path.write_text("See https://example.com/article today.", encoding="utf-8")

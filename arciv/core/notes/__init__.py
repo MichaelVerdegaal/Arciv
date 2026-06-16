@@ -1,32 +1,24 @@
 from pathlib import Path
 
 from .note import NOTE_EXTENSIONS, Note
-from .markdown_note import MarkdownNote
 
 __all__ = [
     "NOTE_EXTENSIONS",
     "Note",
-    "MarkdownNote",
     "load_note",
     "load_notes",
 ]
 
 
 def load_note(note_path: str | Path) -> Note:
-    """Create a note from a file, picking the class by extension.
-
-    Lives here (not on Note) because Note can't reference its own
-    subclasses without a circular import.
+    """Create a Note from a file.
 
     Args:
         note_path: Path to the note file.
 
     Returns:
-        A MarkdownNote for ``.md`` files, a plain Note otherwise.
+        A Note instance.
     """
-    note_path = Path(note_path)
-    if note_path.suffix == ".md":
-        return MarkdownNote(note_path)
     return Note(note_path)
 
 
