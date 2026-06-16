@@ -29,15 +29,10 @@ body.dark {
 }
 
 /* The deep primary is too dark to read as text on the dark surface, so use the
-   light secondary tint for content hyperlinks and for outline buttons. Filled
-   buttons keep their own (higher-specificity) colors. */
+   light secondary tint for content hyperlinks. Buttons stay filled (primary bg,
+   white text) rather than outline/text styles, which would be illegible. */
 main a {
   color: var(--secondary);
-}
-.button.border,
-button.border {
-  color: var(--secondary);
-  border-color: var(--secondary);
 }
 
 /* --- Status pills --------------------------------------------------------- */
@@ -79,7 +74,7 @@ button.border {
 .filters {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
   gap: 0.75rem;
   margin-bottom: 1.25rem;
 }

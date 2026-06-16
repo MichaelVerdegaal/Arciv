@@ -14,10 +14,10 @@
 <div id="source-result"></div>
 
 <nav class="no-space">
-  <button class="border small" data-on:click="@post('/sources/{{ source.name|urlencode }}/archive')">
+  <button class="small" data-on:click="@post('/sources/{{ source.name|urlencode }}/archive')">
     <i>refresh</i><span>Re-archive</span>
   </button>
-  <button class="border small" data-on:click="@post('/sources/{{ source.name|urlencode }}/delete')">
+  <button class="small" data-on:click="@post('/sources/{{ source.name|urlencode }}/delete')">
     <i>delete</i><span>Remove</span>
   </button>
 </nav>
@@ -37,7 +37,7 @@
 <article class="border round">
   <h6><code>{{ file_path }}</code></h6>
   <div class="overflow-x">
-    <table class="stripes">
+    <table>
       <thead><tr><th>Title</th><th>Domain</th><th>State</th><th>Link</th></tr></thead>
       <tbody>
         {% for p in pages %}

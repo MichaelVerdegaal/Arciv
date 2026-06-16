@@ -100,7 +100,7 @@
 <p class="muted">No rules.</p>
 {% else %}
 <div class="overflow-x">
-  <table class="stripes">
+  <table>
     <thead>
       <tr>
         <th>#</th><th>Match</th><th>Pattern</th>
@@ -116,7 +116,7 @@
         <td>{{ rule.action }}</td>
         <td class="muted">{{ rule.replacement or '—' }}</td>
         <td>
-          <button class="border small" data-on:click="@post('/rules/{{ rule.id }}/delete')">
+          <button class="small" data-on:click="@post('/rules/{{ rule.id }}/delete')">
             <i>delete</i><span>Delete</span>
           </button>
         </td>

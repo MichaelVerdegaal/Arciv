@@ -30,7 +30,7 @@
 <p class="muted">No sources registered.</p>
 {% else %}
 <div class="overflow-x">
-  <table class="stripes">
+  <table>
     <thead><tr><th>Name</th><th>Path</th><th>Pages</th><th></th></tr></thead>
     <tbody>
       {% for source, count in sources %}
@@ -43,10 +43,10 @@
         <td class="muted">{{ count }}</td>
         <td>
           <nav class="no-space">
-            <button class="border small" data-on:click="@post('/sources/{{ source.name|urlencode }}/archive')">
+            <button class="small" data-on:click="@post('/sources/{{ source.name|urlencode }}/archive')">
               <i>refresh</i><span>Re-archive</span>
             </button>
-            <button class="border small" data-on:click="@post('/sources/{{ source.name|urlencode }}/delete')">
+            <button class="small" data-on:click="@post('/sources/{{ source.name|urlencode }}/delete')">
               <i>delete</i><span>Remove</span>
             </button>
           </nav>

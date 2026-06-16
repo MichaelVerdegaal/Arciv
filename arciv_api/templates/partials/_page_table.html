@@ -3,7 +3,7 @@
 <p class="muted">No pages match.</p>
 {% else %}
 <div class="overflow-x">
-  <table class="stripes">
+  <table>
     <thead>
       <tr>
         <th>Title</th><th>Domain</th><th>Words</th>
@@ -26,15 +26,15 @@
 </div>
 <nav>
   {% if prev_href %}
-  <a class="button border" href="{{ prev_href }}"><i>arrow_back</i><span>Prev</span></a>
+  <a class="button" href="{{ prev_href }}"><i>arrow_back</i><span>Prev</span></a>
   {% else %}
-  <button class="border" disabled><i>arrow_back</i><span>Prev</span></button>
+  <button disabled><i>arrow_back</i><span>Prev</span></button>
   {% endif %}
   <span class="muted">Page {{ page }}</span>
   {% if next_href %}
-  <a class="button border" href="{{ next_href }}"><span>Next</span><i>arrow_forward</i></a>
+  <a class="button" href="{{ next_href }}"><span>Next</span><i>arrow_forward</i></a>
   {% else %}
-  <button class="border" disabled><span>Next</span><i>arrow_forward</i></button>
+  <button disabled><span>Next</span><i>arrow_forward</i></button>
   {% endif %}
 </nav>
 {% endif %}
