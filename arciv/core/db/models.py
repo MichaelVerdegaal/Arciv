@@ -105,7 +105,7 @@ RULE_ACTIONS = ("skip", "rewrite")
 
 # Capture-group references in a regex rewrite replacement: ``$1``, ``${1}``,
 # with ``$$`` as a literal ``$`` escape (group 1 of the match). Kept in sync
-# with ``_expand_dollar_refs`` in arciv.core.fetch.url_processor, which does the
+# with ``_expand_dollar_refs`` in arciv.core.fetch.url_processing, which does the
 # actual ``$n`` -> ``\n`` translation; here it is used only to count the refs.
 _REGEX_REF_RE = re.compile(r"\$(?:(\$)|\{(\d+)\}|(\d+))")
 

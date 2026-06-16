@@ -5,8 +5,9 @@ import re
 from hypothesis import given
 from hypothesis import strategies as st
 
+from arciv.core.db.database import _DEFAULT_RULES
 from arciv.core.db.models import Rule, validate_rule
-from arciv.core.fetch.url_processor import (
+from arciv.core.fetch import (
     canonicalize,
     is_pdf_url,
     is_raw_text_url,
@@ -15,6 +16,13 @@ from arciv.core.fetch.url_processor import (
     slug_for_url,
     split_url,
 )
+
+# The plumbing skips (media files, image proxies, IP hosts) are seeded default
+# rules now, not code handlers, so behaviour tests run process_url with them.
+_DEFAULT_RULE_OBJS = [
+    Rule(match_type=mt, pattern=p, action=a, replacement=r)
+    for mt, p, a, r in _DEFAULT_RULES
+]
 
 _SLUG_RE = re.compile(r"^.+-[0-9a-f]{8}$")
 
@@ -46,17 +54,21 @@ class TestProcessUrl:
         assert "HTTPS" in status
 
     def test_image_suffix_is_skipped(self):
-        processed, _ = process_url("https://example.com/photo.png")
+        processed, _ = process_url(
+            "https://example.com/photo.png", _DEFAULT_RULE_OBJS
+        )
         assert processed is None
 
     def test_image_proxy_endpoint_is_skipped(self):
         url = "https://example.com/_next/image?url=%2Fcat.jpg&w=640"
-        processed, status = process_url(url)
+        processed, status = process_url(url, _DEFAULT_RULE_OBJS)
         assert processed is None
         assert "image proxy" in status
 
     def test_ip_domain_is_skipped(self):
-        processed, _ = process_url("https://192.168.2.13/dashboard")
+        processed, _ = process_url(
+            "https://192.168.2.13/dashboard", _DEFAULT_RULE_OBJS
+        )
         assert processed is None
 
     def test_github_blob_rewritten_to_repo_root(self):
@@ -92,8 +104,9 @@ class TestProcessUrl:
 
     def test_huggingface_non_pdf_blob_passes_through(self):
         url = "https://huggingface.co/org/model/blob/main/config.json"
-        # .json is a skip suffix, so it never reaches the rewriter.
-        processed, _ = process_url(url)
+        # .json matches the seeded media skip rule (which runs before the
+        # rewriter), so it never reaches the huggingface rewriter.
+        processed, _ = process_url(url, _DEFAULT_RULE_OBJS)
         assert processed is None
 
     def test_huggingface_non_blob_passes_through(self):

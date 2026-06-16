@@ -51,12 +51,21 @@ CREATE TABLE IF NOT EXISTS rules (
 """
 
 # URL rules seeded into a freshly created database. These migrate the skip
-# lists that used to be hardcoded in url_processor into the editable rule store,
-# so they show up in the web UI and can be removed there. Each tuple is
+# lists that used to be hardcoded in the URL processor into the editable rule
+# store, so they show up in the web UI and can be removed there. Each tuple is
 # (match_type, pattern, action, replacement); position follows list order.
-# Plumbing skips (file extensions, image proxies, IP hosts) stay in code — they
-# are not policy anyone wants to edit — so they are deliberately absent here.
+# The plumbing skips (media/file extensions, image proxies, IP hosts) come
+# first so they keep firing ahead of the policy rules, mirroring the old
+# code-handler ordering where they ran before the user rules.
 _DEFAULT_RULES: tuple[tuple[str, str, str, str | None], ...] = (
+    (
+        "regex",
+        r"\.(png|jpg|jpeg|gif|svg|webp|bmp|tiff|ico|mp4|mp3|avi|mov|wmv|flv|mkv|json|xml)(\?|$)",
+        "skip",
+        "media/non-content file",
+    ),
+    ("regex", r"/_next/image", "skip", "image proxy endpoint"),
+    ("regex", r"^https://(www\.)?\d{1,3}(\.\d{1,3}){3}(:\d+)?(/|$)", "skip", "IP-address host"),
     ("starts_with", "https://localhost", "skip", "local address"),
     ("domain", "sharepoint.com", "skip", "not content"),
     ("host", "content.powerapps.com", "skip", "not content"),
