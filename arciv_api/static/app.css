@@ -1,380 +1,103 @@
-/* App styling layered on top of Pico CSS (sand theme, dark mode).
+/* App styling layered on BeerCSS (Material Design 3).
 
-   Pico is loaded from the CDN in base.html and styles all the semantic HTML
-   (nav, table, form, article, headings…). This file does two jobs:
+   BeerCSS (loaded from the CDN in base.html) provides the M3 components, the
+   responsive main layout (left nav rail / bottom bar), and the helper classes.
+   This file only does two small things:
 
-   1. Re-skin Pico by overriding its `--pico-*` design tokens, so the whole app
-      gets one cohesive "warm ink + amber" archival look instead of the stock
-      sand palette — no per-element overrides needed for the common cases.
-   2. Add the few components Pico has no primitive for: the full-bleed top bar,
-      status cards, badges, inline alerts, and the rules help panel.
+   1. Pin the app's brand colors by overriding BeerCSS's theme tokens
+      (--primary / --secondary and friends) for the dark theme.
+   2. Add the few app-specific bits BeerCSS has no primitive for: status pills,
+      inline alerts, the inline filter/add row, and reading tweaks for archived
+      article bodies.
 
-   Keep it small; lean on the tokens before writing component CSS. */
+   Lean on BeerCSS helpers before adding anything here. */
 
-/* --- Design tokens -------------------------------------------------------- */
-/* Override Pico's dark palette. Everything Pico styles (links, buttons, tables,
-   forms, code) picks these up automatically, so the re-skin is mostly here. */
-:root {
-  --pico-border-radius: 0.5rem;
-  --pico-font-family-sans-serif: system-ui, -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", sans-serif;
-  --pico-line-height: 1.6;
-  --pico-transition: 0.15s ease;
+/* --- Brand theme ---------------------------------------------------------- */
+/* Indigo primary (#4B0082) with a thistle secondary (#D8BFD8). Set on the dark
+   theme since the app runs dark-only (<body class="dark">); app.css loads after
+   beer.min.css, so these win. */
+body.dark {
+  --primary: #4b0082;
+  --on-primary: #ffffff;
+  --primary-container: #36115f;
+  --on-primary-container: #ecd9ff;
 
-  /* Shared accent (amber) and status hues, used by the components below. */
-  --accent: #e3a93c;
-  --accent-soft: rgba(227, 169, 60, 0.16);
-  --c-green: #7bc47f;
-  --c-blue: #74b4e6;
-  --c-amber: #e3a93c;
-  --c-red: #e88b8b;
+  --secondary: #d8bfd8;
+  --on-secondary: #3a293a;
+  --secondary-container: #4a384a;
+  --on-secondary-container: #f3e4f3;
 }
 
-[data-theme="dark"] {
-  /* Warm near-black surfaces, layered from page → card → elevated. */
-  --pico-background-color: #15130f;
-  --pico-color: #ece7dd;
-  --pico-h1-color: #fbf8f2;
-  --pico-h2-color: #f6f1e8;
-  --pico-h3-color: #f1ebe1;
-  --pico-h4-color: #ece7dd;
-  --pico-h5-color: #ece7dd;
-  --pico-h6-color: #ece7dd;
-  --pico-muted-color: #a39c8d;
-  --pico-muted-border-color: #322e26;
-  --pico-border-color: #322e26;
-
-  --pico-card-background-color: #1d1a14;
-  --pico-card-border-color: #2c2820;
-  --pico-card-sectioning-background-color: #221e17;
-  --pico-card-box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-
-  /* Amber accent: links and primary buttons. Inverse is the dark text that
-     sits on a filled amber button. */
-  --pico-primary: var(--accent);
-  --pico-primary-background: var(--accent);
-  --pico-primary-border: var(--accent);
-  --pico-primary-hover: #f0bb57;
-  --pico-primary-hover-background: #f0bb57;
-  --pico-primary-hover-border: #f0bb57;
-  --pico-primary-focus: rgba(227, 169, 60, 0.3);
-  --pico-primary-inverse: #1a160e;
-  --pico-primary-underline: rgba(227, 169, 60, 0.4);
-
-  /* Secondary = the quiet outline buttons (Re-archive, Delete, pager). */
-  --pico-secondary: #c4bcab;
-  --pico-secondary-background: #2c2820;
-  --pico-secondary-border: #2c2820;
-  --pico-secondary-hover: #ece7dd;
-  --pico-secondary-hover-background: #38332a;
-  --pico-secondary-hover-border: #38332a;
-  --pico-secondary-inverse: #ece7dd;
-
-  /* Forms. */
-  --pico-form-element-background-color: #1a1712;
-  --pico-form-element-border-color: #38332a;
-  --pico-form-element-color: #ece7dd;
-  --pico-form-element-placeholder-color: #847d6f;
-  --pico-form-element-active-background-color: #1a1712;
-  --pico-form-element-active-border-color: var(--accent);
-  --pico-form-element-focus-color: var(--accent);
-
-  --pico-code-background-color: #221e17;
-  --pico-code-color: #d9cbb0;
-  --pico-blockquote-border-color: var(--accent);
-  --pico-text-selection-color: rgba(227, 169, 60, 0.28);
+/* The deep primary is too dark to read as text on the dark surface, so use the
+   light secondary tint for content hyperlinks and for outline buttons. Filled
+   buttons keep their own (higher-specificity) colors. */
+main a {
+  color: var(--secondary);
+}
+.button.border,
+button.border {
+  color: var(--secondary);
+  border-color: var(--secondary);
 }
 
-/* Snappier interactive feedback than Pico's defaults. */
-a,
-button,
-[role="button"],
-input,
-select,
-.stat {
-  transition: background-color var(--pico-transition),
-    border-color var(--pico-transition), color var(--pico-transition),
-    transform var(--pico-transition);
-}
-
-/* --- Top bar -------------------------------------------------------------- */
-/* A full-width, sticky header with a blurred backdrop and a divider under it. */
-body > header.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  border-bottom: 1px solid var(--pico-muted-border-color);
-  background: color-mix(in srgb, var(--pico-background-color) 88%, transparent);
-  backdrop-filter: blur(8px);
-  margin-bottom: var(--pico-block-spacing-vertical);
-  padding-top: 0.4rem;
-  padding-bottom: 0.4rem;
-}
-body > header.topbar nav {
-  flex-wrap: wrap;
-  gap: 0.25rem 0.35rem;
-}
-/* Nav links read as quiet pills that warm up on hover. */
-body > header.topbar nav a {
-  padding: 0.3rem 0.7rem;
-  border-radius: var(--pico-border-radius);
-  color: var(--pico-muted-color);
-  text-decoration: none;
-}
-body > header.topbar nav a:hover {
-  background: var(--accent-soft);
-  color: var(--pico-color);
-}
-/* Current section: filled accent pill. */
-body > header.topbar nav a[aria-current="page"] {
-  background: var(--accent-soft);
-  color: var(--accent);
+/* --- Status pills --------------------------------------------------------- */
+/* Soft, self-contained tints. Named .state (not BeerCSS's .badge, which is an
+   absolutely-positioned corner element). */
+.state {
+  display: inline-block;
+  padding: 0.15rem 0.6rem;
+  border-radius: 1rem;
+  font-size: 0.72rem;
   font-weight: 600;
-}
-.brand {
-  font-size: 1.2rem;
-  font-weight: 700;
   letter-spacing: 0.02em;
-  color: var(--accent) !important;
+  line-height: 1.5;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--on-surface);
 }
-.brand:hover {
-  background: transparent !important;
-}
-/* Compact archive-a-URL group in the bar, pushed to the right on wide screens. */
-.archive-box {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-@media (min-width: 768px) {
-  .archive-box {
-    margin-left: auto;
-  }
-}
-.archive-box input {
-  margin: 0;
-  width: clamp(12rem, 30vw, 22rem);
-}
-.archive-box button {
-  margin: 0;
-  white-space: nowrap;
-}
+.state-done { background: rgba(123, 196, 127, 0.18); color: #9ad79e; }
+.state-fetched { background: rgba(116, 180, 230, 0.18); color: #8ec5f0; }
+.state-pending { background: rgba(227, 169, 60, 0.18); color: #ecc06a; }
+.state-skipped { background: rgba(255, 255, 255, 0.08); color: var(--on-surface-variant); }
+.state-failed { background: rgba(232, 139, 139, 0.18); color: #f0a0a0; }
 
-/* The /archive problem fragment is patched in just under the bar. */
-#archive-result:not(:empty) {
-  margin-bottom: var(--pico-block-spacing-vertical);
+/* --- Inline alerts -------------------------------------------------------- */
+/* A tinted panel with a thick left accent bar keyed to severity. */
+.alert {
+  padding: 0.85rem 1rem;
+  border-radius: 0.75rem;
+  border-left: 4px solid var(--outline);
+  background: var(--surface-container-high);
+  margin: 0.75rem 0;
 }
+.alert-error { border-left-color: #f0a0a0; background: rgba(232, 139, 139, 0.1); }
+.alert-warning { border-left-color: #ecc06a; background: rgba(227, 169, 60, 0.1); }
+.alert-info { border-left-color: var(--secondary); background: rgba(216, 191, 216, 0.08); }
 
-/* --- Headings ------------------------------------------------------------- */
-main h1 {
-  letter-spacing: -0.01em;
-}
-main > h1:first-child {
-  margin-bottom: 1rem;
-}
-
-/* --- Filter bar (browse / add forms) -------------------------------------- */
-/* Pico stacks labels; for these rows we want them inline, compact, bottom-aligned. */
+/* --- Inline filter / add row ---------------------------------------------- */
+/* BeerCSS form fields stack full-width; for these toolbars we want them inline,
+   compact, and bottom-aligned. */
 .filters {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 0.75rem;
-  margin-bottom: var(--pico-block-spacing-vertical);
-}
-.filters label {
-  margin: 0;
-  font-size: 0.8rem;
-  color: var(--pico-muted-color);
-}
-.filters input,
-.filters select,
-.filters button {
-  margin: 0;
-}
-/* Pico makes form buttons full-width; size the action button to its label so
-   it sits snugly after the last field instead of stretching across the row. */
-.filters button {
-  width: auto;
-}
-
-/* --- Tables --------------------------------------------------------------- */
-/* Quieter header (small caps-ish, muted) and a subtle row hover for scanability. */
-table thead th {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--pico-muted-color);
-}
-table tbody tr {
-  transition: background-color var(--pico-transition);
-}
-table tbody tr:hover {
-  background: var(--accent-soft);
-}
-
-/* --- Status stat cards ---------------------------------------------------- */
-.stats {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.75rem;
-}
-@media (min-width: 576px) {
-  .stats {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-@media (min-width: 992px) {
-  .stats {
-    grid-template-columns: repeat(6, 1fr);
-  }
-}
-.stat {
-  margin: 0;
-  padding: 0.9rem 1rem;
-}
-.stat:hover {
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--pico-card-border-color));
-  transform: translateY(-2px);
-}
-.stat .stat-label {
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--pico-muted-color);
-}
-.stat .stat-value {
-  font-size: 1.7rem;
-  font-weight: 700;
-  line-height: 1.2;
-  font-variant-numeric: tabular-nums;
-}
-.text-success {
-  color: var(--c-green);
-}
-.text-error {
-  color: var(--c-red);
-}
-.muted {
-  color: var(--pico-muted-color);
-}
-
-/* --- Badges (page state) -------------------------------------------------- */
-/* Soft, translucent pills: a tinted background with matching text, rather than
-   loud solid blocks. */
-.badge {
-  display: inline-block;
-  padding: 0.15rem 0.55rem;
-  border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  line-height: 1.4;
-  background: var(--pico-muted-border-color);
-  color: var(--pico-color);
-}
-.badge-success {
-  background: rgba(123, 196, 127, 0.16);
-  color: var(--c-green);
-}
-.badge-info {
-  background: rgba(116, 180, 230, 0.16);
-  color: var(--c-blue);
-}
-.badge-warning {
-  background: var(--accent-soft);
-  color: var(--c-amber);
-}
-.badge-error {
-  background: rgba(232, 139, 139, 0.16);
-  color: var(--c-red);
-}
-.badge-ghost {
-  background: var(--pico-muted-border-color);
-  color: var(--pico-muted-color);
-}
-
-/* --- Inline alerts -------------------------------------------------------- */
-/* A tinted panel with a thick left accent bar keyed to the severity. */
-.alert {
-  padding: 0.75rem 1rem;
-  border-radius: var(--pico-border-radius);
-  border: 1px solid var(--pico-muted-border-color);
-  border-left: 3px solid var(--pico-muted-border-color);
-  background: var(--pico-card-background-color);
-  margin: 0.5rem 0;
-}
-.alert-error {
-  border-left-color: var(--c-red);
-  background: rgba(232, 139, 139, 0.08);
-}
-.alert-warning {
-  border-left-color: var(--c-amber);
-  background: rgba(227, 169, 60, 0.08);
-}
-.alert-info {
-  border-left-color: var(--c-blue);
-  background: rgba(116, 180, 230, 0.08);
-}
-
-/* --- Rules help panel ----------------------------------------------------- */
-/* The "Match types explained" disclosure. Styled here instead of inline so the
-   markup stays clean and uses the real theme tokens. */
-.help {
-  padding: 0.5rem 1.25rem 1.25rem;
-  margin-top: 0.75rem;
-  background: var(--pico-card-sectioning-background-color);
-  border: 1px solid var(--pico-muted-border-color);
-  border-radius: var(--pico-border-radius);
-}
-.help h3 {
-  margin-bottom: 0.25rem;
-  color: var(--accent);
-  font-size: 1rem;
-}
-.help h3:not(:first-child) {
-  margin-top: 1.5rem;
-}
-.help p {
-  margin-bottom: 0.4rem;
-}
-
-/* --- Archived article body ------------------------------------------------ */
-/* Pico styles headings/p/lists/code/table inside <article> already; only nudge
-   line-height and cap the measure for comfortable reading. */
-.article {
-  line-height: 1.75;
-  max-width: 70ch;
-}
-.article img {
-  max-width: 100%;
-  height: auto;
-  border-radius: var(--pico-border-radius);
-}
-
-/* --- Small helpers -------------------------------------------------------- */
-.row {
-  display: flex;
   align-items: center;
   gap: 0.75rem;
+  margin-bottom: 1.25rem;
 }
-.overflow-x {
-  overflow-x: auto;
-  /* Breathing room so the table isn't flush against the filter/add controls
-     above it (and the pager below). */
-  margin-block: var(--pico-block-spacing-vertical);
+.filters .field {
+  margin: 0;
+  width: 12rem;
+}
+.filters .field.max {
+  width: auto;
+  flex: 1;
+  min-width: 14rem;
 }
 
-/* Quiet, theme-matched scrollbars (WebKit/Blink). */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--pico-muted-border-color) transparent;
-}
-*::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-*::-webkit-scrollbar-thumb {
-  background: var(--pico-muted-border-color);
-  border-radius: 999px;
-}
+/* --- Misc helpers --------------------------------------------------------- */
+.muted { color: var(--on-surface-variant); }
+.overflow-x { overflow-x: auto; }
+
+/* Archived article body: comfortable line-height and a capped reading measure.
+   BeerCSS styles the headings/lists/code/tables inside it already. */
+.article { line-height: 1.75; max-width: 70ch; }
+.article img { max-width: 100%; height: auto; border-radius: 0.75rem; }

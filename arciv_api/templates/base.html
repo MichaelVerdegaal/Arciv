@@ -1,53 +1,78 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}Arciv{% endblock %}</title>
     <link
       rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.sand.min.css"
+      href="https://cdn.jsdelivr.net/npm/beercss@4.0.21/dist/cdn/beer.min.css"
     />
     <link rel="stylesheet" href="/static/app.css" />
     <script type="module" src="/static/datastar.js"></script>
   </head>
-  <body>
-    <header class="topbar container-fluid">
-      {# One ul keeps the archive box just after the last link (left side):
-         on a wide monitor the old right-aligned box was a long mouse trip.
-         Datastar v1 separates a plugin's key from its name with a colon
-         (data-bind:url, data-on:click). The hyphen form silently no-ops:
-         the attribute parses to an unknown "bind-url"/"on-click" plugin and
-         is skipped, so the button fires no request at all. #}
-      {# `active` is set by each page template (e.g. {% set active = 'domains' %})
-         and highlights the matching tab; detail/404 pages leave it unset. #}
+  <body class="dark">
+    {# `active` is set by each page template (e.g. {% set active = 'domains' %})
+       and highlights the matching tab; detail/404 pages leave it unset.
+
+       Datastar v1 separates a plugin's key from its name with a colon
+       (data-bind:url, data-on:click). The hyphen form silently no-ops: the
+       attribute parses to an unknown plugin and is skipped, so the button fires
+       no request at all. #}
+    {% set nav_items = [
+        ('/', 'Archive', 'inventory_2', 'archive'),
+        ('/domains', 'Domains', 'public', 'domains'),
+        ('/sources', 'Sources', 'folder', 'sources'),
+        ('/rules', 'Rules', 'rule', 'rules'),
+        ('/status', 'Status', 'insights', 'status')] %}
+
+    {# Navigation rail — medium and large screens. #}
+    <nav class="left m l">
+      <header>
+        <a href="/">
+          <i>inventory_2</i>
+          <span>Arciv</span>
+        </a>
+      </header>
+      {% for href, label, icon, key in nav_items %}
+      <a href="{{ href }}"{% if active == key %} class="active"{% endif %}>
+        <i>{{ icon }}</i>
+        <span>{{ label }}</span>
+      </a>
+      {% endfor %}
+    </nav>
+
+    {# Bottom bar — small screens. #}
+    <nav class="bottom s">
+      {% for href, label, icon, key in nav_items %}
+      <a href="{{ href }}"{% if active == key %} class="active"{% endif %}>
+        <i>{{ icon }}</i>
+        <span>{{ label }}</span>
+      </a>
+      {% endfor %}
+    </nav>
+
+    {# Top app bar — archive a URL, reachable from every page. #}
+    <header class="fixed" data-signals="{url: ''}">
       <nav>
-        <ul>
-          <li><a href="/" class="brand contrast">Arciv</a></li>
-          {% for href, label, key in [
-              ('/', 'Archive', 'archive'),
-              ('/domains', 'Domains', 'domains'),
-              ('/sources', 'Sources', 'sources'),
-              ('/rules', 'Rules', 'rules'),
-              ('/status', 'Status', 'status')] %}
-          <li><a href="{{ href }}"{% if active == key %} aria-current="page"{% endif %}>{{ label }}</a></li>
-          {% endfor %}
-          <li class="archive-box" data-signals="{url: ''}">
-            <input
-              data-bind:url
-              type="url"
-              placeholder="https://… archive a URL"
-              data-on:keydown="evt.key === 'Enter' && @post('/archive')"
-            />
-            <button data-on:click="@post('/archive')">Archive</button>
-          </li>
-        </ul>
+        <div class="field prefix small max round">
+          <i>link</i>
+          <input
+            type="url"
+            placeholder="Archive a URL…"
+            data-bind:url
+            data-on:keydown="evt.key === 'Enter' && @post('/archive')"
+          />
+        </div>
+        <button data-on:click="@post('/archive')">
+          <i>archive</i>
+          <span class="m l">Archive</span>
+        </button>
       </nav>
     </header>
 
-    <div id="archive-result"></div>
-
-    <main class="container">
+    <main class="responsive">
+      <div id="archive-result"></div>
       {% block main %}{% endblock %}
     </main>
   </body>

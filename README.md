@@ -93,7 +93,7 @@ See [SETUP.md](SETUP.md) for installation and configuration.
 
 A single self-hosted web app browses the archive and archives new URLs from the browser with
 live status. It is a FastAPI service that imports this library directly and renders its own
-HTML (Jinja2 + Datastar, Pico CSS) — no separate frontend runtime. Sources are managed from
+HTML (Jinja2 + Datastar, BeerCSS) — no separate frontend runtime. Sources are managed from
 the browser too: add a directory of notes, view the files indexed and the links found in each,
 re-archive to pick up changes, or remove a source.
 
