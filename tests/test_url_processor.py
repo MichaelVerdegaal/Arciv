@@ -206,7 +206,12 @@ class TestProcessUrlRules:
 
     def test_regex_rewrite_with_capture_group(self):
         rules = [
-            Rule("regex", r"^https://arxiv\.org/abs/(.*)$", "rewrite", r"https://arxiv.org/pdf/$1")
+            Rule(
+                "regex",
+                r"^https://arxiv\.org/abs/(.*)$",
+                "rewrite",
+                r"https://arxiv.org/pdf/$1",
+            )
         ]
         processed, status = process_url("https://arxiv.org/abs/2606.14647", rules)
         assert processed == "https://arxiv.org/pdf/2606.14647"
@@ -214,14 +219,24 @@ class TestProcessUrlRules:
 
     def test_regex_rewrite_braced_capture_group(self):
         rules = [
-            Rule("regex", r"^https://arxiv\.org/abs/(.*)$", "rewrite", r"https://arxiv.org/pdf/${1}")
+            Rule(
+                "regex",
+                r"^https://arxiv\.org/abs/(.*)$",
+                "rewrite",
+                r"https://arxiv.org/pdf/${1}",
+            )
         ]
         processed, _ = process_url("https://arxiv.org/abs/2606.14647", rules)
         assert processed == "https://arxiv.org/pdf/2606.14647"
 
     def test_regex_rewrite_preserves_path_segments(self):
         rules = [
-            Rule("regex", r"^https://example\.com/old/(.*?)(?:\?|$)", "rewrite", r"https://example.com/new/$1")
+            Rule(
+                "regex",
+                r"^https://example\.com/old/(.*?)(?:\?|$)",
+                "rewrite",
+                r"https://example.com/new/$1",
+            )
         ]
         processed, _ = process_url("https://example.com/old/page123", rules)
         assert processed == "https://example.com/new/page123"
