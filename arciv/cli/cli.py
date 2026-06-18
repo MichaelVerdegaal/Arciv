@@ -164,7 +164,7 @@ class PruneMode(str, Enum):
 _PRUNE_DESCRIPTIONS: dict[PruneMode, str] = {
     PruneMode.missing: "failed pages no longer indexed in any note",
     PruneMode.failed: "all failed pages (fetch failures and skipped/too-short)",
-    PruneMode.all: "EVERY page — the entire archive index",
+    PruneMode.all: "EVERY page (the entire archive index)",
 }
 
 
@@ -521,7 +521,7 @@ def prune(
     - ``missing`` removes failed pages that no note links to anymore (the dead
       rows left when a URL drops out of the notes and re-indexing unlinks it).
     - ``failed`` removes every page with a failure reason, indexed or not.
-    - ``all`` wipes every page row — the whole archive index.
+    - ``all`` wipes every page row, the whole archive index.
 
     The matching ``saved/<slug>/`` folders are deleted too, so disk space is
     reclaimed. Link rows are removed alongside the pages; registered sources
@@ -720,8 +720,8 @@ def db_remove(
 def rules_list() -> None:
     """List URL rules in the order they are applied (first match wins).
 
-    Columns are tab-separated — id, match type, pattern, action, and the
-    replacement/reason — so the output pipes cleanly into grep/cut/awk. The
+    Columns are tab-separated (id, match type, pattern, action, and the
+    replacement/reason) so the output pipes cleanly into grep/cut/awk. The
     leading id is what ``arciv rules remove`` takes. With --json, emits JSONL
     (one object per line).
     """

@@ -14,7 +14,7 @@ Each rule documents the site(s) it exists for and the failure it
 prevents. Rules apply to every page, so they must be scoped tightly
 enough (unambiguous ids/classes) to never match legitimate content. If a
 rule ever needs to fire for one domain only, that is the moment to add
-domain scoping — not before.
+domain scoping, not before.
 """
 
 import re
@@ -34,8 +34,8 @@ FIX_PATTERNS: list[re.Pattern[str]] = [NEXT_DATA_RE]
 # -- DOM prunes (XPath, applied before extraction) --
 
 # MediaWiki (wikipedia.org and every other MediaWiki site): each section
-# heading sits in a small wrapper div next to an "[edit]" link — the div's
-# only link — so trafilatura's link-density pruning judges the whole div
+# heading sits in a small wrapper div next to an "[edit]" link (the div's
+# only link), so trafilatura's link-density pruning judges the whole div
 # boilerplate and deletes it, heading included.
 MEDIAWIKI_EDIT_SECTION_XPATH = '//span[contains(@class, "mw-editsection")]'
 

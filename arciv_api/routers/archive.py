@@ -1,4 +1,4 @@
-"""Archive: POST /archive — enqueue a fetch+parse job for a submitted URL."""
+"""Archive: POST /archive, enqueue a fetch+parse job for a submitted URL."""
 
 from fastapi import APIRouter, Request
 from datastar_py.fastapi import DatastarResponse, ReadSignals, ServerSentEventGenerator
@@ -16,7 +16,7 @@ def _result_patch(message: str, kind: str) -> DatastarResponse:
 async def archive(request: Request, signals: ReadSignals) -> DatastarResponse:
     """Archive the URL bound to the Datastar ``url`` signal.
 
-    On success, redirect to ``/page/{slug}`` — the slug exists the instant the
+    On success, redirect to ``/page/{slug}``; the slug exists the instant the
     row is registered, so the destination is real before the fetch starts. A
     URL ``process_url`` rejects gets its skip reason shown instead of a slug
     that would never exist.

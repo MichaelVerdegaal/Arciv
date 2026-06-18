@@ -44,7 +44,7 @@ class Action(str, Enum):
     new pages). ``refetch`` and ``reparse`` re-run an already-known page from
     the page detail view: ``refetch`` re-downloads from the network then
     re-parses that one page, while ``reparse`` re-parses the raw file already
-    on disk with no network traffic — the fast loop for trying out parse rules.
+    on disk with no network traffic, the fast loop for trying out parse rules.
     """
 
     archive = "archive"
@@ -99,7 +99,7 @@ def _default_reparse(db_path: Path, url: str) -> None:
 
     ``parse_pending`` only touches unparsed pages, so a re-parse (or the parse
     after a re-fetch, which leaves ``parsed_at`` set) has to target the single
-    page directly. No network traffic — everything is read from disk.
+    page directly. No network traffic; everything is read from disk.
     """
     with PageDatabase(db_path) as db:
         page = db.get(url)
@@ -211,7 +211,7 @@ class ArchiveQueue:
         """Re-run a known page: ``refetch`` re-downloads then re-parses, else
         re-parses the raw file on disk only.
 
-        Idempotent — if a job for the slug is already in flight, nothing new is
+        Idempotent: if a job for the slug is already in flight, nothing new is
         enqueued. Returns the outcome (``"refetch"``, ``"reparse"``, or
         ``"existing"``) for the caller to surface or ignore.
         """

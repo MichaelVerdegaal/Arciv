@@ -1,4 +1,4 @@
-"""Status: GET /status — the pipeline dashboard (counts + failures)."""
+"""Status: GET /status, the pipeline dashboard (counts + failures)."""
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse

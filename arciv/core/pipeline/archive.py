@@ -3,7 +3,7 @@
 The ``get`` CLI command and the web app both want the same flow a source
 archival needs: take the URLs found by indexing, download them all in one
 concurrent batch (the Fetcher shares a single browser context across the
-batch — far faster than a browser per URL), then convert the freshly fetched
+batch, far faster than a browser per URL), then convert the freshly fetched
 pages to markdown. This module is that shared step, so neither the CLI nor the
 web reimplements the fetch+parse pairing.
 """

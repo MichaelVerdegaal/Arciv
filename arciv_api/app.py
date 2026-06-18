@@ -2,7 +2,7 @@
 
 One Python service renders its own HTML (Jinja2) and drives interactivity with
 Datastar (``data-*`` attributes that fire requests answered with HTML fragments
-or SSE patches). It imports the arciv library directly — it never shells out —
+or SSE patches). It imports the arciv library directly (it never shells out)
 and reads through short-lived read-only connections; the only writes go through
 the archive worker started here in the lifespan.
 
