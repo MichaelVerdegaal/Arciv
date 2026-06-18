@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% set active = 'rules' %}
-{% block title %}Arciv — Rules{% endblock %}
+{% block title %}Arciv | Rules{% endblock %}
 {% block main %}
 <h4>Rules</h4>
 <p class="muted">
@@ -114,7 +114,7 @@
         <td>{{ rule.match_type }}</td>
         <td><code>{{ rule.pattern }}</code></td>
         <td>{{ rule.action }}</td>
-        <td class="muted">{{ rule.replacement or '—' }}</td>
+        <td class="muted">{{ rule.replacement or '-' }}</td>
         <td>
           <button class="small" data-on:click="@post('/rules/{{ rule.id }}/delete')">
             <i>delete</i><span>Delete</span>
