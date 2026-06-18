@@ -54,8 +54,8 @@ CREATE TABLE IF NOT EXISTS rules (
 # lists that used to be hardcoded in url_processor into the editable rule store,
 # so they show up in the web UI and can be removed there. Each tuple is
 # (match_type, pattern, action, replacement); position follows list order.
-# Plumbing skips (file extensions, image proxies, IP hosts) stay in code — they
-# are not policy anyone wants to edit — so they are deliberately absent here.
+# Plumbing skips (file extensions, image proxies, IP hosts) stay in code (they
+# are not policy anyone wants to edit), so they are deliberately absent here.
 _DEFAULT_RULES: tuple[tuple[str, str, str, str | None], ...] = (
     ("starts_with", "https://localhost", "skip", "local address"),
     ("domain", "sharepoint.com", "skip", "not content"),
@@ -474,7 +474,7 @@ class PageDatabase:
 
         Modes:
 
-        - ``missing``: failed pages no longer indexed in any note — rows with a
+        - ``missing``: failed pages no longer indexed in any note, rows with a
           ``fail_reason`` that no ``links`` row points at (the dead rows that
           accumulate when a URL is removed from the notes and re-indexing drops
           its link).

@@ -316,7 +316,7 @@ def _skip_suffix_handler(url: str) -> Skip | None:
 
     Plumbing, not policy: nobody wants to manage the image/media list by hand,
     so it stays code rather than becoming an editable rule. ``.pdf`` is
-    deliberately absent — PDFs are archived (and arxiv PDFs get rewritten)."""
+    deliberately absent: PDFs are archived (and arxiv PDFs get rewritten)."""
     if urlparse(url).path.lower().endswith(SKIP_SUFFIXES):
         return Skip("URL matches skip suffix")
     return None

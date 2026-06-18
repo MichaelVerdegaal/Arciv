@@ -1,4 +1,4 @@
-"""Browse list: GET / — the filterable, sortable, paged archive index."""
+"""Browse list: GET /, the filterable, sortable, paged archive index."""
 
 from urllib.parse import urlencode
 

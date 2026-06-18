@@ -26,7 +26,7 @@
         ('/rules', 'Rules', 'rule', 'rules'),
         ('/status', 'Status', 'insights', 'status')] %}
 
-    {# Navigation rail — medium and large screens. #}
+    {# Navigation rail: medium and large screens. #}
     <nav class="left m l">
       <header class="center-align">
         <a href="/">
@@ -42,7 +42,7 @@
       {% endfor %}
     </nav>
 
-    {# Bottom bar — small screens. #}
+    {# Bottom bar: small screens. #}
     <nav class="bottom s">
       {% for href, label, icon, key in nav_items %}
       <a href="{{ href }}"{% if active == key %} class="active"{% endif %}>
@@ -52,7 +52,7 @@
       {% endfor %}
     </nav>
 
-    {# Top app bar — archive a URL, reachable from every page. #}
+    {# Top app bar: archive a URL, reachable from every page. #}
     <header class="fixed" data-signals="{url: ''}">
       <nav>
         <div class="field prefix small max round">

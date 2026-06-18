@@ -9,7 +9,7 @@ How to set up Arciv.
 
 ## Install as a uv tool (recommended for usage)
 
-Arciv is a plain CLI tool — no container needed:
+Arciv is a plain CLI tool, no container needed:
 
 ```bash
 uv tool install git+https://github.com/MichaelVerdegaal/Arciv   # or: uv tool install . from a clone
@@ -41,7 +41,7 @@ arciv index notes
 
 Optional override, via environment variable or a `.env` file (see [.env.example](.env.example)):
 
-- `ARCIV_DATA_DIR` — where the SQLite database, archived pages, and logs live. Defaults to the OS
+- `ARCIV_DATA_DIR`: where the SQLite database, archived pages, and logs live. Defaults to the OS
   user data directory (Linux: `~/.local/share/arciv`, Windows: `%LOCALAPPDATA%\arciv`). Set
   `ARCIV_DATA_DIR=data` in `.env` to keep the archive inside the repository when developing from a
   clone.

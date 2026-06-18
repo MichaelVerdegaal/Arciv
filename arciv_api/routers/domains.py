@@ -1,4 +1,4 @@
-"""Domains: GET /domains — registered domains with page counts."""
+"""Domains: GET /domains, registered domains with page counts."""
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse

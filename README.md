@@ -3,7 +3,7 @@
 [![CI](https://github.com/MichaelVerdegaal/Arciv/actions/workflows/ci.yml/badge.svg)](https://github.com/MichaelVerdegaal/Arciv/actions/workflows/ci.yml)
 
 Arciv is your personal archive for reading material. The blog posts, research papers, and
-documentation you collect — linked in your notes or fed in directly — are fetched and stored
+documentation you collect (linked in your notes or fed in directly) are fetched and stored
 as clean, searchable markdown you can trust years from now. Reading material only: not books,
 not videos.
 
@@ -11,14 +11,14 @@ not videos.
 
 Three stages, no writeback into your notes:
 
-1. **Indexing** — extract links from your files; every link is recorded with the file it came
+1. **Indexing**: extract links from your files; every link is recorded with the file it came
    from and when it was indexed
-2. **Fetching** — download raw pages (browser for HTML, direct HTTP for PDFs)
-3. **Parsing** — validate and convert to markdown, archived on disk with SQLite tracking state
+2. **Fetching**: download raw pages (browser for HTML, direct HTTP for PDFs)
+3. **Parsing**: validate and convert to markdown, archived on disk with SQLite tracking state
 
 ## Usage
 
-Archive things directly — a single URL, a single file, or a whole directory:
+Archive things directly, a single URL, a single file, or a whole directory:
 
 ```bash
 arciv get https://example.com/post   # archive one URL
@@ -61,7 +61,7 @@ arciv db dir                         # where the archive lives on disk
 arciv db remove                      # delete the database (asks first)
 ```
 
-Manage URL rules — skip or rewrite URLs before they are fetched (the same
+Manage URL rules that skip or rewrite URLs before they are fetched (the same
 rules the web app edits):
 
 ```bash
@@ -104,7 +104,7 @@ See [SETUP.md](SETUP.md) for installation and configuration.
 
 A single self-hosted web app browses the archive and archives new URLs from the browser with
 live status. It is a FastAPI service that imports this library directly and renders its own
-HTML (Jinja2 + Datastar, BeerCSS) — no separate frontend runtime. Sources are managed from
+HTML (Jinja2 + Datastar, BeerCSS), so there is no separate frontend runtime. Sources are managed from
 the browser too: add a directory of notes, view the files indexed and the links found in each,
 re-archive to pick up changes, or remove a source. Any page's detail view can re-fetch
 (re-download then re-parse) or re-parse from disk, so URL and parse rules can be tried out
@@ -118,7 +118,7 @@ ARCIV_DATA_DIR=~/.local/share/arciv docker compose up   # http://localhost:8000
 uv run uvicorn arciv_api.app:app                         # http://localhost:8000
 ```
 
-One user per instance — no auth or TLS by design. To reach it beyond your LAN, put a reverse
+One user per instance, no auth or TLS by design. To reach it beyond your LAN, put a reverse
 proxy with auth in front. See [PLAN.md](PLAN.md) for the architecture and roadmap.
 
 ## The Name
