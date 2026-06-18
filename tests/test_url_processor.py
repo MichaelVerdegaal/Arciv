@@ -5,8 +5,9 @@ import re
 from hypothesis import given
 from hypothesis import strategies as st
 
-from arciv.core.db.models import Rule
-from arciv.core.fetch.url_processor import (
+from arciv.core.db.database import _DEFAULT_RULES
+from arciv.core.db.models import Rule, validate_rule
+from arciv.core.fetch import (
     canonicalize,
     is_pdf_url,
     is_raw_text_url,
@@ -15,6 +16,13 @@ from arciv.core.fetch.url_processor import (
     slug_for_url,
     split_url,
 )
+
+# The plumbing skips (media files, image proxies, IP hosts) are seeded default
+# rules now, not code handlers, so behaviour tests run process_url with them.
+_DEFAULT_RULE_OBJS = [
+    Rule(match_type=mt, pattern=p, action=a, replacement=r)
+    for mt, p, a, r in _DEFAULT_RULES
+]
 
 _SLUG_RE = re.compile(r"^.+-[0-9a-f]{8}$")
 
@@ -46,17 +54,21 @@ class TestProcessUrl:
         assert "HTTPS" in status
 
     def test_image_suffix_is_skipped(self):
-        processed, _ = process_url("https://example.com/photo.png")
+        processed, _ = process_url(
+            "https://example.com/photo.png", _DEFAULT_RULE_OBJS
+        )
         assert processed is None
 
     def test_image_proxy_endpoint_is_skipped(self):
         url = "https://example.com/_next/image?url=%2Fcat.jpg&w=640"
-        processed, status = process_url(url)
+        processed, status = process_url(url, _DEFAULT_RULE_OBJS)
         assert processed is None
         assert "image proxy" in status
 
     def test_ip_domain_is_skipped(self):
-        processed, _ = process_url("https://192.168.2.13/dashboard")
+        processed, _ = process_url(
+            "https://192.168.2.13/dashboard", _DEFAULT_RULE_OBJS
+        )
         assert processed is None
 
     def test_github_blob_rewritten_to_repo_root(self):
@@ -92,8 +104,9 @@ class TestProcessUrl:
 
     def test_huggingface_non_pdf_blob_passes_through(self):
         url = "https://huggingface.co/org/model/blob/main/config.json"
-        # .json is a skip suffix, so it never reaches the rewriter.
-        processed, _ = process_url(url)
+        # .json matches the seeded media skip rule (which runs before the
+        # rewriter), so it never reaches the huggingface rewriter.
+        processed, _ = process_url(url, _DEFAULT_RULE_OBJS)
         assert processed is None
 
     def test_huggingface_non_blob_passes_through(self):
@@ -188,6 +201,65 @@ class TestProcessUrlRules:
         assert processed == "https://scribe.rip/@a/post-123"
         assert "rewritten" in status
 
+    def test_freedium_default_rewrite_wraps_url(self):
+        # The seeded medium default keeps the host-swap shape: its slash-bearing
+        # replacement produces the wrapped freedium URL.
+        rules = [
+            Rule("domain", "medium.com", "rewrite", "freedium-mirror.cfd/https://medium.com")
+        ]
+        processed, _ = process_url("https://medium.com/@a/post-123", rules)
+        assert processed == (
+            "https://freedium-mirror.cfd/https://medium.com/@a/post-123"
+        )
+
+    def test_ends_with_skip(self):
+        rules = [Rule("ends_with", ".epub", "skip", "ebook")]
+        skipped, status = process_url("https://example.com/book.epub", rules)
+        kept, _ = process_url("https://example.com/page.html", rules)
+        assert skipped is None
+        assert status == "ebook"
+        assert kept == "https://example.com/page.html"
+
+    def test_ends_with_is_defeated_by_trailing_query(self):
+        # ends_with matches the whole URL string, so a query suffix defeats it.
+        rules = [Rule("ends_with", ".pdf", "skip", "pdf")]
+        plain, _ = process_url("https://example.com/foo.pdf", rules)
+        with_query, _ = process_url("https://example.com/foo.pdf?v=2", rules)
+        assert plain is None
+        assert with_query == "https://example.com/foo.pdf?v=2"
+
+    def test_starts_with_rewrite_replaces_prefix(self):
+        # The arxiv abs -> pdf pain, now without needing a regex.
+        rules = [
+            Rule(
+                "starts_with",
+                "https://arxiv.org/abs/",
+                "rewrite",
+                "https://arxiv.org/pdf/",
+            )
+        ]
+        processed, status = process_url("https://arxiv.org/abs/2606.14647", rules)
+        assert processed == "https://arxiv.org/pdf/2606.14647"
+        assert is_pdf_url(processed)
+        assert "rewritten" in status
+
+    def test_ends_with_rewrite_swaps_suffix(self):
+        rules = [Rule("ends_with", ".html", "rewrite", ".md")]
+        processed, _ = process_url("https://example.com/page.html", rules)
+        assert processed == "https://example.com/page.md"
+
+    def test_exact_rewrite_replaces_whole_url(self):
+        rules = [
+            Rule(
+                "exact",
+                "https://old.example.com/a",
+                "rewrite",
+                "https://new.example.com/b",
+            )
+        ]
+        processed, _ = process_url("https://old.example.com/a", rules)
+        assert processed == "https://new.example.com/b"
+
     def test_first_matching_rule_wins(self):
         rules = [
             Rule("domain", "example.com", "skip", "first"),
@@ -251,6 +323,63 @@ class TestProcessUrlRules:
         # Invalid regex should not crash; rule is skipped
         kept, status = process_url("https://example.com/page", rules)
         assert kept == "https://example.com/page"
+
+
+class TestValidateRule:
+    """The shared add-time validator (used by the web and CLI add paths)."""
+
+    def test_valid_rules_pass(self):
+        assert validate_rule("domain", "medium.com", "skip", None) is None
+        assert validate_rule("ends_with", ".epub", "skip", "ebook") is None
+        assert (
+            validate_rule(
+                "regex",
+                r"^https://arxiv\.org/abs/(.*)$",
+                "rewrite",
+                r"https://arxiv.org/pdf/$1",
+            )
+            is None
+        )
+
+    def test_unknown_match_type_rejected(self):
+        error = validate_rule("nonsense", "x", "skip", None)
+        assert error is not None and "match type" in error
+
+    def test_missing_pattern_rejected(self):
+        error = validate_rule("domain", "", "skip", None)
+        assert error is not None and "pattern" in error.lower()
+
+    def test_rewrite_without_replacement_rejected(self):
+        error = validate_rule("domain", "medium.com", "rewrite", None)
+        assert error is not None and "replacement" in error.lower()
+
+    def test_invalid_regex_rejected_with_message(self):
+        error = validate_rule("regex", r"(?P<invalid", "skip", None)
+        assert error is not None
+        assert "regex" in error.lower()
+
+    def test_capture_group_past_group_count_rejected(self):
+        # One capture group in the pattern, but $2 in the replacement.
+        error = validate_rule(
+            "regex",
+            r"^https://arxiv\.org/abs/(.*)$",
+            "rewrite",
+            r"https://arxiv.org/pdf/$2",
+        )
+        assert error is not None and "$2" in error
+
+    def test_host_replacement_with_slash_passes(self):
+        # The seeded freedium default has a slash in its host replacement; the
+        # validator must not reject it.
+        assert (
+            validate_rule(
+                "domain",
+                "medium.com",
+                "rewrite",
+                "freedium-mirror.cfd/https://medium.com",
+            )
+            is None
+        )
 
 
 class TestCanonicalize:

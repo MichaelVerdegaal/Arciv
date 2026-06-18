@@ -1,5 +1,6 @@
 """Data models for tracked pages and registered sources."""
 
+import re
 from dataclasses import dataclass
 
 # Prefix of the fail_reason written when a page is rejected purely for being
@@ -99,8 +100,68 @@ class Page:
 # Recognised rule match types and actions. Defined next to Rule so the URL
 # processor, the database seeder, and the web form all validate against one
 # list instead of three drifting copies.
-RULE_MATCH_TYPES = ("domain", "host", "starts_with", "exact", "regex")
+RULE_MATCH_TYPES = ("domain", "host", "starts_with", "ends_with", "exact", "regex")
 RULE_ACTIONS = ("skip", "rewrite")
+
+# Capture-group references in a regex rewrite replacement: ``$1``, ``${1}``,
+# with ``$$`` as a literal ``$`` escape (group 1 of the match). Kept in sync
+# with ``_expand_dollar_refs`` in arciv.core.fetch.url_processing, which does the
+# actual ``$n`` -> ``\n`` translation; here it is used only to count the refs.
+_REGEX_REF_RE = re.compile(r"\$(?:(\$)|\{(\d+)\}|(\d+))")
+
+
+def validate_rule(
+    match_type: str, pattern: str, action: str, replacement: str | None
+) -> str | None:
+    """Validate a rule's fields, returning an error message or None if valid.
+
+    Shared by the web ``add_rule`` handler and the CLI ``rules add`` so the two
+    entry points cannot drift (same reasoning as the single ``RULE_MATCH_TYPES``
+    list). Beyond the presence checks, this catches a broken regex pattern or a
+    capture-group reference past the pattern's group count at add time, instead
+    of letting the rule silently never fire at processing time (the URL
+    processor swallows ``re.error`` as a runtime backstop).
+
+    Args:
+        match_type: Candidate match type (checked against RULE_MATCH_TYPES).
+        pattern: The match pattern (must be non-empty).
+        action: Candidate action (checked against RULE_ACTIONS).
+        replacement: The replacement/reason; required for rewrite.
+
+    Returns:
+        An error message describing the first problem found, or None if the
+        rule is valid.
+    """
+    if match_type not in RULE_MATCH_TYPES:
+        return (
+            f"Unknown match type: {match_type!r}. "
+            f"Choose one of: {', '.join(RULE_MATCH_TYPES)}."
+        )
+    if action not in RULE_ACTIONS:
+        return (
+            f"Unknown action: {action!r}. Choose one of: {', '.join(RULE_ACTIONS)}."
+        )
+    if not pattern:
+        return "Enter a pattern to match."
+    if action == "rewrite" and not replacement:
+        return "A rewrite rule needs a replacement."
+
+    if match_type == "regex":
+        try:
+            compiled = re.compile(pattern)
+        except re.error as exc:
+            return f"Invalid regex pattern: {exc}."
+        if action == "rewrite" and replacement:
+            for m in _REGEX_REF_RE.finditer(replacement):
+                if m.group(1):  # $$ -> literal $, not a group reference
+                    continue
+                index = int(m.group(2) or m.group(3))
+                if index > compiled.groups:
+                    return (
+                        f"Replacement references ${index} but the pattern has "
+                        f"only {compiled.groups} capture group(s)."
+                    )
+    return None
 
 
 @dataclass
@@ -116,6 +177,9 @@ class Rule:
     - ``host``: the exact hostname (port included), e.g.
       ``raw.githubusercontent.com``.
     - ``starts_with``: a URL prefix, e.g. ``https://localhost``.
+    - ``ends_with``: a URL suffix matched against the whole URL string, e.g.
+      ``.epub``. A trailing query defeats it: ``.pdf`` matches ``…/foo.pdf``
+      but not ``…/foo.pdf?v=2``.
     - ``exact``: the whole URL.
     - ``regex``: a regular expression (case-insensitive). Supports capture
       groups in ``replacement`` as ``$1``, ``$2``, etc., e.g. pattern
@@ -126,16 +190,24 @@ class Rule:
 
     - ``skip``: the URL is not archived; ``replacement`` holds the reason
       shown to the user (optional, a generic reason is used if blank).
-    - ``rewrite``: replaces the URL. For most match types, swaps the hostname.
-      For ``regex`` match type, ``replacement`` can use ``$1``, ``$2``, etc.
-      to refer to captured groups, enabling full URL rewrites like
-      ``^https://arxiv\.org/abs/(.*)$`` → ``https://arxiv.org/pdf/$1``.
+    - ``rewrite``: replaces whatever the match selected, so ``replacement``
+      stands in for a different span per match type:
+
+      - ``domain``/``host``: swaps the netloc (host), keeping path and query.
+      - ``starts_with``: replaces the matched prefix.
+      - ``ends_with``: replaces the matched suffix (it can only swap a suffix,
+        not strip it, since a replacement is required).
+      - ``exact``: replaces the whole URL.
+      - ``regex``: ``replacement`` can use ``$1``, ``$2``, etc. to refer to
+        captured groups, enabling full URL rewrites like
+        ``^https://arxiv\.org/abs/(.*)$`` → ``https://arxiv.org/pdf/$1``.
 
     Attributes:
         match_type: One of RULE_MATCH_TYPES.
         pattern: The string compared against the URL per match_type.
         action: One of RULE_ACTIONS.
-        replacement: For skip, the reason (optional); for rewrite, the new host.
+        replacement: For skip, the reason (optional); for rewrite, the new
+            span (host, prefix, suffix, whole URL, or regex replacement).
         position: Sort key for ordering; lower positions run first.
         id: Database row id, or None before the rule is inserted.
         added_at: ISO timestamp of when the rule was created.

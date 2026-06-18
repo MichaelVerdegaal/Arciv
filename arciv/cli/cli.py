@@ -59,7 +59,7 @@ from typer.core import TyperGroup
 
 from arciv.settings import DATA_DIR, DB_PATH, SAVED_DIR, configure_logger
 from arciv.core.db import PageDatabase, Rule, Source
-from arciv.core.db.models import RULE_ACTIONS, RULE_MATCH_TYPES
+from arciv.core.db.models import RULE_ACTIONS, RULE_MATCH_TYPES, validate_rule
 from arciv.core.fetch import process_url
 from arciv.core.pipeline import (
     ArchiveResult,
@@ -778,7 +778,9 @@ def rules_add(
             "--replacement",
             "-r",
             help=(
-                "For rewrite: the new host (or regex replacement). "
+                "For rewrite: the replacement for the matched span — a new host "
+                "(domain/host), prefix (starts_with), suffix (ends_with), whole "
+                "URL (exact), or regex replacement. "
                 "For skip: the reason shown when archiving (optional)."
             ),
         ),
@@ -793,10 +795,9 @@ def rules_add(
     pattern = pattern.strip()
     replacement = (replacement or "").strip() or None
 
-    if not pattern:
-        _fail("Enter a pattern to match.", code=EXIT_USAGE)
-    if action == "rewrite" and not replacement:
-        _fail("A rewrite rule needs a replacement host.", code=EXIT_USAGE)
+    error = validate_rule(match_type, pattern, action, replacement)
+    if error:
+        _fail(error, code=EXIT_USAGE)
 
     with PageDatabase(DB_PATH) as db:
         rule = db.add_rule(

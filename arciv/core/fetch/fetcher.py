@@ -20,13 +20,13 @@ from patchright.async_api import async_playwright
 
 from arciv.core.db import Page, PageDatabase
 
-from .url_processor import (
+from .url_helpers import (
     is_pdf_url,
-    process_url,
     registered_domain,
     slug_for_url,
     split_url,
 )
+from .url_processing import process_url
 
 TIMEOUT_MS = 30_000
 # Extra time to let JS-rendered pages (SPAs) finish loading after

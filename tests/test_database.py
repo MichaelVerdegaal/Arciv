@@ -5,7 +5,7 @@ import sqlite3
 import pytest
 
 from arciv.core.db import Page, PageDatabase, Rule, Source
-from arciv.core.fetch import slug_for_url
+from arciv.core.fetch import process_url, slug_for_url
 
 
 @pytest.fixture
@@ -736,6 +736,25 @@ class TestRules:
         rules = db.list_rules()
         positions = [r.position for r in rules]
         assert positions == sorted(positions)
+
+    def test_seeded_plumbing_rules_skip_noncontent(self, db):
+        # The media/image-proxy/IP-host skips, formerly hardcoded handlers, are
+        # now seeded rules; verify they fire through process_url end-to-end.
+        rules = db.list_rules()
+        assert process_url("https://example.com/photo.png", rules)[0] is None
+        assert process_url("https://example.com/data.json", rules)[0] is None
+        assert process_url(
+            "https://example.com/_next/image?url=%2Fcat.jpg", rules
+        )[0] is None
+        assert process_url("https://192.168.2.13/dashboard", rules)[0] is None
+        # A normal content URL is not skipped by the plumbing rules.
+        kept, _ = process_url("https://example.com/article", rules)
+        assert kept == "https://example.com/article"
+
+    def test_plumbing_rules_run_before_policy_rules(self, db):
+        # Plumbing skips are seeded first so they keep firing ahead of policy.
+        patterns = [r.pattern for r in db.list_rules()]
+        assert patterns.index("/_next/image") < patterns.index("https://localhost")
 
     def test_add_rule_appends_to_end(self, db):
         before = db.list_rules()

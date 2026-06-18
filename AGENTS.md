@@ -44,12 +44,15 @@ public interface, so changes to it ripple beyond the Python code:
   path), `source_name` (NULL for ad-hoc files; cleared when a source is removed),
   `indexed_at`. `sources` holds registered directories: `name` (PK), `path`, `added_at`.
   `rules` holds the user-editable URL-processing rules applied in order during
-  indexing/archiving: `id` (PK), `match_type` (`domain`/`host`/`starts_with`/`exact`),
-  `pattern`, `action` (`skip`/`rewrite`), `replacement` (skip reason or rewrite host),
-  `position` (apply order), `added_at`. A new database is seeded with default skip
-  rules (migrated from the old hardcoded lists); deleting them all is honoured (no
-  re-seed on reopen).
-- `<data dir>/saved/<slug>/` is one folder per page: `page.html` (raw fetch) or `page.pdf`, plus
+  indexing/archiving: `id` (PK), `match_type`
+  (`domain`/`host`/`starts_with`/`ends_with`/`exact`/`regex`), `pattern`, `action`
+  (`skip`/`rewrite`), `replacement` (skip reason, or the rewrite target — the new
+  host/prefix/suffix/whole URL/regex replacement for the matched span),
+  `position` (apply order), `added_at`. A new database is seeded with default
+  rules (migrated from the old hardcoded lists, including the media/image-proxy/
+  IP-host plumbing skips, which now lead the list); deleting them all is honoured
+  (no re-seed on reopen).
+- `<data dir>/saved/<slug>/` — one folder per page: `page.html` (raw fetch) or `page.pdf`, plus
   `page.md` once parsed. Slug format is `<domain>-<hash8>`, sanitized to be a safe directory
   name on Linux and Windows.
 - The data root defaults to the OS user data dir via platformdirs (Linux:

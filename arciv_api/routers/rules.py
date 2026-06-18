@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 
 from arciv.core.db import PageDatabase, Rule
-from arciv.core.db.models import RULE_ACTIONS, RULE_MATCH_TYPES
+from arciv.core.db.models import RULE_ACTIONS, RULE_MATCH_TYPES, validate_rule
 
 from .. import config
 from ..dependencies import get_db
@@ -55,14 +55,9 @@ async def add_rule(signals: ReadSignals) -> DatastarResponse:
     action = (data.get("action") or "").strip()
     replacement = (data.get("replacement") or "").strip() or None
 
-    if match_type not in RULE_MATCH_TYPES:
-        return _result_patch(f"Unknown match type: {match_type!r}.", "error")
-    if action not in RULE_ACTIONS:
-        return _result_patch(f"Unknown action: {action!r}.", "error")
-    if not pattern:
-        return _result_patch("Enter a pattern to match.", "error")
-    if action == "rewrite" and not replacement:
-        return _result_patch("A rewrite rule needs a replacement host.", "error")
+    error = validate_rule(match_type, pattern, action, replacement)
+    if error:
+        return _result_patch(error, "error")
 
     rule = Rule(
         match_type=match_type,
