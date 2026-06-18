@@ -33,6 +33,39 @@ LOGS_DIR = DATA_DIR / "logs"
 DB_PATH = DATA_DIR / "arciv.db"
 
 
+def _env_int(name: str, default: int) -> int:
+    """Read a positive integer from the environment, falling back to default.
+
+    A missing, non-integer, or below-1 value uses ``default`` (with a
+    warning for malformed input), so a typo in an ``ARCIV_*`` var degrades
+    to the shipped behavior instead of crashing the CLI on startup.
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(f"Ignoring invalid {name}={raw!r}; using {default}")
+        return default
+    if value < 1:
+        logger.warning(f"Ignoring out-of-range {name}={raw!r}; using {default}")
+        return default
+    return value
+
+
+# Pipeline tunables, overridable via ARCIV_* env vars; the fallbacks below
+# are the defaults. The pipeline layer (core/pipeline) reads these and passes
+# them into the core mechanisms, which keep their own neutral defaults so they
+# stay usable without settings (e.g. in tests).
+DEFAULT_CONCURRENCY = _env_int("ARCIV_CONCURRENCY", 8)
+DEFAULT_MAX_RETRIES = _env_int("ARCIV_MAX_RETRIES", 2)
+TIMEOUT_MS = _env_int("ARCIV_TIMEOUT_MS", 30_000)
+# Minimum extracted word count to accept a page; below this it's rejected as
+# too short. This gate decides what gets archived versus dropped.
+DEFAULT_MIN_WORDS = _env_int("ARCIV_MIN_WORDS", 150)
+
+
 # Maps the CLI's --color choice to loguru's colorize argument. "auto"
 # becomes None so loguru auto-detects the sink's TTY and honors
 # NO_COLOR / FORCE_COLOR.

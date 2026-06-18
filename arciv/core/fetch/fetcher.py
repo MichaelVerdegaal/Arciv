@@ -28,6 +28,9 @@ from .url_helpers import (
 )
 from .url_processing import process_url
 
+# Neutral mechanism defaults so a Fetcher is usable without settings (e.g.
+# in tests). The env-tunable values the CLI actually runs with live in
+# arciv.settings and are injected by the pipeline layer (pipeline/fetch.py).
 TIMEOUT_MS = 30_000
 # Extra time to let JS-rendered pages (SPAs) finish loading after
 # domcontentloaded. Without it, content() can return an empty shell.

@@ -57,6 +57,7 @@ arciv status                         # pipeline counts + failure summary
 arciv list --n 50                    # fetched pages: time, domain, URL
 arciv list --domain medium.com       # only pages from one domain
 arciv path https://example.com/post  # filepath of its archived markdown
+arciv prune failed                   # drop stale rows: missing | failed | all
 arciv db dir                         # where the archive lives on disk
 arciv db remove                      # delete the database (asks first)
 ```

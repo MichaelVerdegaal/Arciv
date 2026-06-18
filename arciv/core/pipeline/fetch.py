@@ -10,7 +10,12 @@ from collections import Counter
 
 from loguru import logger
 
-from arciv.settings import SAVED_DIR
+from arciv.settings import (
+    DEFAULT_CONCURRENCY,
+    DEFAULT_MAX_RETRIES,
+    SAVED_DIR,
+    TIMEOUT_MS,
+)
 from arciv.core.db import Page, PageDatabase
 from arciv.core.fetch import Fetcher
 
@@ -18,7 +23,13 @@ from arciv.core.fetch import Fetcher
 def fetch_urls(db: PageDatabase, urls: list[str], refetch: bool = False) -> list[Page]:
     """Fetch the given URLs (re-downloading if refetch) and return the
     successfully archived Pages."""
-    fetcher = Fetcher(db, saved_dir=SAVED_DIR)
+    fetcher = Fetcher(
+        db,
+        saved_dir=SAVED_DIR,
+        page_timeout=TIMEOUT_MS,
+        max_concurrency=DEFAULT_CONCURRENCY,
+        max_retries=DEFAULT_MAX_RETRIES,
+    )
     return fetcher.fetch_batch(urls, refetch=refetch)
 
 

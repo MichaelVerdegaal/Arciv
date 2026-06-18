@@ -118,10 +118,13 @@ Only what real usage demands.
 - `arciv db` (✅ implemented): `db dir` prints the data directory (answers "where does
   my archive live", also without `ARCIV_DATA_DIR` set); `db remove` deletes the SQLite
   DB after confirmation (`--force` skips asking; archived files under `saved/` are kept).
-- Parked until the implementation picture is certain:
-  - Stale-row pruning (`arciv prune`?): v1 pruned failed rows whose URLs vanished from
-    the notes during indexing; that behavior was dropped in the stage split because partial
-    (per-source) indexing made it unsafe. Revisit if dead rows actually accumulate.
+- `arciv prune <mode>` (✅ implemented): delete stale page rows and their archived
+  `saved/<slug>/` folders. Three modes, narrowest first: `missing` drops failed rows no
+  note links to anymore, `failed` drops every failed row, `all` wipes the whole index.
+  Asks for confirmation unless `--force`; registered sources are untouched. (v1 pruned
+  failed rows whose URLs vanished from the notes during indexing; that auto-pruning was
+  dropped in the stage split because partial per-source indexing made it unsafe, so pruning
+  is now an explicit command instead.)
 - Logging cleanup (later): prune noisy statements and add a `--verbose` flag, so default
   runs stay quiet and the detail lives behind the flag.
 
