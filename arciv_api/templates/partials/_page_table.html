@@ -15,9 +15,9 @@
       <tr>
         <td><a href="/page/{{ p.slug }}">{{ p.title or p.url }}</a></td>
         <td class="muted">{{ p.domain }}</td>
-        <td class="muted">{{ p.word_count or '—' }}</td>
+        <td class="muted">{{ p.word_count or '-' }}</td>
         <td>{{ state_badge(p.state) }}</td>
-        <td class="muted">{{ (p.fetched_at or '')[:10] or '—' }}</td>
+        <td class="muted">{{ (p.fetched_at or '')[:10] or '-' }}</td>
         <td><a href="{{ p.url }}" target="_blank" rel="noopener noreferrer">link ↗</a></td>
       </tr>
       {% endfor %}

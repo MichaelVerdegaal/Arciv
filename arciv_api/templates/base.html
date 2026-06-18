@@ -4,10 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}Arciv{% endblock %}</title>
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/beercss@4.0.21/dist/cdn/beer.min.css"
-    />
+    {# BeerCSS 4.0.21, self-hosted (like datastar.js) so the app is fully
+       self-contained and works offline. The Material Symbols icon font sits
+       next to it in /static; beer.min.css references it by relative URL. #}
+    <link rel="stylesheet" href="/static/beer.min.css" />
     <link rel="stylesheet" href="/static/app.css" />
     <script type="module" src="/static/datastar.js"></script>
   </head>
@@ -26,7 +26,7 @@
         ('/rules', 'Rules', 'rule', 'rules'),
         ('/status', 'Status', 'insights', 'status')] %}
 
-    {# Navigation rail — medium and large screens. #}
+    {# Navigation rail: medium and large screens. #}
     <nav class="left m l">
       <header class="center-align">
         <a href="/">
@@ -42,7 +42,7 @@
       {% endfor %}
     </nav>
 
-    {# Bottom bar — small screens. #}
+    {# Bottom bar: small screens. #}
     <nav class="bottom s">
       {% for href, label, icon, key in nav_items %}
       <a href="{{ href }}"{% if active == key %} class="active"{% endif %}>
@@ -52,7 +52,7 @@
       {% endfor %}
     </nav>
 
-    {# Top app bar — archive a URL, reachable from every page. #}
+    {# Top app bar: archive a URL, reachable from every page. #}
     <header class="fixed" data-signals="{url: ''}">
       <nav>
         <div class="field prefix small max round">

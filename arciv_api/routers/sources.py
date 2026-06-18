@@ -27,15 +27,14 @@ from arciv.core.index import index_source
 
 from .. import config
 from ..dependencies import get_db
-from ..rendering import render
+from ..rendering import alert_patch, render
 
 router = APIRouter()
 
 
 def _result_patch(message: str, kind: str) -> DatastarResponse:
     """Patch the inline #source-result alert (used for validation problems)."""
-    fragment = render("partials/_source_result.html", message=message, kind=kind)
-    return DatastarResponse(ServerSentEventGenerator.patch_elements(fragment))
+    return alert_patch("source-result", message, kind)
 
 
 @router.get("/sources", response_class=HTMLResponse)

@@ -21,15 +21,14 @@ from arciv.core.db.models import RULE_ACTIONS, RULE_MATCH_TYPES, validate_rule
 
 from .. import config
 from ..dependencies import get_db
-from ..rendering import render
+from ..rendering import alert_patch, render
 
 router = APIRouter()
 
 
 def _result_patch(message: str, kind: str) -> DatastarResponse:
     """Patch the inline #rule-result alert (used for validation problems)."""
-    fragment = render("partials/_rule_result.html", message=message, kind=kind)
-    return DatastarResponse(ServerSentEventGenerator.patch_elements(fragment))
+    return alert_patch("rule-result", message, kind)
 
 
 @router.get("/rules", response_class=HTMLResponse)

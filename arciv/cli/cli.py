@@ -51,7 +51,7 @@ import sys
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import NoReturn
+from typing import Annotated, Literal, NoReturn
 
 import typer
 from loguru import logger
@@ -145,12 +145,10 @@ rules_app = typer.Typer(
 cli.add_typer(rules_app, name="rules")
 
 
-class ColorWhen(str, Enum):
-    """Choices for the global --color option."""
-
-    auto = "auto"
-    always = "always"
-    never = "never"
+# Choices for the global --color option. A Literal gives Typer the same
+# choice validation and shell completion as an Enum, but hands the command a
+# plain str (no .value unwrapping) and needs no separate class.
+ColorWhen = Literal["auto", "always", "never"]
 
 
 class PruneMode(str, Enum):
@@ -166,7 +164,7 @@ class PruneMode(str, Enum):
 _PRUNE_DESCRIPTIONS: dict[PruneMode, str] = {
     PruneMode.missing: "failed pages no longer indexed in any note",
     PruneMode.failed: "all failed pages (fetch failures and skipped/too-short)",
-    PruneMode.all: "EVERY page — the entire archive index",
+    PruneMode.all: "EVERY page (the entire archive index)",
 }
 
 
@@ -182,6 +180,32 @@ def _fail(message: str, code: int = 1) -> NoReturn:
     raise typer.Exit(code)
 
 
+def _validate_match_type(value: str) -> str:
+    """Typer callback: reject an unknown rule match type during parsing.
+
+    Runs before the command body so the choice is validated the way Typer
+    intends, while still exiting EXIT_USAGE (not Typer's default 2) to keep
+    the CLI's sysexits convention.
+    """
+    if value not in RULE_MATCH_TYPES:
+        _fail(
+            f"Unknown match type: {value!r}. "
+            f"Choose one of: {', '.join(RULE_MATCH_TYPES)}.",
+            code=EXIT_USAGE,
+        )
+    return value
+
+
+def _validate_action(value: str) -> str:
+    """Typer callback: reject an unknown rule action during parsing."""
+    if value not in RULE_ACTIONS:
+        _fail(
+            f"Unknown action: {value!r}. Choose one of: {', '.join(RULE_ACTIONS)}.",
+            code=EXIT_USAGE,
+        )
+    return value
+
+
 def _resolve_level(verbose: int, quiet: bool) -> str:
     """Map -q / -v / -vv to a loguru level (quiet wins over verbose)."""
     if quiet:
@@ -195,54 +219,65 @@ def _resolve_level(verbose: int, quiet: bool) -> str:
 
 @cli.callback()
 def main(
-    verbose: int = typer.Option(
-        0,
-        "--verbose",
-        "-v",
-        count=True,
-        help="Increase log detail; repeat for more (-v debug, -vv trace).",
-    ),
-    quiet: bool = typer.Option(
-        False, "--quiet", "-q", help="Only show errors (wins over --verbose)."
-    ),
-    color: ColorWhen = typer.Option(
-        ColorWhen.auto, "--color", help="Colorize logs: auto, always, or never."
-    ),
-    json_out: bool = typer.Option(
-        False, "--json", help="Emit machine-readable output on stdout."
-    ),
+    verbose: Annotated[
+        int,
+        typer.Option(
+            "--verbose",
+            "-v",
+            count=True,
+            help="Increase log detail; repeat for more (-v debug, -vv trace).",
+        ),
+    ] = 0,
+    quiet: Annotated[
+        bool,
+        typer.Option("--quiet", "-q", help="Only show errors (wins over --verbose)."),
+    ] = False,
+    color: Annotated[
+        ColorWhen,
+        typer.Option("--color", help="Colorize logs: auto, always, or never."),
+    ] = "auto",
+    json_out: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable output on stdout."),
+    ] = False,
 ) -> None:
     """Arciv: personal knowledge archive.
 
     Global options go before the command, e.g. ``arciv -v --json status``.
     Data goes to stdout; logs and diagnostics go to stderr.
     """
-    configure_logger(level=_resolve_level(verbose, quiet), color=color.value)
+    configure_logger(level=_resolve_level(verbose, quiet), color=color)
     set_json_output(json_out)
 
 
 @cli.command()
 def get(
-    url: str | None = typer.Argument(
-        None, help="A single URL to archive, or '-' to read URLs from stdin."
-    ),
-    file_path: Path | None = typer.Option(
-        None,
-        "--file",
-        exists=True,
-        dir_okay=False,
-        help="Archive all links within a single file.",
-    ),
-    dir_path: Path | None = typer.Option(
-        None,
-        "--dir",
-        exists=True,
-        file_okay=False,
-        help="Archive all links of all files within a directory.",
-    ),
-    refetch: bool = typer.Option(
-        False, "--refetch", help="Re-download pages even if already fetched."
-    ),
+    url: Annotated[
+        str | None,
+        typer.Argument(help="A single URL to archive, or '-' to read URLs from stdin."),
+    ] = None,
+    file_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--file",
+            exists=True,
+            dir_okay=False,
+            help="Archive all links within a single file.",
+        ),
+    ] = None,
+    dir_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--dir",
+            exists=True,
+            file_okay=False,
+            help="Archive all links of all files within a directory.",
+        ),
+    ] = None,
+    refetch: Annotated[
+        bool,
+        typer.Option("--refetch", help="Re-download pages even if already fetched."),
+    ] = False,
 ) -> None:
     """Archive a URL, the links in a file, or a whole directory.
 
@@ -295,18 +330,22 @@ def _report_archive(name: str, result: ArchiveResult) -> None:
 
 @cli.command()
 def add(
-    directory: Path = typer.Argument(
-        ...,
-        exists=True,
-        file_okay=False,
-        help="The directory to register (must exist).",
-    ),
-    name: str = typer.Argument(..., help="The unique name for this source."),
-    no_archive: bool = typer.Option(
-        False,
-        "--no-archive",
-        help="Only register the source; skip indexing/fetching/parsing it now.",
-    ),
+    directory: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            file_okay=False,
+            help="The directory to register (must exist).",
+        ),
+    ],
+    name: Annotated[str, typer.Argument(help="The unique name for this source.")],
+    no_archive: Annotated[
+        bool,
+        typer.Option(
+            "--no-archive",
+            help="Only register the source; skip indexing/fetching/parsing it now.",
+        ),
+    ] = False,
 ) -> None:
     """Register DIRECTORY as a source named NAME and archive it.
 
@@ -330,12 +369,13 @@ def add(
 
 @cli.command()
 def archive(
-    source: str | None = typer.Argument(
-        None, help="Name of the registered source to archive."
-    ),
-    all_sources: bool = typer.Option(
-        False, "--all", help="Archive every registered source."
-    ),
+    source: Annotated[
+        str | None,
+        typer.Argument(help="Name of the registered source to archive."),
+    ] = None,
+    all_sources: Annotated[
+        bool, typer.Option("--all", help="Archive every registered source.")
+    ] = False,
 ) -> None:
     """Archive a source end to end: index, then batch-fetch and parse.
 
@@ -370,7 +410,7 @@ def archive(
 
 @cli.command()
 def remove(
-    name: str = typer.Argument(..., help="The source name to unregister."),
+    name: Annotated[str, typer.Argument(help="The source name to unregister.")],
 ) -> None:
     """Unregister the source named NAME (indexed pages are kept)."""
     with PageDatabase(DB_PATH) as db:
@@ -401,12 +441,13 @@ def sources() -> None:
 
 @cli.command()
 def index(
-    source: str | None = typer.Argument(
-        None, help="Name of the registered source to index."
-    ),
-    all_sources: bool = typer.Option(
-        False, "--all", help="Index every registered source."
-    ),
+    source: Annotated[
+        str | None,
+        typer.Argument(help="Name of the registered source to index."),
+    ] = None,
+    all_sources: Annotated[
+        bool, typer.Option("--all", help="Index every registered source.")
+    ] = False,
 ) -> None:
     """Index stage: extract links from a registered SOURCE (or --all)."""
     if bool(source) == all_sources:
@@ -425,11 +466,13 @@ def index(
 
 @cli.command()
 def fetch(
-    refetch: bool = typer.Option(
-        False,
-        "--refetch",
-        help="Re-download every known page, even fetched/failed ones.",
-    ),
+    refetch: Annotated[
+        bool,
+        typer.Option(
+            "--refetch",
+            help="Re-download every known page, even fetched/failed ones.",
+        ),
+    ] = False,
 ) -> None:
     """Fetch stage: download indexed URLs that are still pending."""
     with PageDatabase(DB_PATH) as db:
@@ -443,9 +486,12 @@ def fetch(
 
 @cli.command()
 def parse(
-    reparse: bool = typer.Option(
-        False, "--reparse", help="Re-parse every fetched page, not just unparsed ones."
-    ),
+    reparse: Annotated[
+        bool,
+        typer.Option(
+            "--reparse", help="Re-parse every fetched page, not just unparsed ones."
+        ),
+    ] = False,
 ) -> None:
     """Parse stage: convert fetched HTML/PDFs into markdown."""
     with PageDatabase(DB_PATH) as db:
@@ -454,17 +500,19 @@ def parse(
 
 @cli.command()
 def prune(
-    mode: PruneMode = typer.Argument(
-        ...,
-        help=(
-            "missing: drop failed rows no longer indexed; "
-            "failed: drop all failed rows; "
-            "all: drop every row (destructive)."
+    mode: Annotated[
+        PruneMode,
+        typer.Argument(
+            help=(
+                "missing: drop failed rows no longer indexed; "
+                "failed: drop all failed rows; "
+                "all: drop every row (destructive)."
+            ),
         ),
-    ),
-    force: bool = typer.Option(
-        False, "--force", help="Delete without asking for confirmation."
-    ),
+    ],
+    force: Annotated[
+        bool, typer.Option("--force", help="Delete without asking for confirmation.")
+    ] = False,
 ) -> None:
     """Delete stale page rows and their archived files under saved/.
 
@@ -473,7 +521,7 @@ def prune(
     - ``missing`` removes failed pages that no note links to anymore (the dead
       rows left when a URL drops out of the notes and re-indexing unlinks it).
     - ``failed`` removes every page with a failure reason, indexed or not.
-    - ``all`` wipes every page row — the whole archive index.
+    - ``all`` wipes every page row, the whole archive index.
 
     The matching ``saved/<slug>/`` folders are deleted too, so disk space is
     reclaimed. Link rows are removed alongside the pages; registered sources
@@ -545,23 +593,28 @@ def status() -> None:
 
 @cli.command(name="list")
 def list_pages(
-    limit: int = typer.Option(
-        20, "--n", min=0, help="Number of rows to show; 0 shows everything."
-    ),
-    reverse: bool = typer.Option(
-        False, "--reverse", help="Oldest first instead of newest first."
-    ),
-    domain: str | None = typer.Option(
-        None,
-        "--domain",
-        help="Only show pages from this registered domain, e.g. medium.com.",
-    ),
-    null: bool = typer.Option(
-        False,
-        "--null",
-        "-0",
-        help="Separate records with a NUL byte instead of a newline (xargs -0).",
-    ),
+    limit: Annotated[
+        int,
+        typer.Option("--n", min=0, help="Number of rows to show; 0 shows everything."),
+    ] = 20,
+    reverse: Annotated[
+        bool, typer.Option("--reverse", help="Oldest first instead of newest first.")
+    ] = False,
+    domain: Annotated[
+        str | None,
+        typer.Option(
+            "--domain",
+            help="Only show pages from this registered domain, e.g. medium.com.",
+        ),
+    ] = None,
+    null: Annotated[
+        bool,
+        typer.Option(
+            "--null",
+            "-0",
+            help="Separate records with a NUL byte instead of a newline (xargs -0).",
+        ),
+    ] = False,
 ) -> None:
     """List fetched pages, newest first: fetch time, domain, URL.
 
@@ -588,9 +641,9 @@ def list_pages(
 
 @cli.command()
 def path(
-    url: str = typer.Argument(
-        ..., help="The URL whose archived markdown path to print."
-    ),
+    url: Annotated[
+        str, typer.Argument(help="The URL whose archived markdown path to print.")
+    ],
 ) -> None:
     """Print the filepath of URL's archived markdown.
 
@@ -630,14 +683,15 @@ def db_dir() -> None:
 
 @db_app.command(name="remove")
 def db_remove(
-    force: bool = typer.Option(
-        False, "--force", help="Delete without asking for confirmation."
-    ),
-    remove_files: bool = typer.Option(
-        False,
-        "--remove-files",
-        help="Also delete the archived files under saved/.",
-    ),
+    force: Annotated[
+        bool, typer.Option("--force", help="Delete without asking for confirmation.")
+    ] = False,
+    remove_files: Annotated[
+        bool,
+        typer.Option(
+            "--remove-files", help="Also delete the archived files under saved/."
+        ),
+    ] = False,
 ) -> None:
     """Delete the SQLite database.
 
@@ -666,8 +720,8 @@ def db_remove(
 def rules_list() -> None:
     """List URL rules in the order they are applied (first match wins).
 
-    Columns are tab-separated — id, match type, pattern, action, and the
-    replacement/reason — so the output pipes cleanly into grep/cut/awk. The
+    Columns are tab-separated (id, match type, pattern, action, and the
+    replacement/reason) so the output pipes cleanly into grep/cut/awk. The
     leading id is what ``arciv rules remove`` takes. With --json, emits JSONL
     (one object per line).
     """
@@ -701,30 +755,43 @@ def rules_list() -> None:
 
 @rules_app.command(name="add")
 def rules_add(
-    match_type: str = typer.Argument(
-        ..., help=f"How to match the URL: one of {', '.join(RULE_MATCH_TYPES)}."
-    ),
-    pattern: str = typer.Argument(..., help="The string compared against the URL."),
-    action: str = typer.Argument(
-        ..., help=f"What to do on a match: one of {', '.join(RULE_ACTIONS)}."
-    ),
-    replacement: str | None = typer.Option(
-        None,
-        "--replacement",
-        "-r",
-        help=(
-            "For rewrite: the replacement for the matched span — a new host "
-            "(domain/host), prefix (starts_with), suffix (ends_with), whole "
-            "URL (exact), or regex replacement. "
-            "For skip: the reason shown when archiving (optional)."
+    match_type: Annotated[
+        str,
+        typer.Argument(
+            callback=_validate_match_type,
+            help=f"How to match the URL: one of {', '.join(RULE_MATCH_TYPES)}.",
         ),
-    ),
+    ],
+    pattern: Annotated[
+        str, typer.Argument(help="The string compared against the URL.")
+    ],
+    action: Annotated[
+        str,
+        typer.Argument(
+            callback=_validate_action,
+            help=f"What to do on a match: one of {', '.join(RULE_ACTIONS)}.",
+        ),
+    ],
+    replacement: Annotated[
+        str | None,
+        typer.Option(
+            "--replacement",
+            "-r",
+            help=(
+                "For rewrite: the replacement for the matched span — a new host "
+                "(domain/host), prefix (starts_with), suffix (ends_with), whole "
+                "URL (exact), or regex replacement. "
+                "For skip: the reason shown when archiving (optional)."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Append a URL rule (a match plus an action).
 
     New rules go to the end of the list, so adding one never reorders the
     existing rules. See ``arciv rules list`` for the order they are applied.
     """
+    # match_type and action are validated by their argument callbacks above.
     pattern = pattern.strip()
     replacement = (replacement or "").strip() or None
 
@@ -757,9 +824,10 @@ def rules_add(
 
 @rules_app.command(name="remove")
 def rules_remove(
-    rule_id: int = typer.Argument(
-        ..., help="The id of the rule to remove (see 'arciv rules list')."
-    ),
+    rule_id: Annotated[
+        int,
+        typer.Argument(help="The id of the rule to remove (see 'arciv rules list')."),
+    ],
 ) -> None:
     """Remove a URL rule by its id."""
     with PageDatabase(DB_PATH) as db:

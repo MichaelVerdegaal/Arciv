@@ -1,7 +1,6 @@
 {% extends "base.html" %}
-{% block title %}Not found — Arciv{% endblock %}
+{% from "_macros.html" import not_found_body %}
+{% block title %}Not found | Arciv{% endblock %}
 {% block main %}
-<h4>Not found</h4>
-<p class="muted">{% if message %}{{ message }}{% else %}No archived page has the slug <code>{{ slug }}</code>.{% endif %}</p>
-<p><a href="{{ back_href or '/' }}">← {{ back_label or 'Back to archive' }}</a></p>
+{{ not_found_body(slug=slug, message=message, back_href=back_href or '/', back_label=back_label or 'Back to archive') }}
 {% endblock %}

@@ -17,13 +17,10 @@ from typing import Any
 
 import typer
 
-# Exit codes. The 64/65/66 values follow the BSD sysexits convention so
+# Exit codes. The 64/66 values follow the BSD sysexits convention so
 # scripts can branch on them. (Typer's own argument-parsing errors still
 # exit 2, the click/Unix convention for a usage error.)
-EXIT_OK = 0
-EXIT_FAILURE = 1
 EXIT_USAGE = 64  # bad/missing argument combination
-EXIT_DATAERR = 65  # input data was present but unusable
 EXIT_NOINPUT = 66  # unknown URL or missing source
 
 # Whether --json was requested; set once by the CLI callback.

@@ -1,14 +1,14 @@
 # Arciv
 
 ## Project Description
-Arciv is a personal archival tool for reading material — blog posts, research papers,
+Arciv is a personal archival tool for reading material: blog posts, research papers,
 documentation. Not books, not videos. It extracts URLs from markdown files (or takes them
 directly on the CLI), scrapes their content, and archives it as markdown on disk. The goal: a
 trustworthy archive of everything worth reading again, retrievable years later. Retrieval today
 is the inspection commands (`arciv list`, `arciv path`) plus ripgrep over the archive; a web
 UI for browsing it is the next step (see PLAN.md).
 
-The project splits into three isolated parts: the **CLI tool** (this package — all archival
+The project splits into three isolated parts: the **CLI tool** (this package, all archival
 logic, installable as a uv tool, not containerized), and a future **backend** and **frontend**
 which each get a dedicated container.
 
@@ -17,24 +17,24 @@ which each get a dedicated container.
 Three stages, no writeback into the notes. Each stage has a dedicated CLI command;
 `arciv get` runs all three in order on a URL, a file (`--file`), or a directory (`--dir`).
 
-1. **Indexing** (`arciv index`, `arciv/core/index/`) — Parse note files (`.md`,
+1. **Indexing** (`arciv index`, `arciv/core/index/`). Parse note files (`.md`,
    `.txt`, `.rst`), extract all links, deduplicate, apply filtering/rewrite rules, register
    pending pages. Each link
    gets a row with the URL, the full normalized filepath it was found in, and an indexed-at
    timestamp. Indexing operates on registered sources (`arciv add <dir> <name>`).
-2. **Fetching** (`arciv fetch`, `arciv/core/pipeline/fetch.py` + `arciv/core/fetch/`) — Download raw
+2. **Fetching** (`arciv fetch`, `arciv/core/pipeline/fetch.py` + `arciv/core/fetch/`). Download raw
    content with patchright (async, concurrency-controlled); PDFs via direct HTTP. Writes
    `page.html` / `page.pdf` to disk, no conversion.
-3. **Parsing** (`arciv parse`, `arciv/core/pipeline/parse.py` + `arciv/core/parse/`) — Validate
+3. **Parsing** (`arciv parse`, `arciv/core/pipeline/parse.py` + `arciv/core/parse/`). Validate
    fetched HTML, convert to markdown via trafilatura (HTML) or liteparse (PDF), write
    `page.md` next to the raw file, fill in title/author/word count.
 
 ### Storage Contract
 
 The planned backend/frontend read the data directory directly, so treat this layout as a
-public interface — changes to it ripple beyond the Python code:
+public interface, so changes to it ripple beyond the Python code:
 
-- `<data dir>/arciv.db` — SQLite (WAL mode, foreign keys ON). `pages` holds one row per URL:
+- `<data dir>/arciv.db`: SQLite (WAL mode, foreign keys ON). `pages` holds one row per URL:
   `url` (PK, normalized), `original_url`, `domain`, `slug` (UNIQUE; names the
   on-disk `saved/<slug>/` folder), `content_type` (`html`/`pdf`,
   set at fetch), `title`, `author`, `word_count`, `fail_reason`, `added_at`, `fetched_at`,
@@ -61,13 +61,13 @@ public interface — changes to it ripple beyond the Python code:
 
 ### Key Libraries
 
-- `patchright` — async web scraping (undetected Playwright fork)
-- `trafilatura` — HTML content extraction
-- `liteparse` — PDF text extraction
-- `tldextract` — domain parsing (registered domain grouping)
-- `typer` — CLI framework
-- `loguru` — logging (one log statement per URL processed)
-- `platformdirs` — OS-appropriate default data directory
+- `patchright`: async web scraping (undetected Playwright fork)
+- `trafilatura`: HTML content extraction
+- `liteparse`: PDF text extraction
+- `tldextract`: domain parsing (registered domain grouping)
+- `typer`: CLI framework
+- `loguru`: logging (one log statement per URL processed)
+- `platformdirs`: OS-appropriate default data directory
 
 ## Tech Stack
 
@@ -94,17 +94,18 @@ underway. PLAN.md is the live roadmap.
 
 - The web app is built: a single FastAPI service (`arciv_api/`) imports the arciv library (it
   never shells out), reads through short-lived read-only connections, and renders its own HTML
-  with Jinja2 + Datastar (BeerCSS) — there is no separate frontend runtime. It serves
+  with Jinja2 + Datastar (BeerCSS), so there is no separate frontend runtime. It serves
   browse, page detail, domains, sources, and status, plus a `POST /archive` job flow run by a
   single in-process worker started in the app lifespan. Page markdown is rendered to HTML and
-  sanitized in Python. Styling is BeerCSS (Material Design 3, dark mode) loaded from the
-  jsDelivr CDN, plus a small self-hosted `static/app.css` that pins the brand colors (indigo
-  `#4B0082` / thistle `#D8BFD8`) and a few app-specific bits; `datastar.js` is self-hosted.
-  There is no CSS build step.
+  sanitized in Python. Styling is BeerCSS (Material Design 3, dark mode), self-hosted in
+  `static/` (`beer.min.css` plus the Material Symbols icon font) so the app is fully
+  self-contained and works offline, plus a small `static/app.css` that pins the brand colors
+  (indigo `#4B0082` / thistle `#D8BFD8`) and a few app-specific bits; `datastar.js` is
+  self-hosted too. There is no CSS build step.
 
 ## Context
 
-This is a solo project — no other developers read or maintain this code. That means:
+This is a solo project; no other developers read or maintain this code. That means:
 
 - No one will explain what "clever" code does when you've forgotten. Write for the version of
   yourself 6 months from now.

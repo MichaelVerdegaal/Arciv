@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 # Prefix of the fail_reason written when a page is rejected purely for being
 # below the word-count threshold (see arciv.core.pipeline.parse). Such a page was
-# fetched and extracted fine — it is just too small to be worth keeping — so
+# fetched and extracted fine (it is just too small to be worth keeping), so
 # the UI surfaces it as "skipped" rather than lumping it in with real errors
 # (block pages, extraction failures, fetch timeouts). The classifier lives
 # here so Page.state and the SQL filter in PageDatabase share one definition.
@@ -172,7 +172,7 @@ class Rule:
     ``arciv.core.fetch.process_url``); the first rule whose pattern matches
     wins. ``match_type`` decides how ``pattern`` is compared to the URL:
 
-    - ``domain``: the registered domain — ``youtube.com`` also matches
+    - ``domain``: the registered domain; ``youtube.com`` also matches
       ``m.youtube.com`` and ``www.youtube.com``.
     - ``host``: the exact hostname (port included), e.g.
       ``raw.githubusercontent.com``.

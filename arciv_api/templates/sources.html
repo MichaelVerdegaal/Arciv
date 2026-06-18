@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% set active = 'sources' %}
-{% block title %}Arciv — Sources{% endblock %}
+{% block title %}Arciv | Sources{% endblock %}
 {% block main %}
 <h4>Sources</h4>
 <p class="muted">
@@ -14,7 +14,7 @@
 
 {# Plain div, not a form: the inputs bind to Datastar signals and the button
    POSTs them as JSON, so there is no native form submission to suppress. #}
-<div class="filters" data-signals="{name: '', path: ''}">
+<div class="toolbar" data-signals="{name: '', path: ''}">
   <div class="field label border small">
     <input data-bind:name placeholder=" " />
     <label>Name</label>

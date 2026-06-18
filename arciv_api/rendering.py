@@ -4,6 +4,7 @@ from typing import Any
 
 import markdown as markdown_lib
 import nh3
+from datastar_py.fastapi import DatastarResponse, ServerSentEventGenerator
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from . import config
@@ -35,6 +36,17 @@ _ALLOWED_ATTRS = {
 def render(template_name: str, **context: Any) -> str:
     """Render a Jinja template to an HTML string."""
     return _env.get_template(template_name).render(**context)
+
+
+def alert_patch(target: str, message: str, kind: str) -> DatastarResponse:
+    """Patch an inline validation alert into the ``target`` slot (by element id).
+
+    The archive, source, and rule forms each keep an empty result ``<div>``; a
+    failed submission patches this alert in so the entered values are not lost,
+    while a successful one redirects instead.
+    """
+    fragment = render("partials/_alert.html", target=target, message=message, kind=kind)
+    return DatastarResponse(ServerSentEventGenerator.patch_elements(fragment))
 
 
 def render_markdown(text: str) -> str:

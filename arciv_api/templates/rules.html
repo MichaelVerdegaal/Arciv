@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% set active = 'rules' %}
-{% block title %}Arciv — Rules{% endblock %}
+{% block title %}Arciv | Rules{% endblock %}
 {% block main %}
 <h4>Rules</h4>
 <p class="muted">
@@ -84,7 +84,7 @@
 
 {# Plain div, not a form: the inputs bind to Datastar signals and the button
    POSTs them as JSON, so there is no native form submission to suppress. #}
-<div class="filters" data-signals="{match_type: 'domain', pattern: '', action: 'skip', replacement: ''}">
+<div class="toolbar" data-signals="{match_type: 'domain', pattern: '', action: 'skip', replacement: ''}">
   <div class="field label border small">
     <select data-bind:match_type>
       {% for mt in match_types %}
@@ -136,7 +136,7 @@
         <td>{{ rule.match_type }}</td>
         <td><code>{{ rule.pattern }}</code></td>
         <td>{{ rule.action }}</td>
-        <td class="muted">{{ rule.replacement or '—' }}</td>
+        <td class="muted">{{ rule.replacement or '-' }}</td>
         <td>
           <button class="small" data-on:click="@post('/rules/{{ rule.id }}/delete')">
             <i>delete</i><span>Delete</span>

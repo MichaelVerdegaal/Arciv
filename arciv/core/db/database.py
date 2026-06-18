@@ -483,7 +483,7 @@ class PageDatabase:
 
         Modes:
 
-        - ``missing``: failed pages no longer indexed in any note — rows with a
+        - ``missing``: failed pages no longer indexed in any note, rows with a
           ``fail_reason`` that no ``links`` row points at (the dead rows that
           accumulate when a URL is removed from the notes and re-indexing drops
           its link).
