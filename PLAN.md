@@ -45,19 +45,24 @@ stage also has a dedicated command, which makes developing the library easier:
 A "Source" is a registered file directory (entirely limited to directories for now):
 
 ```bash
-arciv add <directory> <name>   # register a source and archive it
-arciv archive <name>           # re-index, fetch, and parse one source
-arciv archive --all            # archive every registered source
-arciv remove <name>            # unregister it (indexed pages are kept)
-arciv sources                  # list registered sources
-arciv index <name>             # index a single source (stage only)
-arciv index --all              # index every registered source (stage only)
+arciv source add <directory> <name>  # register a source and archive it
+arciv source update <name>           # re-index, fetch, and parse one source
+arciv source update --all            # update every registered source
+arciv source remove <name>           # unregister it (asks first; pages kept)
+arciv source remove <name> --remove-files  # also delete files only it links
+arciv source                         # list registered sources
+arciv list --source <name>           # list the pages indexed from one source
+arciv index <name>                   # index a single source (stage only)
+arciv index --all                    # index every registered source (stage only)
 ```
 
-`add` archives the source after registering (pass `--no-archive` to skip);
-`archive` re-runs the whole pipeline as one batched fetch, so adding or
-re-syncing a source is a single command instead of `add` + `index` + `fetch` +
-`parse`. The web app exposes the same: add/remove a source, view its indexed
+`source add` archives the source after registering (pass `--no-archive` to
+skip); `source update` re-runs the whole pipeline as one batched fetch, so
+adding or re-syncing a source is a single command instead of `source add` +
+`index` + `fetch` + `parse`. `source remove` asks before unregistering and,
+with `--remove-files`, deletes the archived files of pages this source links
+exclusively (pages another source or an ad-hoc `get` still link are kept). The
+web app exposes the same: add/remove a source, view its indexed
 files and the links found in each, and re-archive, with the slow fetch+parse
 running in a background batch.
 

@@ -29,17 +29,20 @@ arciv get --dir path/to/notes        # archive all links in a directory
 Register directories you index repeatedly as named sources:
 
 ```bash
-arciv add ~/vault/daily-notes notes  # register a source and archive it
-arciv add ~/vault/notes notes --no-archive  # register only, archive later
-arciv archive notes                  # re-index, fetch, and parse one source
-arciv archive --all                  # archive every registered source
-arciv sources                        # list registered sources
-arciv remove notes                   # unregister (archived pages are kept)
+arciv source add ~/vault/daily-notes notes  # register a source and archive it
+arciv source add ~/vault/notes notes --no-archive  # register only, archive later
+arciv source update notes            # re-index, fetch, and parse one source
+arciv source update --all            # update every registered source
+arciv source                         # list registered sources
+arciv source remove notes            # unregister it (asks first)
+arciv source remove notes --remove-files  # also delete files only it links
 ```
 
-`add` and `archive` run the whole pipeline (index, then a single batched fetch,
-then parse) so a source goes from registered to archived in one command. The
-individual `index`, `fetch`, and `parse` stages stay available for development.
+`source add` and `source update` run the whole pipeline (index, then a single
+batched fetch, then parse) so a source goes from registered to archived in one
+command. The individual `index`, `fetch`, and `parse` stages stay available for
+development. The difference from `get`: `get` is a one-shot archive that tracks
+nothing, while a source is registered and re-syncable with `source update`.
 
 Run individual pipeline stages:
 
@@ -56,6 +59,7 @@ Inspect the archive:
 arciv status                         # pipeline counts + failure summary
 arciv list -n 50                     # fetched pages: time, domain, URL
 arciv list --domain medium.com       # only pages from one domain
+arciv list --source notes            # only pages indexed from one source
 arciv path https://example.com/post  # filepath of its archived markdown
 arciv prune failed                   # drop stale rows: missing | failed | all
 arciv db dir                         # where the archive lives on disk
@@ -92,9 +96,10 @@ arciv --version        # print the installed version and exit
 ```
 
 With `--json`, `status` and `path` emit one JSON object, while `list`,
-`sources`, and `rules list` emit JSONL (one object per line) so they stream
-into `head`/`grep`/`jq`. The mutating commands (`archive`, `get`, `fetch`,
-`parse`) emit a single `{indexed, fetched, parsed, failed}` summary, letting a
+`source`, and `rules list` emit JSONL (one object per line) so they stream
+into `head`/`grep`/`jq`. The mutating commands (`source update`, `get`,
+`fetch`, `parse`) emit a single `{indexed, fetched, parsed, failed}` summary,
+letting a
 script assert an outcome inline without a follow-up `status --json`.
 The commands compose with standard Unix tools:
 

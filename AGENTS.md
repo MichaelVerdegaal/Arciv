@@ -21,7 +21,7 @@ Three stages, no writeback into the notes. Each stage has a dedicated CLI comman
    `.txt`, `.rst`), extract all links, deduplicate, apply filtering/rewrite rules, register
    pending pages. Each link
    gets a row with the URL, the full normalized filepath it was found in, and an indexed-at
-   timestamp. Indexing operates on registered sources (`arciv add <dir> <name>`).
+   timestamp. Indexing operates on registered sources (`arciv source add <dir> <name>`).
 2. **Fetching** (`arciv fetch`, `arciv/core/pipeline/fetch.py` + `arciv/core/fetch/`). Download raw
    content with patchright (async, concurrency-controlled); PDFs via direct HTTP. Writes
    `page.html` / `page.pdf` to disk, no conversion.

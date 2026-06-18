@@ -165,6 +165,34 @@ class TestList:
         urls = [line.split("\t")[2] for line in result.output.splitlines()]
         assert urls == ["https://a.com/2", "https://a.com/1"]
 
+    def test_source_filters_to_one_source(self, runner, data_dir, tmp_path):
+        notes = tmp_path / "notes"
+        notes.mkdir()
+        _seed(
+            data_dir,
+            [
+                _page("https://a.com/1", fetched_at="2026-06-10T00:00:00+00:00"),
+                _page("https://a.com/2", fetched_at="2026-06-11T00:00:00+00:00"),
+            ],
+        )
+        with PageDatabase(data_dir / "arciv.db") as db:
+            db.add_source(
+                Source("notes", str(notes), datetime.now(timezone.utc).isoformat())
+            )
+            # Only /1 is indexed from the source; /2 was archived ad-hoc.
+            db.replace_links_for_files(
+                [],
+                [("https://a.com/1", "n.md", "notes", "2026-06-01T00:00:00")],
+            )
+        result = runner.invoke(cli_module.cli, ["list", "--source", "notes"])
+        assert result.exit_code == 0
+        urls = [line.split("\t")[2] for line in result.output.splitlines()]
+        assert urls == ["https://a.com/1"]
+
+    def test_unknown_source_is_noinput(self, runner, data_dir):
+        result = runner.invoke(cli_module.cli, ["list", "--source", "ghost"])
+        assert result.exit_code == output.EXIT_NOINPUT
+
 
 class TestPath:
     def _seed_parsed(self, data_dir):
@@ -353,8 +381,8 @@ class TestDbGroup:
         assert not (data_dir / "saved").exists()
 
 
-class TestAddAndArchive:
-    """`add` archives after registering; `archive` re-archives a source.
+class TestSourceGroup:
+    """`source add` archives after registering; `source update` re-syncs one.
 
     The real archival launches a browser, so these replace ``archive_source``
     / ``archive_urls`` in the CLI module with fakes and assert the wiring.
@@ -370,7 +398,7 @@ class TestAddAndArchive:
             return ArchiveResult(urls=["https://a.com/1"], fetched=[], parsed=0)
 
         monkeypatch.setattr(cli_module, "archive_source", fake_archive_source)
-        result = runner.invoke(cli_module.cli, ["add", str(notes), "notes"])
+        result = runner.invoke(cli_module.cli, ["source", "add", str(notes), "notes"])
         assert result.exit_code == 0
         assert called["name"] == "notes"
         with PageDatabase(data_dir / "arciv.db") as db:
@@ -389,7 +417,7 @@ class TestAddAndArchive:
 
         monkeypatch.setattr(cli_module, "archive_source", fake_archive_source)
         result = runner.invoke(
-            cli_module.cli, ["add", str(notes), "notes", "--no-archive"]
+            cli_module.cli, ["source", "add", str(notes), "notes", "--no-archive"]
         )
         assert result.exit_code == 0
         assert "name" not in called  # archival was not triggered
@@ -404,14 +432,16 @@ class TestAddAndArchive:
             "archive_source",
             lambda db, name: ArchiveResult([], [], 0),
         )
-        runner.invoke(cli_module.cli, ["add", str(notes), "notes", "--no-archive"])
+        runner.invoke(
+            cli_module.cli, ["source", "add", str(notes), "notes", "--no-archive"]
+        )
         result = runner.invoke(
-            cli_module.cli, ["add", str(notes), "notes", "--no-archive"]
+            cli_module.cli, ["source", "add", str(notes), "notes", "--no-archive"]
         )
         assert result.exit_code != 0
         assert "already exists" in result.output
 
-    def test_archive_source_invokes_pipeline(
+    def test_update_source_invokes_pipeline(
         self, runner, data_dir, tmp_path, monkeypatch
     ):
         notes = tmp_path / "notes"
@@ -427,11 +457,11 @@ class TestAddAndArchive:
             return ArchiveResult(urls=["https://a.com/1"], fetched=[], parsed=1)
 
         monkeypatch.setattr(cli_module, "archive_source", fake_archive_source)
-        result = runner.invoke(cli_module.cli, ["archive", "notes"])
+        result = runner.invoke(cli_module.cli, ["source", "update", "notes"])
         assert result.exit_code == 0
         assert called["name"] == "notes"
 
-    def test_archive_all_batches_every_source(
+    def test_update_all_batches_every_source(
         self, runner, data_dir, tmp_path, monkeypatch
     ):
         notes = tmp_path / "notes"
@@ -448,24 +478,125 @@ class TestAddAndArchive:
             return ArchiveResult(urls=urls, fetched=[], parsed=0)
 
         monkeypatch.setattr(cli_module, "archive_urls", fake_archive_urls)
-        result = runner.invoke(cli_module.cli, ["archive", "--all"])
+        result = runner.invoke(cli_module.cli, ["source", "update", "--all"])
         assert result.exit_code == 0
         assert captured["urls"] == ["https://a.com/1"]
 
-    def test_archive_all_with_no_sources_is_graceful(self, runner, data_dir):
-        result = runner.invoke(cli_module.cli, ["archive", "--all"])
+    def test_update_all_with_no_sources_is_graceful(self, runner, data_dir):
+        result = runner.invoke(cli_module.cli, ["source", "update", "--all"])
         assert result.exit_code == 0
         assert "No sources registered" in result.output
 
-    def test_archive_unknown_source_is_noinput(self, runner, data_dir):
+    def test_update_unknown_source_is_noinput(self, runner, data_dir):
         # No source registered: the real archive_source raises KeyError before
         # any fetch, so no browser is launched.
-        result = runner.invoke(cli_module.cli, ["archive", "ghost"])
+        result = runner.invoke(cli_module.cli, ["source", "update", "ghost"])
         assert result.exit_code == output.EXIT_NOINPUT
 
-    def test_archive_name_and_all_is_usage(self, runner, data_dir):
-        result = runner.invoke(cli_module.cli, ["archive", "notes", "--all"])
+    def test_update_name_and_all_is_usage(self, runner, data_dir):
+        result = runner.invoke(cli_module.cli, ["source", "update", "notes", "--all"])
         assert result.exit_code == output.EXIT_USAGE
+
+    def _register(self, data_dir, tmp_path, name="notes"):
+        directory = tmp_path / name
+        directory.mkdir(exist_ok=True)
+        with PageDatabase(data_dir / "arciv.db") as db:
+            db.add_source(
+                Source(name, str(directory), datetime.now(timezone.utc).isoformat())
+            )
+
+    def test_bare_source_lists_registered(self, runner, data_dir, tmp_path):
+        self._register(data_dir, tmp_path, "notes")
+        result = runner.invoke(cli_module.cli, ["source"])
+        assert result.exit_code == 0
+        assert result.stdout.splitlines()[0].split("\t")[0] == "notes"
+
+    def test_source_list_matches_bare(self, runner, data_dir, tmp_path):
+        self._register(data_dir, tmp_path, "notes")
+        result = runner.invoke(cli_module.cli, ["source", "list"])
+        assert result.exit_code == 0
+        assert result.stdout.splitlines()[0].split("\t")[0] == "notes"
+
+    def test_remove_unknown_is_noinput(self, runner, data_dir):
+        result = runner.invoke(cli_module.cli, ["source", "remove", "ghost"])
+        assert result.exit_code == output.EXIT_NOINPUT
+
+    def test_remove_asks_and_aborts_on_no(self, runner, data_dir, tmp_path):
+        self._register(data_dir, tmp_path, "notes")
+        result = runner.invoke(
+            cli_module.cli, ["source", "remove", "notes"], input="n\n"
+        )
+        assert result.exit_code != 0
+        with PageDatabase(data_dir / "arciv.db") as db:
+            assert db.get_source("notes") is not None
+
+    def test_remove_force_skips_prompt(self, runner, data_dir, tmp_path):
+        self._register(data_dir, tmp_path, "notes")
+        result = runner.invoke(cli_module.cli, ["source", "remove", "notes", "--force"])
+        assert result.exit_code == 0
+        with PageDatabase(data_dir / "arciv.db") as db:
+            assert db.get_source("notes") is None
+
+    def test_remove_keeps_pages_by_default(self, runner, data_dir, tmp_path):
+        self._register(data_dir, tmp_path, "notes")
+        _seed(data_dir, [_page("https://example.com/a")])
+        with PageDatabase(data_dir / "arciv.db") as db:
+            db.replace_links_for_files(
+                [],
+                [("https://example.com/a", "note.md", "notes", "2026-06-01T00:00:00")],
+            )
+        result = runner.invoke(cli_module.cli, ["source", "remove", "notes", "--force"])
+        assert result.exit_code == 0
+        with PageDatabase(data_dir / "arciv.db") as db:
+            assert db.get("https://example.com/a") is not None
+
+    def test_remove_files_deletes_exclusive_pages_only(
+        self, runner, data_dir, tmp_path
+    ):
+        self._register(data_dir, tmp_path, "notes")
+        self._register(data_dir, tmp_path, "other")
+        # /solo is linked only by notes; /shared is linked by notes and other.
+        solo = _page("https://example.com/solo")
+        shared = _page("https://example.com/shared")
+        _seed(data_dir, [solo, shared])
+        with PageDatabase(data_dir / "arciv.db") as db:
+            db.replace_links_for_files(
+                [],
+                [
+                    (
+                        "https://example.com/solo",
+                        "a.md",
+                        "notes",
+                        "2026-06-01T00:00:00",
+                    ),
+                    (
+                        "https://example.com/shared",
+                        "a.md",
+                        "notes",
+                        "2026-06-01T00:00:00",
+                    ),
+                    (
+                        "https://example.com/shared",
+                        "b.md",
+                        "other",
+                        "2026-06-01T00:00:00",
+                    ),
+                ],
+            )
+        for page in (solo, shared):
+            folder = data_dir / "saved" / page.slug
+            folder.mkdir(parents=True)
+            (folder / "page.md").write_text("x", encoding="utf-8")
+
+        result = runner.invoke(
+            cli_module.cli, ["source", "remove", "notes", "--force", "--remove-files"]
+        )
+        assert result.exit_code == 0
+        with PageDatabase(data_dir / "arciv.db") as db:
+            assert db.get("https://example.com/solo") is None
+            assert db.get("https://example.com/shared") is not None
+        assert not (data_dir / "saved" / solo.slug).exists()
+        assert (data_dir / "saved" / shared.slug).exists()
 
 
 class TestRules:
@@ -726,7 +857,7 @@ class TestPipelineJsonSummaries:
                 urls=["https://a.com/1", "https://a.com/2"], fetched=[], parsed=2
             ),
         )
-        result = runner.invoke(cli_module.cli, ["--json", "archive", "notes"])
+        result = runner.invoke(cli_module.cli, ["--json", "source", "update", "notes"])
         assert result.exit_code == 0
         obj = json.loads(result.stdout)
         assert obj["indexed"] == 2 and obj["parsed"] == 2
@@ -734,15 +865,15 @@ class TestPipelineJsonSummaries:
 
 class TestStreams:
     def test_data_on_stdout_logs_on_stderr(self, runner, data_dir):
-        # `sources` with none registered logs a hint to stderr; stdout (data)
+        # `source` with none registered logs a hint to stderr; stdout (data)
         # stays empty so pipes see only data.
-        result = runner.invoke(cli_module.cli, ["sources"])
+        result = runner.invoke(cli_module.cli, ["source"])
         assert result.exit_code == 0
         assert result.stdout == ""
         assert "No sources registered" in result.stderr
 
     def test_quiet_suppresses_info_logs(self, runner, data_dir):
-        result = runner.invoke(cli_module.cli, ["-q", "sources"])
+        result = runner.invoke(cli_module.cli, ["-q", "source"])
         assert result.exit_code == 0
         assert result.stderr == ""
 
@@ -772,7 +903,7 @@ class TestJson:
             db.add_source(
                 Source("notes", "/tmp/notes", datetime.now(timezone.utc).isoformat())
             )
-        result = runner.invoke(cli_module.cli, ["--json", "sources"])
+        result = runner.invoke(cli_module.cli, ["--json", "source"])
         records = [json.loads(line) for line in result.stdout.splitlines()]
         assert records == [{"name": "notes", "path": "/tmp/notes"}]
 
@@ -828,7 +959,7 @@ class TestExitCodes:
         assert "Unknown URL" in result.stderr
 
     def test_missing_source_is_noinput(self, runner, data_dir):
-        result = runner.invoke(cli_module.cli, ["remove", "ghost"])
+        result = runner.invoke(cli_module.cli, ["source", "remove", "ghost"])
         assert result.exit_code == output.EXIT_NOINPUT
 
     def test_get_without_target_is_usage(self, runner, data_dir):
