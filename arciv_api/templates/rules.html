@@ -68,7 +68,7 @@
 
 {# Plain div, not a form: the inputs bind to Datastar signals and the button
    POSTs them as JSON, so there is no native form submission to suppress. #}
-<div class="filters" data-signals="{match_type: 'domain', pattern: '', action: 'skip', replacement: ''}">
+<div class="toolbar" data-signals="{match_type: 'domain', pattern: '', action: 'skip', replacement: ''}">
   <div class="field label border small">
     <select data-bind:match_type>
       {% for mt in match_types %}

@@ -1,0 +1,7 @@
+{# Inline validation alert, patched into a form's result slot. The slot id is
+   passed by the caller so one partial serves the archive, source, and rule
+   forms. A successful action redirects instead, so this only carries problems.
+   `kind` is error/warning/info, matching the alert-* classes in app.css. #}
+<div id="{{ target }}">
+  <div class="alert alert-{{ kind }}">{{ message }}</div>
+</div>

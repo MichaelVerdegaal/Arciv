@@ -68,21 +68,21 @@ main a {
 .alert-warning { border-left-color: #ecc06a; background: rgba(227, 169, 60, 0.1); }
 .alert-info { border-left-color: var(--secondary); background: rgba(216, 191, 216, 0.08); }
 
-/* --- Inline filter / add row ---------------------------------------------- */
-/* BeerCSS form fields stack full-width; for these toolbars we want them inline,
-   compact, and bottom-aligned. */
-.filters {
+/* --- Inline toolbar (filter / add rows) ----------------------------------- */
+/* BeerCSS form fields stack full-width; for the filter and add-row toolbars we
+   want them inline, compact, and bottom-aligned. */
+.toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 0.75rem;
   margin-bottom: 1.25rem;
 }
-.filters .field {
+.toolbar .field {
   margin: 0;
   width: 12rem;
 }
-.filters .field.max {
+.toolbar .field.max {
   width: auto;
   flex: 1;
   min-width: 14rem;
