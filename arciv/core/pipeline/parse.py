@@ -17,9 +17,7 @@ from loguru import logger
 from arciv.core.parse import check_html, parse_html, pdf_to_text
 from arciv.core.db import Page, PageDatabase
 from arciv.core.fetch import is_raw_text_url
-from arciv.settings import SAVED_DIR
-
-DEFAULT_MIN_WORDS = 150
+from arciv.settings import DEFAULT_MIN_WORDS, SAVED_DIR
 
 
 def _too_short_reason(words: int, raw_bytes: int, kind: str) -> str:
