@@ -58,3 +58,30 @@ def emit(text: str = "", *, null: bool = False) -> None:
 def emit_json(obj: Any) -> None:
     """Write one compact JSON object/array as a line on stdout."""
     typer.echo(json.dumps(obj, ensure_ascii=False))
+
+
+def emit_pipeline_summary(
+    *, indexed: int = 0, fetched: int = 0, parsed: int = 0, failed: int = 0
+) -> None:
+    """Emit one structured ``--json`` summary for a mutating pipeline command.
+
+    The four mutating commands (``archive``, ``get``, ``fetch``, ``parse``)
+    share this object shape so a script can assert an outcome inline without a
+    follow-up ``status --json``. Each field counts what happened *this run*;
+    stages a command doesn't perform stay 0 (e.g. ``fetch`` reports no
+    ``indexed`` or ``parsed``).
+
+    Args:
+        indexed: Unique URLs found by the index stage.
+        fetched: Pages successfully downloaded.
+        parsed: Pages successfully converted to markdown.
+        failed: Targeted URLs that ended the run with a failure reason.
+    """
+    emit_json(
+        {
+            "indexed": indexed,
+            "fetched": fetched,
+            "parsed": parsed,
+            "failed": failed,
+        }
+    )

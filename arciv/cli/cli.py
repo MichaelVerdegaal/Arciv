@@ -27,6 +27,7 @@ URL rules (skip or rewrite URLs before they are fetched):
     arciv rules list                # list rules in the order they apply
     arciv rules add domain x.com skip            # add a skip rule
     arciv rules add domain medium.com rewrite -r scribe.rip
+    arciv rules test <URL>          # show how the rules treat a URL
     arciv rules remove 3            # remove the rule with that id
 
 Inspection:
@@ -41,8 +42,10 @@ Inspection:
 Global options work before or after the command: ``-v``/``-vv`` for more
 detail, ``-q`` for errors only, ``--color auto|always|never``, and
 ``--json`` to switch every command to machine-readable output on stdout.
-Data goes to stdout; all logs and diagnostics go to stderr, so
-``arciv list | cat`` shows only data.
+The mutating commands (``archive``, ``get``, ``fetch``, ``parse``) emit a
+structured ``{indexed, fetched, parsed, failed}`` summary under ``--json``.
+``arciv --version`` prints the installed version. Data goes to stdout; all
+logs and diagnostics go to stderr, so ``arciv list | cat`` shows only data.
 """
 
 import json
@@ -50,6 +53,7 @@ import shutil
 import sys
 from datetime import datetime, timezone
 from enum import Enum
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Annotated, Literal, NoReturn
 
@@ -60,7 +64,7 @@ from typer.core import TyperGroup
 from arciv.settings import DATA_DIR, DB_PATH, SAVED_DIR, configure_logger
 from arciv.core.db import PageDatabase, Rule, Source
 from arciv.core.db.models import RULE_ACTIONS, RULE_MATCH_TYPES, validate_rule
-from arciv.core.fetch import process_url
+from arciv.core.fetch import matching_rule, process_url
 from arciv.core.pipeline import (
     ArchiveResult,
     archive_source,
@@ -81,6 +85,7 @@ from .output import (
     EXIT_USAGE,
     emit,
     emit_json,
+    emit_pipeline_summary,
     json_output,
     set_json_output,
 )
@@ -129,12 +134,14 @@ class GlobalOptionGroup(TyperGroup):
         return super().parse_args(ctx, hoisted + rest)
 
 
-# add_completion=False keeps the CLI surface identical to the old click one
-# (no extra --install-completion/--show-completion options).
+# add_completion=True exposes --install-completion/--show-completion and turns
+# on shell completion for commands and flags. The GlobalOptionGroup only
+# reorders recognized global tokens during a normal parse, so it does not
+# interfere with the completion machinery.
 cli = typer.Typer(
     help="Arciv: personal knowledge archive.",
     no_args_is_help=True,
-    add_completion=False,
+    add_completion=True,
     cls=GlobalOptionGroup,
 )
 db_app = typer.Typer(help="Inspect or manage the database file.", no_args_is_help=True)
@@ -206,6 +213,26 @@ def _validate_action(value: str) -> str:
     return value
 
 
+def _arciv_version() -> str:
+    """The installed arciv version, or "unknown" if metadata is unavailable
+    (e.g. running from a source tree that was never installed)."""
+    try:
+        return version("arciv")
+    except PackageNotFoundError:
+        return "unknown"
+
+
+def _version_callback(value: bool) -> None:
+    """Print the version and exit, the conventional ``--version`` behaviour.
+
+    Eager so it runs before any other option is processed, letting
+    ``arciv --version`` work without a subcommand.
+    """
+    if value:
+        emit(f"arciv {_arciv_version()}")
+        raise typer.Exit()
+
+
 def _resolve_level(verbose: int, quiet: bool) -> str:
     """Map -q / -v / -vv to a loguru level (quiet wins over verbose)."""
     if quiet:
@@ -239,6 +266,15 @@ def main(
     json_out: Annotated[
         bool,
         typer.Option("--json", help="Emit machine-readable output on stdout."),
+    ] = False,
+    _version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            callback=_version_callback,
+            is_eager=True,
+            help="Show the installed arciv version and exit.",
+        ),
     ] = False,
 ) -> None:
     """Arciv: personal knowledge archive.
@@ -299,8 +335,16 @@ def get(
 
         fetched = fetch_urls(db, urls, refetch=refetch)
         # A refetch resets parsed_at, so refetched pages re-parse here too
-        parse_pending(db)
-        report(db, len(fetched), urls)
+        parsed = parse_pending(db)
+        if json_output():
+            emit_pipeline_summary(
+                indexed=len(urls),
+                fetched=len(fetched),
+                parsed=parsed,
+                failed=_count_failed(db, urls),
+            )
+        else:
+            report(db, len(fetched), urls)
 
 
 def _resolve_url_targets(url: str) -> list[str]:
@@ -325,6 +369,30 @@ def _report_archive(name: str, result: ArchiveResult) -> None:
     logger.info(
         f"Archived source '{name}': {len(result.urls)} indexed, "
         f"{len(result.fetched)} fetched, {result.parsed} parsed"
+    )
+
+
+def _count_failed(db: PageDatabase, urls: list[str]) -> int:
+    """How many of ``urls`` carry a failure reason now.
+
+    Counts the URLs this run targeted that ended with a ``fail_reason`` set
+    (fetch failures plus parse rejections/skips), matching the run-scoped
+    failure summary ``report`` logs to stderr.
+    """
+    return sum(
+        1
+        for url in urls
+        if (page := db.get(url)) is not None and page.fail_reason is not None
+    )
+
+
+def _emit_archive_summary(db: PageDatabase, result: ArchiveResult) -> None:
+    """Emit the --json pipeline summary for an ArchiveResult."""
+    emit_pipeline_summary(
+        indexed=len(result.urls),
+        fetched=len(result.fetched),
+        parsed=result.parsed,
+        failed=_count_failed(db, result.urls),
     )
 
 
@@ -396,16 +464,22 @@ def archive(
                 return
             # One batch across every source beats a browser launch per source.
             result = archive_urls(db, index_all(db))
-            logger.info(
-                f"Archived {len(sources_list)} source(s): {len(result.urls)} "
-                f"indexed, {len(result.fetched)} fetched, {result.parsed} parsed"
-            )
+            if json_output():
+                _emit_archive_summary(db, result)
+            else:
+                logger.info(
+                    f"Archived {len(sources_list)} source(s): {len(result.urls)} "
+                    f"indexed, {len(result.fetched)} fetched, {result.parsed} parsed"
+                )
             return
         try:
             result = archive_source(db, source)
         except KeyError as e:
             _fail(str(e.args[0]), code=EXIT_NOINPUT)
-        _report_archive(source, result)
+        if json_output():
+            _emit_archive_summary(db, result)
+        else:
+            _report_archive(source, result)
 
 
 @cli.command()
@@ -481,7 +555,11 @@ def fetch(
         pages = db.get_all() if refetch else db.get_unfetched()
         urls = [page.url for page in pages]
         fetched = fetch_urls(db, urls, refetch=refetch)
-        report(db, len(fetched), urls)
+        if json_output():
+            # fetch neither indexes nor parses, so those counts stay 0.
+            emit_pipeline_summary(fetched=len(fetched), failed=_count_failed(db, urls))
+        else:
+            report(db, len(fetched), urls)
 
 
 @cli.command()
@@ -493,9 +571,21 @@ def parse(
         ),
     ] = False,
 ) -> None:
-    """Parse stage: convert fetched HTML/PDFs into markdown."""
+    """Parse stage: convert fetched HTML/PDFs into markdown.
+
+    With --json, emits a structured ``{indexed, fetched, parsed, failed}``
+    summary of this run.
+    """
     with PageDatabase(DB_PATH) as db:
-        parse_pending(db, reparse=reparse)
+        if json_output():
+            # Capture the pages this run will attempt up front so the failed
+            # count is scoped to them (rejections set fail_reason).
+            targets = db.get_fetched() if reparse else db.get_unparsed()
+            urls = [page.url for page in targets]
+            parsed = parse_pending(db, reparse=reparse)
+            emit_pipeline_summary(parsed=parsed, failed=_count_failed(db, urls))
+        else:
+            parse_pending(db, reparse=reparse)
 
 
 @cli.command()
@@ -595,7 +685,12 @@ def status() -> None:
 def list_pages(
     limit: Annotated[
         int,
-        typer.Option("--n", min=0, help="Number of rows to show; 0 shows everything."),
+        typer.Option(
+            "--limit",
+            "-n",
+            min=0,
+            help="Number of rows to show; 0 shows everything.",
+        ),
     ] = 20,
     reverse: Annotated[
         bool, typer.Option("--reverse", help="Oldest first instead of newest first.")
@@ -619,7 +714,7 @@ def list_pages(
     """List fetched pages, newest first: fetch time, domain, URL.
 
     Columns are tab-separated so the output pipes cleanly into
-    grep/cut/awk, e.g.: arciv list --n 0 | grep /tag/. With --json, emits
+    grep/cut/awk, e.g.: arciv list -n 0 | grep /tag/. With --json, emits
     JSONL (one object per line). With --null, records are NUL-separated.
     """
     with PageDatabase(DB_PATH) as db:
@@ -820,6 +915,60 @@ def rules_add(
                 "position": rule.position,
             }
         )
+
+
+@rules_app.command(name="test")
+def rules_test(
+    url: Annotated[
+        str, typer.Argument(help="The URL to run through the current rule list.")
+    ],
+) -> None:
+    """Show what the current rules do to URL: skip, rewrite, or pass through.
+
+    Runs URL through the same processing the fetch stage uses (your rules,
+    then the built-in site rewriters and canonicalization) and prints the
+    verdict, naming the rule id when one of your rules is responsible. Lets
+    you tune a rule without the add-run-inspect-remove round trip.
+
+    With --json, emits a single object: ``{"url", "verdict", "target",
+    "reason", "rule_id"}`` where verdict is skipped, rewritten, or passthrough.
+    """
+    with PageDatabase(DB_PATH) as db:
+        rules = db.list_rules()
+    processed, status = process_url(url, rules)
+
+    if processed is None:
+        verdict, target, reason = "skipped", None, status
+    elif "rewritten" in status:
+        verdict, target, reason = "rewritten", processed, None
+    else:
+        verdict, target, reason = "passthrough", processed, None
+
+    # A user rule is only "responsible" when it changed the outcome (a skip or
+    # a rewrite); a passthrough means no rule altered the URL.
+    rule = matching_rule(url, rules) if verdict != "passthrough" else None
+
+    if json_output():
+        emit_json(
+            {
+                "url": url,
+                "verdict": verdict,
+                "target": target,
+                "reason": reason,
+                "rule_id": rule.id if rule else None,
+            }
+        )
+        return
+
+    if verdict == "skipped":
+        line = f"skipped: {reason}"
+    elif verdict == "rewritten":
+        line = f"rewritten -> {target}"
+    else:
+        line = f"passthrough: {target}"
+    if rule is not None:
+        line += f" (rule {rule.id}: {rule.match_type} {rule.pattern!r})"
+    emit(line)
 
 
 @rules_app.command(name="remove")

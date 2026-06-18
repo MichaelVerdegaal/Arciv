@@ -235,6 +235,37 @@ def _rules_handler(rules: Sequence[Rule]) -> UrlHandler:
     return handler
 
 
+def matching_rule(url: str, rules: Sequence[Rule]) -> Rule | None:
+    """Return the first user rule that matches ``url``, or None.
+
+    Mirrors the pre-match normalization in :func:`process_url` (strip the
+    ``#fragment`` and lowercase the host) so the reported rule is the one that
+    actually governs the verdict: for a skip the first match wins and ends the
+    chain, and for a rewrite the first match is the rewrite that fires. Used by
+    ``arciv rules test`` to show which rule was responsible. Non-https or
+    hostless URLs never reach the rules, so they match nothing here.
+    """
+    if not url.startswith("https://"):
+        return None
+    url = url.partition("#")[0]
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return None
+    host = parsed.netloc
+    if not host:
+        return None
+    if not host.islower():
+        url = f"https://{host.lower()}{url[len('https://') + len(host) :]}"
+        parsed = urlparse(url)
+    netloc = parsed.netloc
+    domain = registered_domain(url) or split_url(url)[0]
+    for rule in rules:
+        if _rule_matches(rule, url, netloc, domain):
+            return rule
+    return None
+
+
 def process_url(url: str, rules: Sequence[Rule] = ()) -> tuple[str | None, str]:
     """Process a URL for scraping: skip it, rewrite it, or pass it through.
 
