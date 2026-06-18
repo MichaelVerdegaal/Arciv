@@ -3,14 +3,13 @@
 from fastapi import APIRouter, Request
 from datastar_py.fastapi import DatastarResponse, ReadSignals, ServerSentEventGenerator
 
-from ..rendering import render
+from ..rendering import alert_patch
 
 router = APIRouter()
 
 
 def _result_patch(message: str, kind: str) -> DatastarResponse:
-    fragment = render("partials/_archive_result.html", message=message, kind=kind)
-    return DatastarResponse(ServerSentEventGenerator.patch_elements(fragment))
+    return alert_patch("archive-result", message, kind)
 
 
 @router.post("/archive")

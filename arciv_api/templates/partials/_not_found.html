@@ -1,6 +1,5 @@
 {# Fragment form of the 404, patched into #page-main if a polled slug vanishes. #}
+{% from "_macros.html" import not_found_body %}
 <div id="page-main">
-  <h4>Not found</h4>
-  <p class="muted">No archived page has the slug <code>{{ slug }}</code>.</p>
-  <p><a href="/">← Back to archive</a></p>
+  {{ not_found_body(slug=slug) }}
 </div>

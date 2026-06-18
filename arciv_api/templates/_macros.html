@@ -1,3 +1,12 @@
 {% macro state_badge(state) -%}
 <span class="state state-{{ state }}">{{ state }}</span>
 {%- endmacro %}
+
+{# The "not found" body, shared by the full 404 page and the poll fragment.
+   `message` overrides the default slug line; `back_href`/`back_label` set the
+   return link. #}
+{% macro not_found_body(slug=None, message=None, back_href='/', back_label='Back to archive') -%}
+<h4>Not found</h4>
+<p class="muted">{% if message %}{{ message }}{% else %}No archived page has the slug <code>{{ slug }}</code>.{% endif %}</p>
+<p><a href="{{ back_href }}">← {{ back_label }}</a></p>
+{%- endmacro %}
