@@ -54,9 +54,7 @@ class TestProcessUrl:
         assert "HTTPS" in status
 
     def test_image_suffix_is_skipped(self):
-        processed, _ = process_url(
-            "https://example.com/photo.png", _DEFAULT_RULE_OBJS
-        )
+        processed, _ = process_url("https://example.com/photo.png", _DEFAULT_RULE_OBJS)
         assert processed is None
 
     def test_image_proxy_endpoint_is_skipped(self):
@@ -66,9 +64,7 @@ class TestProcessUrl:
         assert "image proxy" in status
 
     def test_ip_domain_is_skipped(self):
-        processed, _ = process_url(
-            "https://192.168.2.13/dashboard", _DEFAULT_RULE_OBJS
-        )
+        processed, _ = process_url("https://192.168.2.13/dashboard", _DEFAULT_RULE_OBJS)
         assert processed is None
 
     def test_github_blob_rewritten_to_repo_root(self):
@@ -205,7 +201,12 @@ class TestProcessUrlRules:
         # The seeded medium default keeps the host-swap shape: its slash-bearing
         # replacement produces the wrapped freedium URL.
         rules = [
-            Rule("domain", "medium.com", "rewrite", "freedium-mirror.cfd/https://medium.com")
+            Rule(
+                "domain",
+                "medium.com",
+                "rewrite",
+                "freedium-mirror.cfd/https://medium.com",
+            )
         ]
         processed, _ = process_url("https://medium.com/@a/post-123", rules)
         assert processed == (

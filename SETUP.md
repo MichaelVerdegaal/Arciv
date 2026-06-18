@@ -35,9 +35,11 @@ this by manually installing Chrome.
 Everything works out of the box. Point Arciv at your notes by registering them as a source:
 
 ```bash
-arciv add "/path/to/your/vault/Daily notes" notes
-arciv index notes
+arciv source add "/path/to/your/vault/Daily notes" notes
 ```
+
+`source add` registers the directory and archives it in one go. Re-sync it any
+time with `arciv source update notes`.
 
 Optional override, via environment variable or a `.env` file (see [.env.example](.env.example)):
 

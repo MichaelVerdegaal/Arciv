@@ -743,9 +743,10 @@ class TestRules:
         rules = db.list_rules()
         assert process_url("https://example.com/photo.png", rules)[0] is None
         assert process_url("https://example.com/data.json", rules)[0] is None
-        assert process_url(
-            "https://example.com/_next/image?url=%2Fcat.jpg", rules
-        )[0] is None
+        assert (
+            process_url("https://example.com/_next/image?url=%2Fcat.jpg", rules)[0]
+            is None
+        )
         assert process_url("https://192.168.2.13/dashboard", rules)[0] is None
         # A normal content URL is not skipped by the plumbing rules.
         kept, _ = process_url("https://example.com/article", rules)

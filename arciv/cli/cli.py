@@ -1,19 +1,21 @@
 """Arciv CLI: archive management commands (built on Typer).
 
-Layered archiving with ``get`` (index → fetch → parse in one go):
+One-shot archiving with ``get`` (index → fetch → parse in one go, nothing
+tracked — the ephemeral, pipe-friendly path):
 
     arciv get https://example.com   # archive a single URL
     arciv get --file note.md        # archive all links in one file
     arciv get --dir ~/notes         # archive all links in a directory
     arciv list --json | jq -r .url | arciv get -   # archive piped URLs
 
-Sources (named directories that can be re-archived any time):
+Sources are registered directories you re-sync over time (the tracked path):
 
-    arciv add ~/vault/notes notes   # register source "notes" and archive it
-    arciv archive notes             # re-index, fetch, and parse one source
-    arciv archive --all             # archive every registered source
-    arciv remove notes              # unregister it
-    arciv sources                   # list registered sources
+    arciv source add ~/vault/notes notes  # register "notes" and archive it
+    arciv source update notes             # re-index, fetch, and parse it
+    arciv source update --all             # update every registered source
+    arciv source remove notes             # unregister it (asks first)
+    arciv source                          # list registered sources
+    arciv list --source notes             # pages indexed from one source
 
 Individual pipeline stages, mainly for development:
 
@@ -42,8 +44,8 @@ Inspection:
 Global options work before or after the command: ``-v``/``-vv`` for more
 detail, ``-q`` for errors only, ``--color auto|always|never``, and
 ``--json`` to switch every command to machine-readable output on stdout.
-The mutating commands (``archive``, ``get``, ``fetch``, ``parse``) emit a
-structured ``{indexed, fetched, parsed, failed}`` summary under ``--json``.
+The mutating commands (``source update``, ``get``, ``fetch``, ``parse``) emit
+a structured ``{indexed, fetched, parsed, failed}`` summary under ``--json``.
 ``arciv --version`` prints the installed version. Data goes to stdout; all
 logs and diagnostics go to stderr, so ``arciv list | cat`` shows only data.
 """
@@ -150,6 +152,13 @@ rules_app = typer.Typer(
     help="View, add, and remove URL-processing rules.", no_args_is_help=True
 )
 cli.add_typer(rules_app, name="rules")
+# invoke_without_command lets a bare ``arciv source`` list the sources (see
+# source_main), while ``source add/update/remove/list`` are the subcommands.
+source_app = typer.Typer(
+    help="Register, update, list, and remove sources.",
+    invoke_without_command=True,
+)
+cli.add_typer(source_app, name="source")
 
 
 # Choices for the global --color option. A Literal gives Typer the same
@@ -396,8 +405,51 @@ def _emit_archive_summary(db: PageDatabase, result: ArchiveResult) -> None:
     )
 
 
-@cli.command()
-def add(
+def _list_sources() -> None:
+    """List registered sources to stdout (tab-separated, or JSONL with --json).
+
+    Shared by ``arciv source`` (no subcommand) and ``arciv source list``.
+    """
+    with PageDatabase(DB_PATH) as db:
+        registered = db.list_sources()
+    if json_output():
+        for source in registered:
+            emit_json({"name": source.name, "path": source.path})
+        return
+    if not registered:
+        # A hint, not data: keep it off stdout so pipes stay clean
+        logger.info(
+            "No sources registered. Add one with: arciv source add <dir> <name>"
+        )
+        return
+    for source in registered:
+        emit(f"{source.name}\t{source.path}")
+
+
+@source_app.callback(invoke_without_command=True)
+def source_main(ctx: typer.Context) -> None:
+    """Register, update, list, and remove sources.
+
+    A source is a directory whose notes are indexed for links to archive, and
+    which you re-sync over time with ``source update``. With no subcommand,
+    ``arciv source`` lists the registered sources. (Contrast ``arciv get``,
+    which archives a one-off URL/file/directory and tracks nothing.)
+    """
+    if ctx.invoked_subcommand is None:
+        _list_sources()
+
+
+@source_app.command(name="list")
+def source_list() -> None:
+    """List registered sources (same as a bare ``arciv source``).
+
+    With --json, emits JSONL (one ``{"name", "path"}`` object per line).
+    """
+    _list_sources()
+
+
+@source_app.command(name="add")
+def source_add(
     directory: Annotated[
         Path,
         typer.Argument(
@@ -419,7 +471,7 @@ def add(
 
     After registering, the source is indexed and every URL found is fetched
     and parsed in one batch (index, then fetch, then parse). Pass --no-archive
-    to only register it, then archive later with ``arciv archive NAME``.
+    to only register it, then archive later with ``arciv source update NAME``.
     """
     source = Source(
         name=name,
@@ -435,23 +487,23 @@ def add(
         _report_archive(name, archive_source(db, name))
 
 
-@cli.command()
-def archive(
-    source: Annotated[
+@source_app.command(name="update")
+def source_update(
+    name: Annotated[
         str | None,
-        typer.Argument(help="Name of the registered source to archive."),
+        typer.Argument(help="Name of the registered source to update."),
     ] = None,
     all_sources: Annotated[
-        bool, typer.Option("--all", help="Archive every registered source.")
+        bool, typer.Option("--all", help="Update every registered source.")
     ] = False,
 ) -> None:
-    """Archive a source end to end: index, then batch-fetch and parse.
+    """Update a source end to end: re-index, then batch-fetch and parse.
 
     Re-indexes first so notes added or removed since last time are picked up,
-    then downloads and parses every URL found in one batch. Provide a source
-    name or --all, not both.
+    then downloads and parses whatever is not fetched/parsed yet, in one batch.
+    Provide a source name or --all, not both.
     """
-    if bool(source) == all_sources:
+    if bool(name) == all_sources:
         _fail("Provide a source name or --all, not both.", code=EXIT_USAGE)
 
     with PageDatabase(DB_PATH) as db:
@@ -459,7 +511,7 @@ def archive(
             sources_list = db.list_sources()
             if not sources_list:
                 logger.info(
-                    "No sources registered. Add one with: arciv add <dir> <name>"
+                    "No sources registered. Add one with: arciv source add <dir> <name>"
                 )
                 return
             # One batch across every source beats a browser launch per source.
@@ -468,49 +520,76 @@ def archive(
                 _emit_archive_summary(db, result)
             else:
                 logger.info(
-                    f"Archived {len(sources_list)} source(s): {len(result.urls)} "
+                    f"Updated {len(sources_list)} source(s): {len(result.urls)} "
                     f"indexed, {len(result.fetched)} fetched, {result.parsed} parsed"
                 )
             return
         try:
-            result = archive_source(db, source)
+            result = archive_source(db, name)
         except KeyError as e:
             _fail(str(e.args[0]), code=EXIT_NOINPUT)
         if json_output():
             _emit_archive_summary(db, result)
         else:
-            _report_archive(source, result)
+            _report_archive(name, result)
 
 
-@cli.command()
-def remove(
+@source_app.command(name="remove")
+def source_remove(
     name: Annotated[str, typer.Argument(help="The source name to unregister.")],
+    force: Annotated[
+        bool, typer.Option("--force", help="Remove without asking for confirmation.")
+    ] = False,
+    remove_files: Annotated[
+        bool,
+        typer.Option(
+            "--remove-files",
+            help=(
+                "Also delete the archived files of pages linked only by this "
+                "source (pages also linked elsewhere are kept)."
+            ),
+        ),
+    ] = False,
 ) -> None:
-    """Unregister the source named NAME (indexed pages are kept)."""
-    with PageDatabase(DB_PATH) as db:
-        if not db.remove_source(name):
-            _fail(f"No source named '{name}'.", code=EXIT_NOINPUT)
-    logger.info(f"Removed source '{name}'")
+    """Unregister the source named NAME. Asks first unless --force is given.
 
-
-@cli.command()
-def sources() -> None:
-    """List registered sources.
-
-    With --json, emits JSONL (one ``{"name", "path"}`` object per line).
+    By default the indexed pages are kept; only the source registration and
+    its link attribution go away. Pass --remove-files to also delete the
+    archived files (and rows) of pages this source links exclusively — pages
+    another source or an ad-hoc ``get`` run still points at are left intact.
     """
     with PageDatabase(DB_PATH) as db:
-        registered = db.list_sources()
-    if json_output():
-        for source in registered:
-            emit_json({"name": source.name, "path": source.path})
-        return
-    if not registered:
-        # A hint, not data: keep it off stdout so pipes stay clean
-        logger.info("No sources registered. Add one with: arciv add <dir> <name>")
-        return
-    for source in registered:
-        emit(f"{source.name}\t{source.path}")
+        if db.get_source(name) is None:
+            _fail(f"No source named '{name}'.", code=EXIT_NOINPUT)
+        if not force:
+            prompt = f"Remove source '{name}'?"
+            if remove_files:
+                prompt += (
+                    " This also deletes the archived files of pages linked "
+                    "only by this source"
+                )
+            typer.confirm(prompt, abort=True)
+        # Compute and delete the exclusively-linked pages while the source's
+        # links still carry its name; remove_source's cascade would NULL them.
+        slugs = db.prune_source_pages(name) if remove_files else []
+        db.remove_source(name)
+
+    removed_folders = 0
+    for slug in slugs:
+        # A blank slug would resolve to SAVED_DIR itself; never recurse into it
+        if not slug:
+            continue
+        folder = SAVED_DIR / slug
+        if folder.is_dir():
+            shutil.rmtree(folder)
+            removed_folders += 1
+
+    logger.info(f"Removed source '{name}'")
+    if remove_files:
+        emit(
+            f"Removed {len(slugs)} page(s) linked only by '{name}'; "
+            f"deleted {removed_folders} saved folder(s)."
+        )
 
 
 @cli.command()
@@ -702,6 +781,13 @@ def list_pages(
             help="Only show pages from this registered domain, e.g. medium.com.",
         ),
     ] = None,
+    source: Annotated[
+        str | None,
+        typer.Option(
+            "--source",
+            help="Only show pages indexed from this registered source.",
+        ),
+    ] = None,
     null: Annotated[
         bool,
         typer.Option(
@@ -714,12 +800,16 @@ def list_pages(
     """List fetched pages, newest first: fetch time, domain, URL.
 
     Columns are tab-separated so the output pipes cleanly into
-    grep/cut/awk, e.g.: arciv list -n 0 | grep /tag/. With --json, emits
-    JSONL (one object per line). With --null, records are NUL-separated.
+    grep/cut/awk, e.g.: arciv list -n 0 | grep /tag/. Restrict to one
+    registered source with --source NAME (or one domain with --domain).
+    With --json, emits JSONL (one object per line). With --null, records
+    are NUL-separated.
     """
     with PageDatabase(DB_PATH) as db:
+        if source is not None and db.get_source(source) is None:
+            _fail(f"No source named '{source}'.", code=EXIT_NOINPUT)
         pages = db.list_fetched(
-            limit=limit or None, oldest_first=reverse, domain=domain
+            limit=limit or None, oldest_first=reverse, domain=domain, source=source
         )
     for page in pages:
         # ISO timestamp trimmed to seconds for readability

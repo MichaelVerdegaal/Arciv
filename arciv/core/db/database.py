@@ -65,7 +65,12 @@ _DEFAULT_RULES: tuple[tuple[str, str, str, str | None], ...] = (
         "media/non-content file",
     ),
     ("regex", r"/_next/image", "skip", "image proxy endpoint"),
-    ("regex", r"^https://(www\.)?\d{1,3}(\.\d{1,3}){3}(:\d+)?(/|$)", "skip", "IP-address host"),
+    (
+        "regex",
+        r"^https://(www\.)?\d{1,3}(\.\d{1,3}){3}(:\d+)?(/|$)",
+        "skip",
+        "IP-address host",
+    ),
     ("starts_with", "https://localhost", "skip", "local address"),
     ("domain", "sharepoint.com", "skip", "not content"),
     ("host", "content.powerapps.com", "skip", "not content"),
@@ -399,20 +404,34 @@ class PageDatabase:
         limit: int | None = None,
         oldest_first: bool = False,
         domain: str | None = None,
+        source: str | None = None,
     ) -> list[Page]:
         """List fetched pages ordered by fetch time, newest first by
         default. A limit of None returns every row; a domain restricts
-        the rows to that exact registered domain (e.g. ``medium.com``)."""
+        the rows to that exact registered domain (e.g. ``medium.com``);
+        a source restricts them to the pages indexed from that registered
+        source (joined via the links table, so a page linked from several
+        of the source's files still appears once)."""
         order = "ASC" if oldest_first else "DESC"
-        where = "WHERE fetched_at IS NOT NULL"
+        joins = ""
+        # When filtering by source the join can return a page once per link
+        # row, so DISTINCT collapses those duplicates back to one row.
+        select = "SELECT pages.* FROM pages"
+        clauses = ["pages.fetched_at IS NOT NULL"]
         params: list[object] = []
+        if source is not None:
+            select = "SELECT DISTINCT pages.* FROM pages"
+            joins = " JOIN links ON links.url = pages.url"
+            clauses.append("links.source_name = ?")
+            params.append(source)
         if domain is not None:
-            where += " AND domain = ?"
+            clauses.append("pages.domain = ?")
             params.append(domain)
+        where = " AND ".join(clauses)
         # SQLite treats a negative LIMIT as "no limit"
         params.append(-1 if limit is None else limit)
         rows = self._conn.execute(
-            f"SELECT * FROM pages {where} ORDER BY fetched_at {order} LIMIT ?",
+            f"{select}{joins} WHERE {where} ORDER BY pages.fetched_at {order} LIMIT ?",
             params,
         ).fetchall()
         return [self._row_to_page(row) for row in rows]
@@ -642,6 +661,44 @@ class PageDatabase:
         cursor = self._conn.execute("DELETE FROM sources WHERE name = ?", (name,))
         self._conn.commit()
         return cursor.rowcount > 0
+
+    def prune_source_pages(self, name: str) -> list[str]:
+        """Delete the pages linked *only* by source ``name``; return their slugs.
+
+        A page is removed only when every link referencing it belongs to this
+        source: no link from another source and none from an ad-hoc file
+        (``source_name`` NULL). Pages also linked elsewhere are kept untouched
+        here, so removing one source never orphans a page another source — or a
+        loose ``get --file`` run — still points at; ``remove_source`` later
+        drops just this source's attribution from those shared links.
+
+        Must be called *before* ``remove_source`` so the source's links still
+        carry its name. Link rows are deleted before page rows because
+        ``links.url`` is a foreign key into ``pages`` with no cascade.
+
+        Returns the slugs of the deleted pages so the caller can delete the
+        matching ``saved/<slug>/`` folders on disk.
+        """
+        # `source_name IS NOT ?` is NULL-safe in SQLite: an ad-hoc link
+        # (NULL) and a link from another source both count as "another link",
+        # so a page with any such link is excluded from the exclusive set.
+        rows = self._conn.execute(
+            "SELECT DISTINCT pages.url AS url, pages.slug AS slug "
+            "FROM pages JOIN links ON links.url = pages.url "
+            "WHERE links.source_name = ? "
+            "AND pages.url NOT IN "
+            "(SELECT url FROM links WHERE source_name IS NOT ?)",
+            (name, name),
+        ).fetchall()
+        urls = [row["url"] for row in rows]
+        slugs = [row["slug"] for row in rows]
+        if not urls:
+            return []
+        placeholders = ",".join("?" * len(urls))
+        self._conn.execute(f"DELETE FROM links WHERE url IN ({placeholders})", urls)
+        self._conn.execute(f"DELETE FROM pages WHERE url IN ({placeholders})", urls)
+        self._conn.commit()
+        return slugs
 
     def get_source(self, name: str) -> Source | None:
         """Get a source by name, or None if unknown."""

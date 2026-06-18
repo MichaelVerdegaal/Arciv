@@ -138,9 +138,7 @@ def validate_rule(
             f"Choose one of: {', '.join(RULE_MATCH_TYPES)}."
         )
     if action not in RULE_ACTIONS:
-        return (
-            f"Unknown action: {action!r}. Choose one of: {', '.join(RULE_ACTIONS)}."
-        )
+        return f"Unknown action: {action!r}. Choose one of: {', '.join(RULE_ACTIONS)}."
     if not pattern:
         return "Enter a pattern to match."
     if action == "rewrite" and not replacement:
