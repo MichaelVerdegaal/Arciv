@@ -54,7 +54,7 @@ Inspect the archive:
 
 ```bash
 arciv status                         # pipeline counts + failure summary
-arciv list --n 50                    # fetched pages: time, domain, URL
+arciv list -n 50                     # fetched pages: time, domain, URL
 arciv list --domain medium.com       # only pages from one domain
 arciv path https://example.com/post  # filepath of its archived markdown
 arciv prune failed                   # drop stale rows: missing | failed | all
@@ -69,8 +69,14 @@ rules the web app edits):
 arciv rules list                                   # rules, in the order they apply
 arciv rules add domain medium.com rewrite -r scribe.rip  # rewrite a host
 arciv rules add domain youtube.com skip            # skip a domain
+arciv rules test https://medium.com/@me/post       # show how the rules treat a URL
 arciv rules remove 3                               # remove a rule by id
 ```
+
+`rules test` runs a URL through the live rule list and prints the verdict —
+`skipped` (with the reason), `rewritten` (with the target), or `passthrough` —
+naming the rule id that fired, so you can tune a rewrite without the
+add-run-inspect-remove round trip.
 
 ### Global options and pipes
 
@@ -82,11 +88,14 @@ arciv -v fetch         # more detail (-v debug, -vv trace)
 arciv -q fetch         # errors only
 arciv --color never list
 arciv --json status    # machine-readable output on stdout
+arciv --version        # print the installed version and exit
 ```
 
 With `--json`, `status` and `path` emit one JSON object, while `list`,
 `sources`, and `rules list` emit JSONL (one object per line) so they stream
-into `head`/`grep`/`jq`.
+into `head`/`grep`/`jq`. The mutating commands (`archive`, `get`, `fetch`,
+`parse`) emit a single `{indexed, fetched, parsed, failed}` summary, letting a
+script assert an outcome inline without a follow-up `status --json`.
 The commands compose with standard Unix tools:
 
 ```bash
@@ -94,7 +103,7 @@ The commands compose with standard Unix tools:
 arciv list --json | jq -r .url | grep medium.com | arciv get -
 
 # NUL-separated output survives odd characters and feeds xargs -0
-arciv list --n 0 --null | xargs -0 -n1 echo
+arciv list -n 0 --null | xargs -0 -n1 echo
 ```
 
 `arciv get -` reads newline-separated URLs from stdin.

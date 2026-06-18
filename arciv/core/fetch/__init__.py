@@ -7,13 +7,14 @@ from .url_helpers import (
     slug_for_url,
     split_url,
 )
-from .url_processing import process_url
+from .url_processing import matching_rule, process_url
 
 __all__ = [
     "Fetcher",
     "canonicalize",
     "is_pdf_url",
     "is_raw_text_url",
+    "matching_rule",
     "process_url",
     "registered_domain",
     "slug_for_url",

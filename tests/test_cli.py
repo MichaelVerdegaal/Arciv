@@ -103,15 +103,28 @@ class TestList:
 
     def test_n_limits_rows(self, runner, data_dir):
         self._seed_three(data_dir)
-        result = runner.invoke(cli_module.cli, ["list", "--n", "1"])
+        result = runner.invoke(cli_module.cli, ["list", "-n", "1"])
         assert result.exit_code == 0
         assert result.output.splitlines() == [
             "2026-06-10T10:15:00\texample.com\thttps://example.com/new"
         ]
 
+    def test_limit_long_form_limits_rows(self, runner, data_dir):
+        self._seed_three(data_dir)
+        result = runner.invoke(cli_module.cli, ["list", "--limit", "1"])
+        assert result.exit_code == 0
+        assert result.output.splitlines() == [
+            "2026-06-10T10:15:00\texample.com\thttps://example.com/new"
+        ]
+
+    def test_old_double_dash_n_is_gone(self, runner, data_dir):
+        self._seed_three(data_dir)
+        result = runner.invoke(cli_module.cli, ["list", "--n", "1"])
+        assert result.exit_code != 0
+
     def test_n_zero_shows_everything(self, runner, data_dir):
         self._seed_three(data_dir)
-        result = runner.invoke(cli_module.cli, ["list", "--n", "0"])
+        result = runner.invoke(cli_module.cli, ["list", "-n", "0"])
         assert len(result.output.splitlines()) == 3
 
     def test_reverse_shows_oldest_first(self, runner, data_dir):
@@ -557,6 +570,62 @@ class TestRules:
         assert result.exit_code == output.EXIT_NOINPUT
 
 
+class TestRulesTest:
+    """`rules test <url>` reports skip / rewrite / passthrough verdicts."""
+
+    def test_skip_names_the_rule(self, runner, data_dir):
+        with PageDatabase(data_dir / "arciv.db") as db:
+            rule = db.add_rule(
+                Rule(match_type="host", pattern="skip-me.example.com", action="skip")
+            )
+        result = runner.invoke(
+            cli_module.cli, ["rules", "test", "https://skip-me.example.com/post"]
+        )
+        assert result.exit_code == 0
+        assert result.stdout.startswith("skipped:")
+        assert f"rule {rule.id}" in result.stdout
+
+    def test_rewrite_shows_target_and_rule(self, runner, data_dir):
+        with PageDatabase(data_dir / "arciv.db") as db:
+            rule = db.add_rule(
+                Rule(
+                    match_type="host",
+                    pattern="rewrite-me.example.com",
+                    action="rewrite",
+                    replacement="scribe.rip",
+                )
+            )
+        result = runner.invoke(
+            cli_module.cli, ["rules", "test", "https://rewrite-me.example.com/post"]
+        )
+        assert result.exit_code == 0
+        assert "rewritten -> https://scribe.rip/post" in result.stdout
+        assert f"rule {rule.id}" in result.stdout
+
+    def test_passthrough_when_no_rule_fires(self, runner, data_dir):
+        result = runner.invoke(
+            cli_module.cli, ["rules", "test", "https://unmatched.example.com/post"]
+        )
+        assert result.exit_code == 0
+        assert result.stdout.startswith("passthrough:")
+        assert "rule" not in result.stdout
+
+    def test_json_emits_structured_verdict(self, runner, data_dir):
+        with PageDatabase(data_dir / "arciv.db") as db:
+            rule = db.add_rule(
+                Rule(match_type="host", pattern="skip-me.example.com", action="skip")
+            )
+        result = runner.invoke(
+            cli_module.cli,
+            ["--json", "rules", "test", "https://skip-me.example.com/post"],
+        )
+        assert result.exit_code == 0
+        obj = json.loads(result.stdout)
+        assert obj["verdict"] == "skipped"
+        assert obj["rule_id"] == rule.id
+        assert obj["reason"]
+
+
 class TestGlobalOptions:
     """Global options must work both before and after the command."""
 
@@ -578,6 +647,89 @@ class TestGlobalOptions:
     def test_quiet_after_command(self, runner, data_dir):
         result = runner.invoke(cli_module.cli, ["status", "-q"])
         assert result.exit_code == 0
+
+
+class TestVersion:
+    def test_version_prints_and_exits(self, runner, data_dir):
+        result = runner.invoke(cli_module.cli, ["--version"])
+        assert result.exit_code == 0
+        assert result.stdout.startswith("arciv ")
+
+
+class TestPipelineJsonSummaries:
+    """Mutating commands emit a {indexed, fetched, parsed, failed} object."""
+
+    def test_fetch_emits_summary(self, runner, data_dir, monkeypatch):
+        _seed(data_dir, [_page("https://example.com/a", fetched_at=None)])
+
+        def fake_fetch_urls(db, urls, refetch=False):
+            return [db.get(urls[0])] if urls else []
+
+        monkeypatch.setattr(cli_module, "fetch_urls", fake_fetch_urls)
+        result = runner.invoke(cli_module.cli, ["--json", "fetch"])
+        assert result.exit_code == 0
+        obj = json.loads(result.stdout)
+        assert obj == {"indexed": 0, "fetched": 1, "parsed": 0, "failed": 0}
+
+    def test_fetch_counts_failures(self, runner, data_dir, monkeypatch):
+        _seed(data_dir, [_page("https://example.com/a", fetched_at=None)])
+
+        def fake_fetch_urls(db, urls, refetch=False):
+            # Simulate a failed fetch: mark the page and return nothing.
+            page = db.get(urls[0])
+            page.fail_reason = "timeout"
+            db.upsert(page)
+            return []
+
+        monkeypatch.setattr(cli_module, "fetch_urls", fake_fetch_urls)
+        result = runner.invoke(cli_module.cli, ["--json", "fetch"])
+        obj = json.loads(result.stdout)
+        assert obj["fetched"] == 0
+        assert obj["failed"] == 1
+
+    def test_parse_emits_summary(self, runner, data_dir, monkeypatch):
+        _seed(data_dir, [_page("https://example.com/a")])  # fetched, unparsed
+
+        monkeypatch.setattr(cli_module, "parse_pending", lambda db, reparse=False: 1)
+        result = runner.invoke(cli_module.cli, ["--json", "parse"])
+        assert result.exit_code == 0
+        obj = json.loads(result.stdout)
+        assert obj["parsed"] == 1
+        assert obj["indexed"] == 0 and obj["fetched"] == 0
+
+    def test_get_emits_summary(self, runner, data_dir, monkeypatch):
+        monkeypatch.setattr(
+            cli_module, "register_urls", lambda db, urls: ["https://a.com/1"]
+        )
+        monkeypatch.setattr(
+            cli_module, "fetch_urls", lambda db, urls, refetch=False: []
+        )
+        monkeypatch.setattr(cli_module, "parse_pending", lambda db: 1)
+        result = runner.invoke(cli_module.cli, ["--json", "get", "https://a.com/1"])
+        assert result.exit_code == 0
+        obj = json.loads(result.stdout)
+        assert obj == {"indexed": 1, "fetched": 0, "parsed": 1, "failed": 0}
+
+    def test_archive_source_emits_summary(
+        self, runner, data_dir, tmp_path, monkeypatch
+    ):
+        notes = tmp_path / "notes"
+        notes.mkdir()
+        with PageDatabase(data_dir / "arciv.db") as db:
+            db.add_source(
+                Source("notes", str(notes), datetime.now(timezone.utc).isoformat())
+            )
+        monkeypatch.setattr(
+            cli_module,
+            "archive_source",
+            lambda db, name: ArchiveResult(
+                urls=["https://a.com/1", "https://a.com/2"], fetched=[], parsed=2
+            ),
+        )
+        result = runner.invoke(cli_module.cli, ["--json", "archive", "notes"])
+        assert result.exit_code == 0
+        obj = json.loads(result.stdout)
+        assert obj["indexed"] == 2 and obj["parsed"] == 2
 
 
 class TestStreams:
@@ -646,7 +798,7 @@ class TestNull:
                 _page("https://a.com/2", fetched_at="2026-06-11T00:00:00+00:00"),
             ],
         )
-        result = runner.invoke(cli_module.cli, ["list", "--n", "0", "--null"])
+        result = runner.invoke(cli_module.cli, ["list", "-n", "0", "--null"])
         assert result.exit_code == 0
         assert "\n" not in result.stdout
         records = [r for r in result.stdout.split("\0") if r]

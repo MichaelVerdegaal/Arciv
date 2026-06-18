@@ -108,9 +108,9 @@ Only what real usage demands.
 - `arciv status` (✅ implemented): pipeline-state counts and failure summary. Recent
   fetches were dropped from it; that's `arciv list`'s job now.
 - `arciv list` (✅ implemented): fetched pages as `fetched-at TAB domain TAB url`, newest
-  first. `--n` caps the row count (0 = everything), `--reverse` flips to oldest first,
-  `--domain <d>` restricts to one registered domain (exact match, e.g. `medium.com`).
-  Columns stay tab-separated so finer filtering is still `arciv list --n 0 | grep <pat>`.
+  first. `-n`/`--limit` caps the row count (0 = everything), `--reverse` flips to oldest
+  first, `--domain <d>` restricts to one registered domain (exact match, e.g. `medium.com`).
+  Columns stay tab-separated so finer filtering is still `arciv list -n 0 | grep <pat>`.
 - `arciv path <URL>` (✅ implemented): prints the filepath of a page's archived markdown,
   composing with standard tools (`less $(arciv path <URL>)`, `grep ... $(arciv path ...)`)
   instead of reimplementing them. The URL is normalized the same way as at index time, so
