@@ -53,7 +53,9 @@ public interface, so changes to it ripple beyond the Python code:
   IP-host plumbing skips, which now lead the list); deleting them all is honoured
   (no re-seed on reopen).
 - `<data dir>/saved/<slug>/` — one folder per page: `page.html` (raw fetch) or `page.pdf`, plus
-  `page.md` once parsed. Slug format is `<domain>-<hash8>`, sanitized to be a safe directory
+  `page.md` once parsed, plus an `images/` subfolder holding the page's inline images downloaded
+  at parse time (`page.md` links them with relative `![](images/<name>)` paths, so it renders
+  self-contained on disk). Slug format is `<domain>-<hash8>`, sanitized to be a safe directory
   name on Linux and Windows.
 - The data root defaults to the OS user data dir via platformdirs (Linux:
   `~/.local/share/arciv`, Windows: `%LOCALAPPDATA%\arciv`) and is relocatable via

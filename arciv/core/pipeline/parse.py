@@ -4,9 +4,11 @@ Reads the raw files the fetch stage archived under ``saved/<slug>/``,
 validates them (block pages, minimum length), converts them to markdown
 via trafilatura (HTML) or liteparse (PDF), writes ``page.md`` next to the
 raw file, and stamps the page row with ``parsed_at`` plus title/author/word
-count. Rejected pages get a ``fail_reason`` (with ``parsed_at`` left empty)
-so they don't pose as valid archive entries; their raw files stay on disk
-for debugging.
+count. Inline images are downloaded into ``saved/<slug>/images/`` and linked
+locally so a parsed page is self-contained (the one bit of network this stage
+does; cached on disk, so re-parsing stays offline). Rejected pages get a
+``fail_reason`` (with ``parsed_at`` left empty) so they don't pose as valid
+archive entries; their raw files stay on disk for debugging.
 """
 
 from datetime import datetime, timezone
@@ -141,7 +143,9 @@ def _parse_html(
         _reject(db, page, block_reason)
         return None
 
-    conversion = parse_html(html, clean=True)
+    conversion = parse_html(
+        html, clean=True, base_url=page.url, images_dir=html_path.parent / "images"
+    )
     if conversion is None:
         _reject(db, page, "extraction failed")
         return None
@@ -162,7 +166,10 @@ def _parse_html(
         conversion.author,
         conversion.word_count,
     )
-    logger.info(f"Parsed {page.url} ({conversion.word_count} words)")
+    logger.info(
+        f"Parsed {page.url} ({conversion.word_count} words, "
+        f"{conversion.image_count} images)"
+    )
     return result
 
 
@@ -177,7 +184,8 @@ def parse_pending(
 
     With reparse, every fetched page is re-parsed, including already-parsed
     and previously rejected ones. Useful after changing trafilatura settings
-    or cleanup rules; no network traffic, everything is read from disk.
+    or cleanup rules; everything is read from disk, apart from downloading any
+    inline images not already cached under the page's ``images/`` folder.
     """
     pages = db.get_fetched() if reparse else db.get_unparsed()
     count = 0

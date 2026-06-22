@@ -24,9 +24,10 @@ LIST_WITH_COLON_NUMBERED_RE = re.compile(r"^\d+\.\s+:\s*.*$", re.MULTILINE)
 ORPHANED_ASTERISK_RE = re.compile(r"^\s*\*\s*[×]*\s*$", re.MULTILINE)
 EMPTY_NUMBERED_SEQUENCE_RE = re.compile(r"(?:\d+\.\s+){2,}")
 
-# Orphan brackets (removal only)
+# Orphan brackets (removal only). The bracket rule skips a "[]" preceded by
+# "!" so it doesn't gut an alt-less markdown image (![](images/x.png)).
 EMPTY_PARENS_RE = re.compile(r"\(\s*\)")
-EMPTY_BRACKETS_RE = re.compile(r"\[\s*\]")
+EMPTY_BRACKETS_RE = re.compile(r"(?<!!)\[\s*\]")
 STRAY_PAREN_AFTER_SPACE_RE = re.compile(r"(?<=\s)\)")
 STRAY_PAREN_LINE_START_RE = re.compile(r"^\)", re.MULTILINE)
 

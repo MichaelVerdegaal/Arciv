@@ -66,6 +66,13 @@ class TestOrphanBrackets:
     def test_removes_empty_brackets(self):
         assert "[]" not in MarkdownCleaner("text []").clean_orphan_brackets().text
 
+    def test_preserves_alt_less_image(self):
+        # The empty-bracket rule must not gut an alt-less markdown image; the
+        # "!" in front of "[]" is what keeps it intact.
+        text = "![](images/abc123.png)"
+        assert MarkdownCleaner(text).clean_orphan_brackets().text == text
+        assert clean_markdown(text) == text
+
 
 class TestCleanMarkdownPipeline:
     def test_combined_cleaning(self):

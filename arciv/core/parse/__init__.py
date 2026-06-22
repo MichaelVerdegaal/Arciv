@@ -1,4 +1,5 @@
 from .clean_markdown import MarkdownCleaner, clean_markdown
+from .images import localize_images
 from .parser import (
     ConversionResult,
     count_words,
@@ -17,6 +18,7 @@ __all__ = [
     "count_words",
     "extract_metadata",
     "html_to_markdown",
+    "localize_images",
     "parse_html",
     "pdf_to_text",
 ]
