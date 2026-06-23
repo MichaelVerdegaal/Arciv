@@ -1,5 +1,5 @@
 from .clean_markdown import MarkdownCleaner, clean_markdown
-from .images import localize_images
+from .images import localize_images, strip_image_links
 from .parser import (
     ConversionResult,
     count_words,
@@ -21,4 +21,5 @@ __all__ = [
     "localize_images",
     "parse_html",
     "pdf_to_text",
+    "strip_image_links",
 ]

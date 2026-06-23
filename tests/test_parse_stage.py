@@ -1,5 +1,7 @@
 """Tests for the parse stage (raw HTML/PDF on disk → markdown)."""
 
+import urllib.request
+
 import pytest
 
 from arciv.core.db import Page, PageDatabase
@@ -105,6 +107,54 @@ class TestParsePending:
         assert parsed == 1
         md = (saved / "example.com-bbbbbbbb" / "page.md").read_text("utf-8")
         assert md == content
+
+    def test_downloads_inline_images_into_slug_folder(self, db, tmp_path, monkeypatch):
+        # A page-relative <img> should be resolved against the page URL,
+        # downloaded into saved/<slug>/images/, and linked locally in page.md.
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b"fake image bytes"
+
+        requested: list[str] = []
+
+        def fake_urlopen(request, timeout=0):
+            requested.append(request.full_url)
+            return _Resp()
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+        saved = tmp_path / "saved"
+        slug = "example.com-aaaaaaaa"
+        db.upsert(_fetched_page("https://example.com/a", slug))
+        paragraphs = "".join(
+            f"<p>Gallery prose line {i} with distinct words for extraction "
+            f"number {i * 3}.</p>"
+            for i in range(40)
+        )
+        html = (
+            "<html><head><title>Gallery</title></head><body><article>"
+            f"{paragraphs}"
+            '<img src="/img/pic.png" alt="A pic"/>'
+            f"{paragraphs}"
+            "</article></body></html>"
+        )
+        _save_html(saved, slug, html)
+
+        assert parse_pending(db, saved_dir=saved, min_words=10) == 1
+
+        # The relative src resolved against the page URL before downloading.
+        assert requested == ["https://example.com/img/pic.png"]
+        images = list((saved / slug / "images").iterdir())
+        assert len(images) == 1
+        md = (saved / slug / "page.md").read_text("utf-8")
+        assert "](images/" in md
+        assert "example.com/img/pic.png" not in md
 
     def test_unfetched_pages_are_ignored(self, db, tmp_path):
         saved = tmp_path / "saved"

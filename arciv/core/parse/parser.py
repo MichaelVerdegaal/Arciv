@@ -8,7 +8,7 @@ from trafilatura import bare_extraction, extract
 
 from .clean_markdown import clean_markdown
 from .html_fixes import PRUNE_XPATHS, fix_html
-from .images import localize_images
+from .images import localize_images, strip_image_links
 
 WORD_RE = re.compile(r"\b\w+\b")
 
@@ -192,7 +192,8 @@ def parse_html(
     title, author = extract_metadata(html_content)
     return ConversionResult(
         md_content=md_content,
-        word_count=count_words(md_content),
+        # Count prose only: image links (alt text + path tokens) aren't words.
+        word_count=count_words(strip_image_links(md_content)),
         full_word_count=full_word_count,
         title=title,
         author=author,

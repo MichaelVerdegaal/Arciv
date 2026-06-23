@@ -84,6 +84,12 @@ def _download(abs_url: str, dest: Path) -> bool:
         logger.warning(f"Image download failed {abs_url}: {e}")
         return False
 
+    if not data:
+        # An empty body is a broken image; don't cache a 0-byte file that a
+        # later reparse would treat as a valid download and never retry.
+        logger.warning(f"Image download empty {abs_url}")
+        return False
+
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".part")
     tmp.write_bytes(data)
@@ -131,3 +137,14 @@ def localize_images(
         return f"![{alt}]({IMAGES_SUBDIR}/{name})"
 
     return _IMAGE_RE.sub(replace, markdown), count
+
+
+def strip_image_links(markdown: str) -> str:
+    """Remove markdown image syntax so word counts reflect prose.
+
+    Image links carry no prose, but their alt text and URL/path tokens would
+    otherwise be counted as words (a hash-named local path adds ~3 tokens per
+    image). Stripping them keeps ``word_count`` meaning the same thing it did
+    before images were stored inline, so the length gate stays calibrated.
+    """
+    return _IMAGE_RE.sub("", markdown)

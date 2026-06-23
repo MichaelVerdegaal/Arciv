@@ -125,6 +125,19 @@ class TestLocalizeImages:
         assert md1 == md2
 
 
+class TestStripImageLinks:
+    def test_removes_image_syntax(self):
+        from arciv.core.parse.images import strip_image_links
+
+        assert strip_image_links("a ![alt](images/x.png) b") == "a  b"
+
+    def test_leaves_text_without_images_unchanged(self):
+        from arciv.core.parse.images import strip_image_links
+
+        text = "plain text, no images here."
+        assert strip_image_links(text) == text
+
+
 class TestModuleConstants:
     def test_images_subdir_name(self):
         assert images.IMAGES_SUBDIR == "images"
