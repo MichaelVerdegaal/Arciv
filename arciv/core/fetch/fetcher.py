@@ -2,9 +2,12 @@
 
 Uses patchright (undetected Playwright fork) with Chrome in persistent-context
 mode for stealth. Each page goes through: fetch HTML → write ``page.html`` to
-the slug folder → record in DB. PDF URLs are downloaded via direct HTTP and
-stored as ``page.pdf``. Validation and markdown conversion happen later, in
-the parse stage (see ``arciv.core.pipeline.parse``).
+the slug folder → record in DB. A page's images are captured in-browser as it
+loads (see ``image_capture.py``) into ``<slug>/images/`` plus a URL manifest,
+so the archive keeps them without a second, less-stealthy round-trip. PDF URLs
+are downloaded via direct HTTP and stored as ``page.pdf``. Validation and
+markdown conversion happen later, in the parse stage (see
+``arciv.core.pipeline.parse``).
 """
 
 import asyncio
@@ -19,7 +22,9 @@ from patchright.async_api import TimeoutError as PlaywrightTimeoutError
 from patchright.async_api import async_playwright
 
 from arciv.core.db import Page, PageDatabase
+from arciv.core.image_manifest import IMAGES_SUBDIR, write_manifest
 
+from .image_capture import ImageCapturer, autoscroll
 from .url_helpers import (
     is_pdf_url,
     registered_domain,
@@ -37,7 +42,10 @@ TIMEOUT_MS = 30_000
 NETWORKIDLE_MS = 3_000
 DEFAULT_CONCURRENCY = 8
 DEFAULT_MAX_RETRIES = 2
-BLOCKED_RESOURCE_TYPES = {"image", "stylesheet", "font"}
+# Stylesheets and fonts are dropped for speed; images are now allowed through
+# so the in-browser ImageCapturer can archive them (real browsers load images,
+# so this is also less of a stealth tell than blocking them).
+BLOCKED_RESOURCE_TYPES = {"stylesheet", "font"}
 
 # Transient error patterns worth retrying
 _TRANSIENT_ERRORS = (
@@ -299,6 +307,8 @@ class Fetcher:
         the Page, or None on failure."""
         html: str | None = None
         last_reason = ""
+        capturer: ImageCapturer | None = None
+        slug_dir = self.saved_dir / slug
 
         for attempt in range(1, self.max_retries + 1):
             async with semaphore:
@@ -311,6 +321,9 @@ class Fetcher:
                         else route.continue_()
                     ),
                 )
+                # Capture images as they load, in this same stealthy session.
+                capturer = ImageCapturer(slug_dir / IMAGES_SUBDIR)
+                capturer.attach(pw_page)
                 try:
                     await pw_page.goto(
                         processed_url,
@@ -325,6 +338,16 @@ class Fetcher:
                         )
                     except PlaywrightTimeoutError:
                         pass
+                    # Nudge lazy images into loading, then let them settle.
+                    await autoscroll(pw_page)
+                    try:
+                        await pw_page.wait_for_load_state(
+                            "networkidle", timeout=NETWORKIDLE_MS
+                        )
+                    except PlaywrightTimeoutError:
+                        pass
+                    # Finish all image reads before the page closes.
+                    await capturer.drain()
                     html = await pw_page.content()
                 except Exception as e:
                     last_reason = self._format_fetch_error(e)
@@ -359,6 +382,10 @@ class Fetcher:
             await asyncio.sleep(2 * attempt)
 
         await self._save_html(slug, html)
+        image_count = 0
+        if capturer is not None:
+            write_manifest(slug_dir, capturer.manifest)
+            image_count = len(set(capturer.manifest.values()))
         page = self._store_success(processed_url, original_url, domain, slug, "html")
-        logger.info(f"Fetched {processed_url}")
+        logger.info(f"Fetched {processed_url} ({image_count} images)")
         return page

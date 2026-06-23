@@ -4,11 +4,11 @@ Reads the raw files the fetch stage archived under ``saved/<slug>/``,
 validates them (block pages, minimum length), converts them to markdown
 via trafilatura (HTML) or liteparse (PDF), writes ``page.md`` next to the
 raw file, and stamps the page row with ``parsed_at`` plus title/author/word
-count. Inline images are downloaded into ``saved/<slug>/images/`` and linked
-locally so a parsed page is self-contained (the one bit of network this stage
-does; cached on disk, so re-parsing stays offline). Rejected pages get a
-``fail_reason`` (with ``parsed_at`` left empty) so they don't pose as valid
-archive entries; their raw files stay on disk for debugging.
+count. Inline image links are pointed at the copies the fetch stage already
+captured (via the page's image manifest), so this stage stays offline.
+Rejected pages get a ``fail_reason`` (with ``parsed_at`` left empty) so they
+don't pose as valid archive entries; their raw files stay on disk for
+debugging.
 """
 
 from datetime import datetime, timezone
@@ -19,6 +19,7 @@ from loguru import logger
 from arciv.core.parse import check_html, parse_html, pdf_to_text
 from arciv.core.db import Page, PageDatabase
 from arciv.core.fetch import is_raw_text_url
+from arciv.core.image_manifest import load_manifest
 from arciv.settings import DEFAULT_MIN_WORDS, SAVED_DIR
 
 
@@ -143,8 +144,9 @@ def _parse_html(
         _reject(db, page, block_reason)
         return None
 
+    manifest = load_manifest(html_path.parent)
     conversion = parse_html(
-        html, clean=True, base_url=page.url, images_dir=html_path.parent / "images"
+        html, clean=True, base_url=page.url, image_manifest=manifest
     )
     if conversion is None:
         _reject(db, page, "extraction failed")
@@ -184,8 +186,7 @@ def parse_pending(
 
     With reparse, every fetched page is re-parsed, including already-parsed
     and previously rejected ones. Useful after changing trafilatura settings
-    or cleanup rules; everything is read from disk, apart from downloading any
-    inline images not already cached under the page's ``images/`` folder.
+    or cleanup rules; no network traffic, everything is read from disk.
     """
     pages = db.get_fetched() if reparse else db.get_unparsed()
     count = 0

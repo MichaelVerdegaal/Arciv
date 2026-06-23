@@ -2,13 +2,12 @@
 
 import re
 from dataclasses import dataclass
-from pathlib import Path
 
 from trafilatura import bare_extraction, extract
 
 from .clean_markdown import clean_markdown
 from .html_fixes import PRUNE_XPATHS, fix_html
-from .images import localize_images, strip_image_links
+from .images import relink_images, strip_image_links
 
 WORD_RE = re.compile(r"\b\w+\b")
 
@@ -149,7 +148,7 @@ def parse_html(
     html_content: str,
     clean: bool = True,
     base_url: str | None = None,
-    images_dir: Path | None = None,
+    image_manifest: dict[str, str] | None = None,
 ) -> ConversionResult | None:
     """Convert HTML to markdown and extract metadata.
 
@@ -159,17 +158,21 @@ def parse_html(
     Args:
         html_content: Raw HTML string.
         clean: Whether to apply markdown cleaning.
-        images_dir: If given, inline images are downloaded here and their
-            links rewritten to local paths (``![alt](images/<name>)``), making
-            the markdown self-contained on disk. When None, images are left out.
+        image_manifest: If given, inline images are emitted and their links
+            rewritten to the local files captured at fetch time
+            (``![alt](images/<name>)``) via this ``url -> filename`` manifest.
+            An empty dict still emits images (all left as remote links); None
+            leaves images out entirely.
         base_url: The page URL, used to resolve relative image srcs against.
-            Only meaningful together with ``images_dir``.
+            Only meaningful together with ``image_manifest``.
 
     Returns:
         Conversion result with markdown content, word count, and metadata.
         None if extraction failed entirely.
     """
-    md_content = html_to_markdown(html_content, include_images=images_dir is not None)
+    md_content = html_to_markdown(
+        html_content, include_images=image_manifest is not None
+    )
     if md_content is None:
         return None
 
@@ -179,12 +182,11 @@ def parse_html(
     full_md = html_to_markdown(html_content, strip_code=False)
     full_word_count = count_words(full_md) if full_md else 0
 
-    # Localize before cleaning: this swaps arbitrary remote URLs (which the
-    # cleaner can mangle) for clean local paths. Failed downloads keep their
-    # remote link.
+    # Relink before cleaning: this swaps arbitrary remote URLs (which the
+    # cleaner can mangle) for clean local paths. Unmatched images stay remote.
     image_count = 0
-    if images_dir is not None:
-        md_content, image_count = localize_images(md_content, base_url, images_dir)
+    if image_manifest is not None:
+        md_content, image_count = relink_images(md_content, base_url, image_manifest)
 
     if clean:
         md_content = clean_markdown(md_content)

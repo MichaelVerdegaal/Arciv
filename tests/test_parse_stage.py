@@ -1,10 +1,9 @@
 """Tests for the parse stage (raw HTML/PDF on disk → markdown)."""
 
-import urllib.request
-
 import pytest
 
 from arciv.core.db import Page, PageDatabase
+from arciv.core.image_manifest import write_manifest
 from arciv.core.pipeline.parse import parse_pending
 
 
@@ -108,27 +107,9 @@ class TestParsePending:
         md = (saved / "example.com-bbbbbbbb" / "page.md").read_text("utf-8")
         assert md == content
 
-    def test_downloads_inline_images_into_slug_folder(self, db, tmp_path, monkeypatch):
-        # A page-relative <img> should be resolved against the page URL,
-        # downloaded into saved/<slug>/images/, and linked locally in page.md.
-        class _Resp:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *exc):
-                return False
-
-            def read(self):
-                return b"fake image bytes"
-
-        requested: list[str] = []
-
-        def fake_urlopen(request, timeout=0):
-            requested.append(request.full_url)
-            return _Resp()
-
-        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-
+    def test_relinks_inline_images_from_manifest(self, db, tmp_path):
+        # A page-relative <img> should be resolved against the page URL and,
+        # using the fetch-written manifest, linked to the local capture.
         saved = tmp_path / "saved"
         slug = "example.com-aaaaaaaa"
         db.upsert(_fetched_page("https://example.com/a", slug))
@@ -145,15 +126,16 @@ class TestParsePending:
             "</article></body></html>"
         )
         _save_html(saved, slug, html)
+        # Simulate what the fetch stage wrote: the manifest plus the file.
+        slug_dir = saved / slug
+        (slug_dir / "images").mkdir()
+        (slug_dir / "images" / "pic123.png").write_bytes(b"fake image bytes")
+        write_manifest(slug_dir, {"https://example.com/img/pic.png": "pic123.png"})
 
         assert parse_pending(db, saved_dir=saved, min_words=10) == 1
 
-        # The relative src resolved against the page URL before downloading.
-        assert requested == ["https://example.com/img/pic.png"]
-        images = list((saved / slug / "images").iterdir())
-        assert len(images) == 1
-        md = (saved / slug / "page.md").read_text("utf-8")
-        assert "](images/" in md
+        md = (slug_dir / "page.md").read_text("utf-8")
+        assert "](images/pic123.png)" in md
         assert "example.com/img/pic.png" not in md
 
     def test_unfetched_pages_are_ignored(self, db, tmp_path):
