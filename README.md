@@ -66,8 +66,7 @@ arciv db dir                         # where the archive lives on disk
 arciv db remove                      # delete the database (asks first)
 ```
 
-Manage URL rules that skip or rewrite URLs before they are fetched (the same
-rules the web app edits):
+Manage URL rules that skip or rewrite URLs before they are fetched:
 
 ```bash
 arciv rules list                                   # rules, in the order they apply
@@ -114,27 +113,6 @@ arciv list -n 0 --null | xargs -0 -n1 echo
 `arciv get -` reads newline-separated URLs from stdin.
 
 See [SETUP.md](SETUP.md) for installation and configuration.
-
-## Web app
-
-A single self-hosted web app browses the archive and archives new URLs from the browser with
-live status. It is a FastAPI service that imports this library directly and renders its own
-HTML (Jinja2 + Datastar, BeerCSS), so there is no separate frontend runtime. Sources are managed from
-the browser too: add a directory of notes, view the files indexed and the links found in each,
-re-archive to pick up changes, or remove a source. Any page's detail view can re-fetch
-(re-download then re-parse) or re-parse from disk, so URL and parse rules can be tried out
-without dropping to the CLI.
-
-```bash
-# With Docker, mounting the same data dir the CLI writes:
-ARCIV_DATA_DIR=~/.local/share/arciv docker compose up   # http://localhost:8000
-
-# Or directly from a clone:
-uv run uvicorn arciv_api.app:app                         # http://localhost:8000
-```
-
-One user per instance, no auth or TLS by design. To reach it beyond your LAN, put a reverse
-proxy with auth in front. See [PLAN.md](PLAN.md) for the architecture and roadmap.
 
 ## The Name
 

@@ -696,33 +696,6 @@ class TestListSourcesWithCounts:
         assert [s.name for s, _ in db.list_sources_with_counts()] == ["alpha", "zeta"]
 
 
-class TestReadOnly:
-    def test_reads_data_written_by_the_writer(self, tmp_path):
-        db_path = tmp_path / "arciv.db"
-        with PageDatabase(db_path) as writer:
-            writer.upsert(_page("https://example.com/a", title="Hello"))
-            # Open the reader while the writer (and its WAL) is live, the way
-            # the backend reads alongside the running CLI.
-            with PageDatabase(db_path, read_only=True) as reader:
-                page = reader.get("https://example.com/a")
-                assert page is not None
-                assert page.title == "Hello"
-
-    def test_read_only_connection_rejects_writes(self, tmp_path):
-        db_path = tmp_path / "arciv.db"
-        with PageDatabase(db_path):
-            pass  # create the database file and schema
-        with PageDatabase(db_path, read_only=True) as reader:
-            with pytest.raises(sqlite3.OperationalError):
-                reader.upsert(_page("https://example.com/a"))
-
-    def test_read_only_open_does_not_create_a_missing_file(self, tmp_path):
-        db_path = tmp_path / "missing.db"
-        with pytest.raises(sqlite3.OperationalError):
-            PageDatabase(db_path, read_only=True)
-        assert not db_path.exists()
-
-
 class TestRules:
     def test_new_database_is_seeded_with_default_rules(self, db):
         rules = db.list_rules()

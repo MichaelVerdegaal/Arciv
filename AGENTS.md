@@ -4,13 +4,12 @@
 Arciv is a personal archival tool for reading material: blog posts, research papers,
 documentation. Not books, not videos. It extracts URLs from markdown files (or takes them
 directly on the CLI), scrapes their content, and archives it as markdown on disk. The goal: a
-trustworthy archive of everything worth reading again, retrievable years later. Retrieval today
-is the inspection commands (`arciv list`, `arciv path`) plus ripgrep over the archive; a web
-UI for browsing it is the next step (see PLAN.md).
+trustworthy archive of everything worth reading again, retrievable years later. Retrieval is
+the inspection commands (`arciv list`, `arciv path`) plus ripgrep over the archive.
 
-The project splits into three isolated parts: the **CLI tool** (this package, all archival
-logic, installable as a uv tool, not containerized), and a future **backend** and **frontend**
-which each get a dedicated container.
+Arciv is a single CLI tool: the **`arciv/` package**, holding all archival logic, installable
+as a uv tool and deliberately not containerized. There is no separate service or frontend
+runtime. See PLAN.md for the roadmap.
 
 ### Architecture
 
@@ -29,10 +28,7 @@ Three stages, no writeback into the notes. Each stage has a dedicated CLI comman
    fetched HTML, convert to markdown via trafilatura (HTML) or liteparse (PDF), write
    `page.md` next to the raw file, fill in title/author/word count.
 
-### Storage Contract
-
-The planned backend/frontend read the data directory directly, so treat this layout as a
-public interface, so changes to it ripple beyond the Python code:
+### Storage
 
 - `<data dir>/arciv.db`: SQLite (WAL mode, foreign keys ON). `pages` holds one row per URL:
   `url` (PK, normalized), `original_url`, `domain`, `slug` (UNIQUE; names the
@@ -43,15 +39,8 @@ public interface, so changes to it ripple beyond the Python code:
   either stage. `links` holds one row per indexed link: `url`, `file_path` (full normalized
   path), `source_name` (NULL for ad-hoc files; cleared when a source is removed),
   `indexed_at`. `sources` holds registered directories: `name` (PK), `path`, `added_at`.
-  `rules` holds the user-editable URL-processing rules applied in order during
-  indexing/archiving: `id` (PK), `match_type`
-  (`domain`/`host`/`starts_with`/`ends_with`/`exact`/`regex`), `pattern`, `action`
-  (`skip`/`rewrite`), `replacement` (skip reason, or the rewrite target — the new
-  host/prefix/suffix/whole URL/regex replacement for the matched span),
-  `position` (apply order), `added_at`. A new database is seeded with default
-  rules (migrated from the old hardcoded lists, including the media/image-proxy/
-  IP-host plumbing skips, which now lead the list); deleting them all is honoured
-  (no re-seed on reopen).
+  `rules` holds the URL-processing rules applied in order during indexing/archiving (see
+  PLAN.md item 3 for the planned move out of the DB into TOML).
 - `<data dir>/saved/<slug>/` — one folder per page: `page.html` (raw fetch) or `page.pdf`, plus
   `page.md` once parsed. Slug format is `<domain>-<hash8>`, sanitized to be a safe directory
   name on Linux and Windows.
@@ -88,20 +77,11 @@ uv tool install .                # Install the CLI as a global tool
 
 ## Current Direction
 
-The scope is settled: Arciv is the main archival tool for all reading material. The CLI
-foundation (layered `get`, separated stages, sources) is in place; the web app phase is now
-underway. PLAN.md is the live roadmap.
-
-- The web app is built: a single FastAPI service (`arciv_api/`) imports the arciv library (it
-  never shells out), reads through short-lived read-only connections, and renders its own HTML
-  with Jinja2 + Datastar (BeerCSS), so there is no separate frontend runtime. It serves
-  browse, page detail, domains, sources, and status, plus a `POST /archive` job flow run by a
-  single in-process worker started in the app lifespan. Page markdown is rendered to HTML and
-  sanitized in Python. Styling is BeerCSS (Material Design 3, dark mode), self-hosted in
-  `static/` (`beer.min.css` plus the Material Symbols icon font) so the app is fully
-  self-contained and works offline, plus a small `static/app.css` that pins the brand colors
-  (indigo `#4B0082` / thistle `#D8BFD8`) and a few app-specific bits; `datastar.js` is
-  self-hosted too. There is no CSS build step.
+The scope is settled: Arciv is the main archival tool for all reading material, shipped as a
+single CLI tool. The CLI foundation (layered `get`, separated stages, sources) is in place. The
+web app has been removed (it was not worth the maintenance cost while the archival experience is
+still settling). PLAN.md is the live roadmap; the next steps are moving the fetch layer to
+Scrapling and redesigning the URL rule system as TOML data.
 
 ## Context
 
