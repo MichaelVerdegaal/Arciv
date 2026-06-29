@@ -1,0 +1,135 @@
+# Default URL-processing rules, applied in order (first match wins) after the
+# in-code plumbing guards (media files, image proxies, IP/localhost hosts) and
+# before any user rules. Each rule is a match (type + match string) plus an
+# ordered list of actions. See PLAN.md item 3.
+#
+# To override or extend these, create a rules.toml in the data dir (see
+# `arciv db dir`); user rules load ahead of these, so they win on first match.
+
+# -- Rewrites --
+
+# Medium articles are paywalled; route them through the freedium mirror. A
+# prepend (not a host swap) keeps the article's subdomain, e.g.
+# https://aignishant.medium.com/post stays intact behind the mirror.
+[[rule]]
+name = "medium to freedium"
+type = "domain"
+match = "medium.com"
+  [[rule.action]]
+  type = "prepend"
+  text = "https://freedium-mirror.cfd/"
+
+# HuggingFace /blob/ PDF links serve an HTML viewer; /resolve/ serves the file.
+# The regex match fires only on the PDF case, so the action stays regex-free.
+[[rule]]
+name = "huggingface readable pdf"
+type = "regex"
+match = 'huggingface\.co/.+/blob/.+\.pdf'
+  [[rule.action]]
+  type = "replace"
+  old = "/blob/"
+  new = "/resolve/"
+
+# Collapse a GitHub file/dir view to the repository root. The negative lookahead
+# in the match keeps readable files (.md/.txt/.rst, e.g. READMEs) archived as-is
+# instead of collapsed, so no halt action is needed.
+[[rule]]
+name = "github file to repo root"
+type = "regex"
+match = '^https://github\.com/[^/]+/[^/]+/(?:blob|tree)/(?!.*\.(?:md|txt|rst)$)'
+  [[rule.action]]
+  type = "regex_replace"
+  pattern = '^https://github\.com/([^/]+)/([^/]+)/(?:blob|tree)/.*'
+  replacement = "https://github.com/$1/$2"
+
+# raw.githubusercontent.com serves bare file bytes; point it back at the repo.
+[[rule]]
+name = "raw github to repo root"
+type = "host"
+match = "raw.githubusercontent.com"
+  [[rule.action]]
+  type = "regex_replace"
+  pattern = '^https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/.*'
+  replacement = "https://github.com/$1/$2"
+
+# -- Policy skips (edit or remove these in your own rules.toml) --
+
+[[rule]]
+name = "youtube"
+type = "domain"
+match = "youtube.com"
+  [[rule.action]]
+  type = "skip"
+  reason = "video, not readable content"
+
+[[rule]]
+name = "youtu.be"
+type = "domain"
+match = "youtu.be"
+  [[rule.action]]
+  type = "skip"
+  reason = "video, not readable content"
+
+[[rule]]
+name = "sharepoint"
+type = "domain"
+match = "sharepoint.com"
+  [[rule.action]]
+  type = "skip"
+  reason = "not content"
+
+[[rule]]
+name = "powerapps"
+type = "host"
+match = "content.powerapps.com"
+  [[rule.action]]
+  type = "skip"
+  reason = "not content"
+
+[[rule]]
+name = "microsoft fabric"
+type = "host"
+match = "app.fabric.microsoft.com"
+  [[rule.action]]
+  type = "skip"
+  reason = "not content"
+
+[[rule]]
+name = "power bi"
+type = "host"
+match = "app.powerbi.com"
+  [[rule.action]]
+  type = "skip"
+  reason = "not content"
+
+[[rule]]
+name = "azure"
+type = "domain"
+match = "azure.com"
+  [[rule.action]]
+  type = "skip"
+  reason = "not content"
+
+[[rule]]
+name = "claude.ai"
+type = "domain"
+match = "claude.ai"
+  [[rule.action]]
+  type = "skip"
+  reason = "not content"
+
+[[rule]]
+name = "linkedin shortener"
+type = "domain"
+match = "lnkd.in"
+  [[rule.action]]
+  type = "skip"
+  reason = "link shortener"
+
+[[rule]]
+name = "google search results"
+type = "starts_with"
+match = "https://google.com/search"
+  [[rule.action]]
+  type = "skip"
+  reason = "search results"

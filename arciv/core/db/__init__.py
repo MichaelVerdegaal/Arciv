@@ -1,9 +1,8 @@
 from .database import PageDatabase
-from .models import Page, Rule, Source
+from .models import Page, Source
 
 __all__ = [
     "Page",
     "PageDatabase",
-    "Rule",
     "Source",
 ]

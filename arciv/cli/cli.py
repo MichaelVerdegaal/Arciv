@@ -26,11 +26,11 @@ Individual pipeline stages, mainly for development:
 
 URL rules (skip or rewrite URLs before they are fetched):
 
-    arciv rules list                # list rules in the order they apply
-    arciv rules add domain x.com skip            # add a skip rule
-    arciv rules add domain medium.com rewrite -r scribe.rip
+    arciv rules list                # list active rules, in the order they apply
     arciv rules test <URL>          # show how the rules treat a URL
-    arciv rules remove 3            # remove the rule with that id
+
+Rules are data, not commands: edit the TOML at ``<data dir>/rules.toml`` (see
+``arciv db dir``); user rules load ahead of the packaged defaults.
 
 Inspection:
 
@@ -63,10 +63,15 @@ import typer
 from loguru import logger
 from typer.core import TyperGroup
 
-from arciv.settings import DATA_DIR, DB_PATH, SAVED_DIR, configure_logger
-from arciv.core.db import PageDatabase, Rule, Source
-from arciv.core.db.models import RULE_ACTIONS, RULE_MATCH_TYPES, validate_rule
-from arciv.core.fetch import matching_rule, process_url
+from arciv.settings import (
+    DATA_DIR,
+    DB_PATH,
+    SAVED_DIR,
+    USER_RULES_PATH,
+    configure_logger,
+)
+from arciv.core.db import PageDatabase, Source
+from arciv.core.fetch import evaluate_url, load_rules, process_url
 from arciv.core.pipeline import (
     ArchiveResult,
     archive_source,
@@ -149,7 +154,8 @@ cli = typer.Typer(
 db_app = typer.Typer(help="Inspect or manage the database file.", no_args_is_help=True)
 cli.add_typer(db_app, name="db")
 rules_app = typer.Typer(
-    help="View, add, and remove URL-processing rules.", no_args_is_help=True
+    help="Inspect URL-processing rules (edit them in the data dir's rules.toml).",
+    no_args_is_help=True,
 )
 cli.add_typer(rules_app, name="rules")
 # invoke_without_command lets a bare ``arciv source`` list the sources (see
@@ -194,32 +200,6 @@ def _fail(message: str, code: int = 1) -> NoReturn:
     """
     typer.echo(f"Error: {message}", err=True)
     raise typer.Exit(code)
-
-
-def _validate_match_type(value: str) -> str:
-    """Typer callback: reject an unknown rule match type during parsing.
-
-    Runs before the command body so the choice is validated the way Typer
-    intends, while still exiting EXIT_USAGE (not Typer's default 2) to keep
-    the CLI's sysexits convention.
-    """
-    if value not in RULE_MATCH_TYPES:
-        _fail(
-            f"Unknown match type: {value!r}. "
-            f"Choose one of: {', '.join(RULE_MATCH_TYPES)}.",
-            code=EXIT_USAGE,
-        )
-    return value
-
-
-def _validate_action(value: str) -> str:
-    """Typer callback: reject an unknown rule action during parsing."""
-    if value not in RULE_ACTIONS:
-        _fail(
-            f"Unknown action: {value!r}. Choose one of: {', '.join(RULE_ACTIONS)}.",
-            code=EXIT_USAGE,
-        )
-    return value
 
 
 def _arciv_version() -> str:
@@ -840,7 +820,7 @@ def path(
         if page is None:
             # The archive keys pages by processed URL; normalize the input
             # the same way so e.g. #fragment variants still resolve
-            processed, _ = process_url(url, db.list_rules())
+            processed, _ = process_url(url, load_rules(USER_RULES_PATH))
             if processed is not None and processed != url:
                 page = db.get(processed)
     if page is None:
@@ -901,178 +881,90 @@ def db_remove(
         emit(f"Removed archived files under {SAVED_DIR}")
 
 
+def _describe_actions(rule) -> str:
+    """One-line summary of a rule's actions for ``rules list``."""
+    parts: list[str] = []
+    for action in rule.actions:
+        if action.type == "skip":
+            parts.append(f"skip ({action.reason})" if action.reason else "skip")
+        elif action.type == "prepend":
+            parts.append(f"prepend {action.text!r}")
+        elif action.type == "replace":
+            parts.append(f"replace {action.old!r} -> {action.new!r}")
+        elif action.type == "regex_replace":
+            parts.append(f"regex_replace {action.pattern!r} -> {action.replacement!r}")
+        else:
+            parts.append(action.type)
+    return "; ".join(parts)
+
+
 @rules_app.command(name="list")
 def rules_list() -> None:
-    """List URL rules in the order they are applied (first match wins).
+    """List the active URL rules in the order they apply (first match wins).
 
-    Columns are tab-separated (id, match type, pattern, action, and the
-    replacement/reason) so the output pipes cleanly into grep/cut/awk. The
-    leading id is what ``arciv rules remove`` takes. With --json, emits JSONL
-    (one object per line).
+    Shows the merged list: the user's ``rules.toml`` (if any) ahead of the
+    packaged defaults. Columns are tab-separated (name, match type, pattern,
+    and the action summary) so the output pipes cleanly into grep/cut/awk.
+    With --json, emits JSONL (one object per line).
     """
-    with PageDatabase(DB_PATH) as db:
-        rules = db.list_rules()
+    rules = load_rules(USER_RULES_PATH)
     if json_output():
         for rule in rules:
             emit_json(
                 {
-                    "id": rule.id,
-                    "match_type": rule.match_type,
-                    "pattern": rule.pattern,
-                    "action": rule.action,
-                    "replacement": rule.replacement,
-                    "position": rule.position,
+                    "name": rule.name,
+                    "type": rule.match_type,
+                    "match": rule.pattern,
+                    "actions": [vars(action) for action in rule.actions],
                 }
             )
         return
-    if not rules:
-        # A hint, not data: keep it off stdout so pipes stay clean
-        logger.info(
-            "No rules defined. Add one with: arciv rules add <match> <pattern> <action>"
-        )
-        return
     for rule in rules:
         emit(
-            f"{rule.id}\t{rule.match_type}\t{rule.pattern}\t"
-            f"{rule.action}\t{rule.replacement or ''}"
-        )
-
-
-@rules_app.command(name="add")
-def rules_add(
-    match_type: Annotated[
-        str,
-        typer.Argument(
-            callback=_validate_match_type,
-            help=f"How to match the URL: one of {', '.join(RULE_MATCH_TYPES)}.",
-        ),
-    ],
-    pattern: Annotated[
-        str, typer.Argument(help="The string compared against the URL.")
-    ],
-    action: Annotated[
-        str,
-        typer.Argument(
-            callback=_validate_action,
-            help=f"What to do on a match: one of {', '.join(RULE_ACTIONS)}.",
-        ),
-    ],
-    replacement: Annotated[
-        str | None,
-        typer.Option(
-            "--replacement",
-            "-r",
-            help=(
-                "For rewrite: the replacement for the matched span — a new host "
-                "(domain/host), prefix (starts_with), suffix (ends_with), whole "
-                "URL (exact), or regex replacement. "
-                "For skip: the reason shown when archiving (optional)."
-            ),
-        ),
-    ] = None,
-) -> None:
-    """Append a URL rule (a match plus an action).
-
-    New rules go to the end of the list, so adding one never reorders the
-    existing rules. See ``arciv rules list`` for the order they are applied.
-    """
-    # match_type and action are validated by their argument callbacks above.
-    pattern = pattern.strip()
-    replacement = (replacement or "").strip() or None
-
-    error = validate_rule(match_type, pattern, action, replacement)
-    if error:
-        _fail(error, code=EXIT_USAGE)
-
-    with PageDatabase(DB_PATH) as db:
-        rule = db.add_rule(
-            Rule(
-                match_type=match_type,
-                pattern=pattern,
-                action=action,
-                replacement=replacement,
-            )
-        )
-    logger.info(f"Added rule {rule.id}: {match_type} {pattern!r} -> {action}")
-    if json_output():
-        emit_json(
-            {
-                "id": rule.id,
-                "match_type": rule.match_type,
-                "pattern": rule.pattern,
-                "action": rule.action,
-                "replacement": rule.replacement,
-                "position": rule.position,
-            }
+            f"{rule.name}\t{rule.match_type}\t{rule.pattern}\t{_describe_actions(rule)}"
         )
 
 
 @rules_app.command(name="test")
 def rules_test(
     url: Annotated[
-        str, typer.Argument(help="The URL to run through the current rule list.")
+        str, typer.Argument(help="The URL to run through the active rule list.")
     ],
 ) -> None:
-    """Show what the current rules do to URL: skip, rewrite, or pass through.
+    """Show what the active rules do to URL: skip, rewrite, or pass through.
 
-    Runs URL through the same processing the fetch stage uses (your rules,
-    then the built-in site rewriters and canonicalization) and prints the
-    verdict, naming the rule id when one of your rules is responsible. Lets
-    you tune a rule without the add-run-inspect-remove round trip.
+    Runs URL through the same processing the index and fetch stages use (the
+    plumbing guards, then the rules, then canonicalization) and prints the
+    verdict, naming the rule responsible for a skip or rewrite. Lets you tune a
+    rule in rules.toml and check it without a full index run.
 
     With --json, emits a single object: ``{"url", "verdict", "target",
-    "reason", "rule_id"}`` where verdict is skipped, rewritten, or passthrough.
+    "reason", "rule"}`` where verdict is skipped, rewritten, or passthrough.
     """
-    with PageDatabase(DB_PATH) as db:
-        rules = db.list_rules()
-    processed, status = process_url(url, rules)
-
-    if processed is None:
-        verdict, target, reason = "skipped", None, status
-    elif "rewritten" in status:
-        verdict, target, reason = "rewritten", processed, None
-    else:
-        verdict, target, reason = "passthrough", processed, None
-
-    # A user rule is only "responsible" when it changed the outcome (a skip or
-    # a rewrite); a passthrough means no rule altered the URL.
-    rule = matching_rule(url, rules) if verdict != "passthrough" else None
+    verdict = evaluate_url(url, load_rules(USER_RULES_PATH))
+    rule_name = verdict.rule.name if verdict.rule else None
 
     if json_output():
         emit_json(
             {
                 "url": url,
-                "verdict": verdict,
-                "target": target,
-                "reason": reason,
-                "rule_id": rule.id if rule else None,
+                "verdict": verdict.verdict,
+                "target": verdict.url,
+                "reason": verdict.reason,
+                "rule": rule_name,
             }
         )
         return
 
-    if verdict == "skipped":
-        line = f"skipped: {reason}"
-    elif verdict == "rewritten":
-        line = f"rewritten -> {target}"
+    if verdict.verdict == "skipped":
+        line = f"skipped: {verdict.reason}"
+    elif verdict.verdict == "rewritten":
+        line = f"rewritten -> {verdict.url}"
     else:
-        line = f"passthrough: {target}"
-    if rule is not None:
-        line += f" (rule {rule.id}: {rule.match_type} {rule.pattern!r})"
+        line = f"passthrough: {verdict.url}"
+    if rule_name is not None:
+        line += f" (rule {rule_name!r})"
     emit(line)
-
-
-@rules_app.command(name="remove")
-def rules_remove(
-    rule_id: Annotated[
-        int,
-        typer.Argument(help="The id of the rule to remove (see 'arciv rules list')."),
-    ],
-) -> None:
-    """Remove a URL rule by its id."""
-    with PageDatabase(DB_PATH) as db:
-        if not db.remove_rule(rule_id):
-            _fail(f"No rule with id {rule_id}.", code=EXIT_NOINPUT)
-    logger.info(f"Removed rule {rule_id}")
 
 
 if __name__ == "__main__":

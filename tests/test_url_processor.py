@@ -5,24 +5,22 @@ import re
 from hypothesis import given
 from hypothesis import strategies as st
 
-from arciv.core.db.database import _DEFAULT_RULES
-from arciv.core.db.models import Rule, validate_rule
 from arciv.core.fetch import (
+    Action,
+    Rule,
     canonicalize,
     is_pdf_url,
     is_raw_text_url,
+    load_rules,
     process_url,
     registered_domain,
     slug_for_url,
     split_url,
 )
 
-# The plumbing skips (media files, image proxies, IP hosts) are seeded default
-# rules now, not code handlers, so behaviour tests run process_url with them.
-_DEFAULT_RULE_OBJS = [
-    Rule(match_type=mt, pattern=p, action=a, replacement=r)
-    for mt, p, a, r in _DEFAULT_RULES
-]
+# The packaged defaults (no user file): medium/github/huggingface rewrites plus
+# the policy skips. Behaviour tests that exercise a default rule pass these.
+DEFAULTS = load_rules()
 
 _SLUG_RE = re.compile(r"^.+-[0-9a-f]{8}$")
 
@@ -30,8 +28,13 @@ _SLUG_RE = re.compile(r"^.+-[0-9a-f]{8}$")
 _UNSAFE_FS_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f\s]')
 
 
+def _rule(match_type: str, pattern: str, *actions: Action, name: str = "test") -> Rule:
+    """Build a Rule tersely for the engine tests."""
+    return Rule(name=name, match_type=match_type, pattern=pattern, actions=actions)
+
+
 class TestProcessUrl:
-    """Behaviour of the top-level process_url dispatcher."""
+    """Behaviour of the top-level process_url dispatcher (with defaults)."""
 
     def test_passthrough_keeps_url(self):
         url = "https://example.com/article"
@@ -53,62 +56,87 @@ class TestProcessUrl:
         assert processed is None
         assert "HTTPS" in status
 
-    def test_image_suffix_is_skipped(self):
-        processed, _ = process_url("https://example.com/photo.png", _DEFAULT_RULE_OBJS)
+    def test_image_suffix_is_skipped_by_guard(self):
+        # Media extensions are an in-code plumbing guard, not a rule, so they
+        # fire without any rules passed.
+        processed, _ = process_url("https://example.com/photo.png")
         assert processed is None
 
-    def test_image_proxy_endpoint_is_skipped(self):
+    def test_image_proxy_endpoint_is_skipped_by_guard(self):
         url = "https://example.com/_next/image?url=%2Fcat.jpg&w=640"
-        processed, status = process_url(url, _DEFAULT_RULE_OBJS)
+        processed, status = process_url(url)
         assert processed is None
         assert "image proxy" in status
 
-    def test_ip_domain_is_skipped(self):
-        processed, _ = process_url("https://192.168.2.13/dashboard", _DEFAULT_RULE_OBJS)
+    def test_ip_host_is_skipped_by_guard(self):
+        processed, _ = process_url("https://192.168.2.13/dashboard")
         assert processed is None
+
+    def test_localhost_is_skipped_by_guard(self):
+        processed, status = process_url("https://localhost:8080/page")
+        assert processed is None
+        assert "local" in status
 
     def test_github_blob_rewritten_to_repo_root(self):
         processed, status = process_url(
-            "https://github.com/pytorch/captum/blob/main/setup.py"
+            "https://github.com/pytorch/captum/blob/main/setup.py", DEFAULTS
         )
         assert processed == "https://github.com/pytorch/captum"
         assert "rewritten" in status
 
     def test_github_readable_file_kept(self):
+        # The github rule's negative lookahead keeps readable files archived.
         url = "https://github.com/owner/repo/blob/main/README.md"
-        processed, _ = process_url(url)
+        processed, _ = process_url(url, DEFAULTS)
         assert processed == url
 
     def test_raw_github_rewritten_to_repo_root(self):
         processed, status = process_url(
-            "https://raw.githubusercontent.com/unit8co/darts/master/darts/x.py"
+            "https://raw.githubusercontent.com/unit8co/darts/master/darts/x.py",
+            DEFAULTS,
         )
         assert processed == "https://github.com/unit8co/darts"
         assert "rewritten" in status
 
-    def test_raw_github_readable_file_kept(self):
-        url = "https://raw.githubusercontent.com/owner/repo/main/README.md"
-        processed, _ = process_url(url)
-        assert processed == url
+    def test_raw_github_collapses_readable_file_too(self):
+        # Unlike the github rule, the raw.github rule has no readable exception,
+        # so even a raw README collapses to the repo root.
+        processed, _ = process_url(
+            "https://raw.githubusercontent.com/owner/repo/main/README.md", DEFAULTS
+        )
+        assert processed == "https://github.com/owner/repo"
 
     def test_huggingface_blob_pdf_rewritten_to_resolve(self):
         processed, status = process_url(
-            "https://huggingface.co/org/model/blob/main/paper.pdf"
+            "https://huggingface.co/org/model/blob/main/paper.pdf", DEFAULTS
         )
         assert processed == "https://huggingface.co/org/model/resolve/main/paper.pdf"
         assert "rewritten" in status
 
-    def test_huggingface_non_pdf_blob_passes_through(self):
+    def test_huggingface_blob_json_skipped_by_media_guard(self):
+        # .json matches the media guard (which runs before the rules), so the
+        # huggingface rule never sees it.
         url = "https://huggingface.co/org/model/blob/main/config.json"
-        # .json matches the seeded media skip rule (which runs before the
-        # rewriter), so it never reaches the huggingface rewriter.
-        processed, _ = process_url(url, _DEFAULT_RULE_OBJS)
+        processed, _ = process_url(url, DEFAULTS)
         assert processed is None
 
     def test_huggingface_non_blob_passes_through(self):
         url = "https://huggingface.co/org/model"
-        processed, _ = process_url(url)
+        processed, _ = process_url(url, DEFAULTS)
         assert processed == url
+
+    def test_medium_default_prepends_freedium_keeping_subdomain(self):
+        processed, status = process_url(
+            "https://aignishant.medium.com/some-post", DEFAULTS
+        )
+        assert processed == (
+            "https://freedium-mirror.cfd/https://aignishant.medium.com/some-post"
+        )
+        assert "rewritten" in status
+
+    def test_youtube_default_skipped(self):
+        processed, _ = process_url("https://www.youtube.com/watch?v=abc", DEFAULTS)
+        assert processed is None
 
     def test_host_case_variants_dedupe_to_same_url(self):
         lower, _ = process_url("https://example.com/Path")
@@ -137,106 +165,101 @@ class TestProcessUrl:
     def test_never_raises_and_output_is_https_or_none(self, value):
         """process_url is total: any input (including https:// followed by
         garbage) yields (None, reason) or a https URL, never an exception."""
-        processed, status = process_url(f"https://{value}")
+        processed, status = process_url(f"https://{value}", DEFAULTS)
         assert isinstance(status, str)
         if processed is not None:
             assert processed.startswith("https://")
 
 
 class TestProcessUrlRules:
-    """User rules drive skip/rewrite during process_url (the handler chain)."""
+    """The match/action engine drives skip and rewrite during process_url."""
 
     def test_no_rules_passes_content_through(self):
-        # Without rules, only the built-in code handlers run; ordinary content
-        # is kept (this is the behaviour migrated skips no longer provide).
+        # Without rules, only the plumbing guards run; ordinary content is kept.
         url = "https://my.sharepoint.com/sites/x"
         processed, _ = process_url(url)
         assert processed == url
 
-    def test_starts_with_skip(self):
-        rules = [Rule("starts_with", "https://localhost", "skip", "local address")]
-        processed, status = process_url("https://localhost:8080/page", rules)
-        assert processed is None
-        assert status == "local address"
-
     def test_domain_skip_matches_subdomain(self):
-        rules = [Rule("domain", "sharepoint.com", "skip", "not content")]
+        rules = [
+            _rule("domain", "sharepoint.com", Action("skip", reason="not content"))
+        ]
         processed, _ = process_url("https://my.sharepoint.com/sites/x", rules)
         assert processed is None
 
-    def test_domain_skip_exact(self):
-        rules = [Rule("domain", "claude.ai", "skip", None)]
-        processed, _ = process_url("https://claude.ai/chat/abc", rules)
+    def test_skip_reason_is_propagated(self):
+        rules = [
+            _rule(
+                "starts_with",
+                "https://localhost.example",
+                Action("skip", reason="local"),
+            )
+        ]
+        processed, status = process_url("https://localhost.example/page", rules)
         assert processed is None
+        assert status == "local"
 
-    def test_starts_with_skip_is_path_aware(self):
-        rules = [Rule("starts_with", "https://google.com/search", "skip", None)]
-        skipped, _ = process_url("https://google.com/search?q=test", rules)
-        kept, _ = process_url("https://google.com/maps", rules)
-        assert skipped is None
-        assert kept == "https://google.com/maps"
+    def test_skip_uses_default_reason_when_blank(self):
+        rules = [_rule("domain", "claude.ai", Action("skip"))]
+        processed, status = process_url("https://claude.ai/chat/abc", rules)
+        assert processed is None
+        assert status  # a non-empty generic reason
 
     def test_host_skip_is_exact_hostname(self):
-        rules = [Rule("host", "app.powerbi.com", "skip", None)]
+        rules = [_rule("host", "app.powerbi.com", Action("skip"))]
         skipped, _ = process_url("https://app.powerbi.com/report", rules)
         # A different host on the same registered domain is not matched.
         kept, _ = process_url("https://learn.powerbi.com/docs", rules)
         assert skipped is None
         assert kept == "https://learn.powerbi.com/docs"
 
-    def test_exact_skip(self):
-        rules = [Rule("exact", "https://example.com/one", "skip", None)]
-        skipped, _ = process_url("https://example.com/one", rules)
-        kept, _ = process_url("https://example.com/one/two", rules)
+    def test_starts_with_skip_is_path_aware(self):
+        rules = [_rule("starts_with", "https://google.com/search", Action("skip"))]
+        skipped, _ = process_url("https://google.com/search?q=test", rules)
+        kept, _ = process_url("https://google.com/maps", rules)
         assert skipped is None
-        assert kept == "https://example.com/one/two"
+        assert kept == "https://google.com/maps"
 
-    def test_rewrite_swaps_host_and_keeps_path(self):
-        rules = [Rule("domain", "medium.com", "rewrite", "scribe.rip")]
+    def test_first_matching_rule_wins(self):
+        rules = [
+            _rule("domain", "example.com", Action("skip", reason="first")),
+            _rule("domain", "example.com", Action("skip", reason="second")),
+        ]
+        processed, status = process_url("https://example.com/p", rules)
+        assert processed is None
+        assert status == "first"
+
+    def test_prepend_action_wraps_url(self):
+        rules = [
+            _rule("domain", "medium.com", Action("prepend", text="https://mirror/"))
+        ]
         processed, status = process_url("https://medium.com/@a/post-123", rules)
-        assert processed == "https://scribe.rip/@a/post-123"
+        assert processed == "https://mirror/https://medium.com/@a/post-123"
         assert "rewritten" in status
 
-    def test_freedium_default_rewrite_wraps_url(self):
-        # The seeded medium default keeps the host-swap shape: its slash-bearing
-        # replacement produces the wrapped freedium URL.
+    def test_replace_action_swaps_substring(self):
         rules = [
-            Rule(
-                "domain",
-                "medium.com",
-                "rewrite",
-                "freedium-mirror.cfd/https://medium.com",
+            _rule(
+                "regex",
+                r"huggingface\.co/.+/blob/.+\.pdf",
+                Action("replace", old="/blob/", new="/resolve/"),
             )
         ]
-        processed, _ = process_url("https://medium.com/@a/post-123", rules)
-        assert processed == (
-            "https://freedium-mirror.cfd/https://medium.com/@a/post-123"
+        processed, _ = process_url(
+            "https://huggingface.co/org/model/blob/main/paper.pdf", rules
         )
+        assert processed == "https://huggingface.co/org/model/resolve/main/paper.pdf"
 
-    def test_ends_with_skip(self):
-        rules = [Rule("ends_with", ".epub", "skip", "ebook")]
-        skipped, status = process_url("https://example.com/book.epub", rules)
-        kept, _ = process_url("https://example.com/page.html", rules)
-        assert skipped is None
-        assert status == "ebook"
-        assert kept == "https://example.com/page.html"
-
-    def test_ends_with_is_defeated_by_trailing_query(self):
-        # ends_with matches the whole URL string, so a query suffix defeats it.
-        rules = [Rule("ends_with", ".pdf", "skip", "pdf")]
-        plain, _ = process_url("https://example.com/foo.pdf", rules)
-        with_query, _ = process_url("https://example.com/foo.pdf?v=2", rules)
-        assert plain is None
-        assert with_query == "https://example.com/foo.pdf?v=2"
-
-    def test_starts_with_rewrite_replaces_prefix(self):
-        # The arxiv abs -> pdf pain, now without needing a regex.
+    def test_regex_replace_with_capture_group(self):
         rules = [
-            Rule(
-                "starts_with",
-                "https://arxiv.org/abs/",
-                "rewrite",
-                "https://arxiv.org/pdf/",
+            _rule(
+                "regex",
+                r"^https://arxiv\.org/abs/(.*)$",
+                Action(
+                    "regex_replace",
+                    pattern=r"^https://arxiv\.org/abs/(.*)$",
+                    replacement=r"https://arxiv.org/pdf/$1",
+                ),
             )
         ]
         processed, status = process_url("https://arxiv.org/abs/2606.14647", rules)
@@ -244,143 +267,98 @@ class TestProcessUrlRules:
         assert is_pdf_url(processed)
         assert "rewritten" in status
 
-    def test_ends_with_rewrite_swaps_suffix(self):
-        rules = [Rule("ends_with", ".html", "rewrite", ".md")]
-        processed, _ = process_url("https://example.com/page.html", rules)
-        assert processed == "https://example.com/page.md"
-
-    def test_exact_rewrite_replaces_whole_url(self):
+    def test_regex_replace_braced_capture_group(self):
         rules = [
-            Rule(
-                "exact",
-                "https://old.example.com/a",
-                "rewrite",
-                "https://new.example.com/b",
-            )
-        ]
-        processed, _ = process_url("https://old.example.com/a", rules)
-        assert processed == "https://new.example.com/b"
-
-    def test_first_matching_rule_wins(self):
-        rules = [
-            Rule("domain", "example.com", "skip", "first"),
-            Rule("domain", "example.com", "skip", "second"),
-        ]
-        processed, status = process_url("https://example.com/p", rules)
-        assert processed is None
-        assert status == "first"
-
-    def test_regex_skip(self):
-        rules = [Rule("regex", r"^https://example\.com/admin.*", "skip", None)]
-        skipped, _ = process_url("https://example.com/admin/panel", rules)
-        kept, _ = process_url("https://example.com/public", rules)
-        assert skipped is None
-        assert kept == "https://example.com/public"
-
-    def test_regex_rewrite_with_capture_group(self):
-        rules = [
-            Rule(
+            _rule(
                 "regex",
                 r"^https://arxiv\.org/abs/(.*)$",
-                "rewrite",
-                r"https://arxiv.org/pdf/$1",
-            )
-        ]
-        processed, status = process_url("https://arxiv.org/abs/2606.14647", rules)
-        assert processed == "https://arxiv.org/pdf/2606.14647"
-        assert "rewritten" in status
-
-    def test_regex_rewrite_braced_capture_group(self):
-        rules = [
-            Rule(
-                "regex",
-                r"^https://arxiv\.org/abs/(.*)$",
-                "rewrite",
-                r"https://arxiv.org/pdf/${1}",
+                Action(
+                    "regex_replace",
+                    pattern=r"^https://arxiv\.org/abs/(.*)$",
+                    replacement=r"https://arxiv.org/pdf/${1}",
+                ),
             )
         ]
         processed, _ = process_url("https://arxiv.org/abs/2606.14647", rules)
         assert processed == "https://arxiv.org/pdf/2606.14647"
 
-    def test_regex_rewrite_preserves_path_segments(self):
+    def test_regex_replace_preserves_path_segments(self):
         rules = [
-            Rule(
+            _rule(
                 "regex",
-                r"^https://example\.com/old/(.*?)(?:\?|$)",
-                "rewrite",
-                r"https://example.com/new/$1",
+                r"^https://example\.com/old/",
+                Action(
+                    "regex_replace",
+                    pattern=r"^https://example\.com/old/(.*?)(?:\?|$)",
+                    replacement=r"https://example.com/new/$1",
+                ),
             )
         ]
         processed, _ = process_url("https://example.com/old/page123", rules)
         assert processed == "https://example.com/new/page123"
 
-    def test_regex_case_insensitive(self):
-        rules = [Rule("regex", r"example\.com", "skip", None)]
+    def test_regex_match_is_case_insensitive(self):
+        rules = [_rule("regex", r"example\.com", Action("skip"))]
         skipped, _ = process_url("https://EXAMPLE.COM/page", rules)
         assert skipped is None
 
-    def test_regex_invalid_pattern_is_skipped(self):
-        rules = [Rule("regex", r"(?P<invalid", "skip", None)]
-        # Invalid regex should not crash; rule is skipped
-        kept, status = process_url("https://example.com/page", rules)
+    def test_invalid_regex_match_does_not_crash(self):
+        rules = [_rule("regex", r"(?P<invalid", Action("skip"))]
+        kept, _ = process_url("https://example.com/page", rules)
         assert kept == "https://example.com/page"
 
-
-class TestValidateRule:
-    """The shared add-time validator (used by the web and CLI add paths)."""
-
-    def test_valid_rules_pass(self):
-        assert validate_rule("domain", "medium.com", "skip", None) is None
-        assert validate_rule("ends_with", ".epub", "skip", "ebook") is None
-        assert (
-            validate_rule(
+    def test_invalid_regex_replace_is_noop(self):
+        rules = [
+            _rule(
                 "regex",
-                r"^https://arxiv\.org/abs/(.*)$",
-                "rewrite",
-                r"https://arxiv.org/pdf/$1",
+                r"example\.com",
+                Action("regex_replace", pattern=r"(?P<invalid", replacement="x"),
             )
-            is None
+        ]
+        # The match fires but the broken replace leaves the URL unchanged.
+        processed, _ = process_url("https://example.com/page", rules)
+        assert processed == "https://example.com/page"
+
+
+class TestLoadRules:
+    """Loading the packaged defaults and an optional user file."""
+
+    def test_defaults_loaded_without_user_file(self):
+        rules = load_rules()
+        assert rules  # not empty
+        names = {r.name for r in rules}
+        assert "medium to freedium" in names
+        assert "youtube" in names
+
+    def test_user_rules_load_ahead_of_defaults(self, tmp_path):
+        user_file = tmp_path / "rules.toml"
+        user_file.write_text(
+            '[[rule]]\nname = "mine"\ntype = "domain"\nmatch = "example.com"\n'
+            '  [[rule.action]]\n  type = "skip"\n  reason = "custom"\n',
+            encoding="utf-8",
         )
+        rules = load_rules(user_file)
+        assert rules[0].name == "mine"
+        # The defaults still follow the user rule.
+        assert any(r.name == "youtube" for r in rules)
 
-    def test_unknown_match_type_rejected(self):
-        error = validate_rule("nonsense", "x", "skip", None)
-        assert error is not None and "match type" in error
-
-    def test_missing_pattern_rejected(self):
-        error = validate_rule("domain", "", "skip", None)
-        assert error is not None and "pattern" in error.lower()
-
-    def test_rewrite_without_replacement_rejected(self):
-        error = validate_rule("domain", "medium.com", "rewrite", None)
-        assert error is not None and "replacement" in error.lower()
-
-    def test_invalid_regex_rejected_with_message(self):
-        error = validate_rule("regex", r"(?P<invalid", "skip", None)
-        assert error is not None
-        assert "regex" in error.lower()
-
-    def test_capture_group_past_group_count_rejected(self):
-        # One capture group in the pattern, but $2 in the replacement.
-        error = validate_rule(
-            "regex",
-            r"^https://arxiv\.org/abs/(.*)$",
-            "rewrite",
-            r"https://arxiv.org/pdf/$2",
+    def test_user_rule_wins_on_first_match(self, tmp_path):
+        # A user rule that rewrites medium beats the default freedium prepend.
+        user_file = tmp_path / "rules.toml"
+        user_file.write_text(
+            '[[rule]]\nname = "scribe"\ntype = "domain"\nmatch = "medium.com"\n'
+            '  [[rule.action]]\n  type = "prepend"\n  text = "https://scribe/"\n',
+            encoding="utf-8",
         )
-        assert error is not None and "$2" in error
+        processed, _ = process_url("https://medium.com/@a/p", load_rules(user_file))
+        assert processed == "https://scribe/https://medium.com/@a/p"
 
-    def test_host_replacement_with_slash_passes(self):
-        # The seeded freedium default has a slash in its host replacement; the
-        # validator must not reject it.
-        assert (
-            validate_rule(
-                "domain",
-                "medium.com",
-                "rewrite",
-                "freedium-mirror.cfd/https://medium.com",
-            )
-            is None
-        )
+    def test_malformed_user_file_is_ignored(self, tmp_path):
+        user_file = tmp_path / "rules.toml"
+        user_file.write_text("this is not valid toml = = =", encoding="utf-8")
+        # Falls back to the defaults rather than raising.
+        rules = load_rules(user_file)
+        assert any(r.name == "youtube" for r in rules)
 
 
 class TestCanonicalize:

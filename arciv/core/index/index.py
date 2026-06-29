@@ -11,9 +11,16 @@ from pathlib import Path
 
 from loguru import logger
 
+from arciv.settings import USER_RULES_PATH
 from arciv.core.db import PageDatabase
 from arciv.core.notes import Note, load_note, load_notes
-from arciv.core.fetch import process_url, registered_domain, slug_for_url, split_url
+from arciv.core.fetch import (
+    load_rules,
+    process_url,
+    registered_domain,
+    slug_for_url,
+    split_url,
+)
 
 
 def _page_entry(processed_url: str, original_url: str) -> tuple[str, str, str, str]:
@@ -35,7 +42,7 @@ def _index_notes(
     source_name is the registered source the notes belong to, if any.
     """
     indexed_at = datetime.now(timezone.utc).isoformat()
-    rules = db.list_rules()
+    rules = load_rules(USER_RULES_PATH)
     file_paths: list[str] = []
     original_urls: dict[str, str] = {}
     link_entries: list[tuple[str, str, str | None, str]] = []
@@ -109,7 +116,7 @@ def register_urls(db: PageDatabase, urls: list[str]) -> list[str]:
     Used by ``arciv get <URL>``, where the URL doesn't come from a file.
     Returns the processed URLs that were registered; skipped URLs excluded.
     """
-    rules = db.list_rules()
+    rules = load_rules(USER_RULES_PATH)
     registered: dict[str, None] = {}
     for url in urls:
         processed, skip_reason = process_url(url, rules)

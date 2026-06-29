@@ -15,6 +15,7 @@ and markdown conversion happen later, in the parse stage (see
 """
 
 import asyncio
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from scrapling.fetchers import Fetcher as StaticFetcher
 
 from arciv.core.db import Page, PageDatabase
 
+from .rules import Rule, load_rules
 from .url_helpers import (
     is_pdf_url,
     registered_domain,
@@ -62,6 +64,8 @@ class Fetcher:
         page_timeout: Browser page load timeout in milliseconds.
         max_concurrency: Maximum concurrent page fetches for batch operations.
         max_retries: Maximum retry attempts for transient failures.
+        rules: URL-processing rules to re-apply before fetching. Defaults to the
+            packaged defaults only; the pipeline injects the user-merged list.
     """
 
     def __init__(
@@ -71,12 +75,14 @@ class Fetcher:
         page_timeout: int = TIMEOUT_MS,
         max_concurrency: int = DEFAULT_CONCURRENCY,
         max_retries: int = DEFAULT_MAX_RETRIES,
+        rules: Sequence[Rule] | None = None,
     ):
         self.db = db
         self.saved_dir = saved_dir
         self.page_timeout = page_timeout
         self.max_concurrency = max_concurrency
         self.max_retries = max_retries
+        self.rules = list(rules) if rules is not None else load_rules()
 
     # -- internal helpers --
 
@@ -237,11 +243,10 @@ class Fetcher:
         to_fetch_pdf: list[tuple[str, str, str, str]] = []
         seen_processed: set[str] = set()
 
-        # Re-process with the current rules so a rule added after indexing still
+        # Re-process with the current rules so a rule edited after indexing still
         # applies (and re-canonicalises) before anything is downloaded.
-        rules = self.db.list_rules()
         for url in urls:
-            processed_url, skip_reason = process_url(url, rules)
+            processed_url, skip_reason = process_url(url, self.rules)
             if processed_url is None:
                 logger.warning(f"Skipped {url}: {skip_reason}")
                 continue

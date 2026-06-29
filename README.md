@@ -66,20 +66,36 @@ arciv db dir                         # where the archive lives on disk
 arciv db remove                      # delete the database (asks first)
 ```
 
-Manage URL rules that skip or rewrite URLs before they are fetched:
+URL rules skip or rewrite URLs before they are fetched. They are data, not
+commands: the packaged defaults handle medium, github, huggingface, and a set of
+policy skips (youtube, sharepoint, and so on). To add your own, create a
+`rules.toml` in the data dir (see `arciv db dir`); user rules load ahead of the
+defaults, so they win on first match.
 
 ```bash
-arciv rules list                                   # rules, in the order they apply
-arciv rules add domain medium.com rewrite -r scribe.rip  # rewrite a host
-arciv rules add domain youtube.com skip            # skip a domain
-arciv rules test https://medium.com/@me/post       # show how the rules treat a URL
-arciv rules remove 3                               # remove a rule by id
+arciv rules list                              # active rules, in the order they apply
+arciv rules test https://medium.com/@me/post  # show how the rules treat a URL
 ```
 
-`rules test` runs a URL through the live rule list and prints the verdict —
-`skipped` (with the reason), `rewritten` (with the target), or `passthrough` —
-naming the rule id that fired, so you can tune a rewrite without the
-add-run-inspect-remove round trip.
+A rule is a match (`domain`, `host`, `starts_with`, or `regex`) plus an ordered
+list of actions (`skip`, `prepend`, `replace`, `regex_replace`):
+
+```toml
+[[rule]]
+name = "arxiv abstract to pdf"
+type = "regex"
+match = '^https://arxiv\.org/abs/'
+  [[rule.action]]
+  type = "regex_replace"
+  pattern = '^https://arxiv\.org/abs/(.*)$'
+  replacement = "https://arxiv.org/pdf/$1"
+```
+
+`rules test` runs a URL through the same processing the index and fetch stages
+use (the in-code plumbing guards, then the rules, then canonicalization) and
+prints the verdict: `skipped` (with the reason), `rewritten` (with the target),
+or `passthrough`, naming the rule that fired so you can tune a rule and check it
+without a full index run.
 
 ### Global options and pipes
 

@@ -31,6 +31,9 @@ LOGS_DIR = DATA_DIR / "logs"
 
 # File constants
 DB_PATH = DATA_DIR / "arciv.db"
+# Optional, hand-edited TOML of URL rules; loaded ahead of the packaged defaults
+# so user rules win on first match. Absent by default (defaults-only).
+USER_RULES_PATH = DATA_DIR / "rules.toml"
 
 
 def _env_int(name: str, default: int) -> int:
