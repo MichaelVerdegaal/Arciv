@@ -13,7 +13,7 @@ Arciv is a plain CLI tool, no container needed:
 
 ```bash
 uv tool install git+https://github.com/MichaelVerdegaal/Arciv   # or: uv tool install . from a clone
-patchright install chrome   # browser engine used for fetching
+scrapling install   # browser engine (patchright Chromium) used for fetching
 ```
 
 After that `arciv` is on your PATH. The archive lives in the OS user data directory by default (see
@@ -24,11 +24,8 @@ Configuration below), so no further setup is needed.
 1. `uv venv` to set up the virtual environment
 2. `source .venv/bin/activate` (Bash)
 3. `uv sync`
-4. `patchright install chrome --force` to install the browser engine for Playwright.
-
-If you get an error like
-`'ERROR: cannot install on pop distribution - only Ubuntu and Debian are supported'`, you can bypass
-this by manually installing Chrome.
+4. `scrapling install` to install Scrapling's fetcher dependencies (the patchright Chromium
+   browser used for HTML fetching).
 
 ## Configuration
 

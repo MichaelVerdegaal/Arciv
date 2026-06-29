@@ -1,22 +1,27 @@
 """Fetch stage: download raw page content (HTML or PDF) to disk.
 
-Uses patchright (undetected Playwright fork) with Chrome in persistent-context
-mode for stealth. Each page goes through: fetch HTML → write ``page.html`` to
-the slug folder → record in DB. PDF URLs are downloaded via direct HTTP and
-stored as ``page.pdf``. Validation and markdown conversion happen later, in
-the parse stage (see ``arciv.core.pipeline.parse``).
+One fetch layer, two engines from Scrapling, one ``Response`` type:
+
+- HTML goes through :class:`~scrapling.fetchers.AsyncStealthySession`
+  (patchright under a stealth wrapper: CDP-leak patching, canvas noise, an
+  optional Turnstile solver), sharing one browser context across the batch.
+- PDFs and direct downloads go through :class:`~scrapling.fetchers.Fetcher`
+  (curl_cffi, TLS-impersonated), no browser needed.
+
+Each page goes: fetch HTML → write ``page.html`` to the slug folder → record
+in DB. PDF URLs are downloaded directly and stored as ``page.pdf``. Validation
+and markdown conversion happen later, in the parse stage (see
+``arciv.core.pipeline.parse``).
 """
 
 import asyncio
-import tempfile
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
 import aiofiles
 from loguru import logger
-from patchright.async_api import TimeoutError as PlaywrightTimeoutError
-from patchright.async_api import async_playwright
+from scrapling.fetchers import AsyncStealthySession
+from scrapling.fetchers import Fetcher as StaticFetcher
 
 from arciv.core.db import Page, PageDatabase
 
@@ -32,12 +37,8 @@ from .url_processing import process_url
 # in tests). The env-tunable values the CLI actually runs with live in
 # arciv.settings and are injected by the pipeline layer (pipeline/fetch.py).
 TIMEOUT_MS = 30_000
-# Extra time to let JS-rendered pages (SPAs) finish loading after
-# domcontentloaded. Without it, content() can return an empty shell.
-NETWORKIDLE_MS = 3_000
 DEFAULT_CONCURRENCY = 8
 DEFAULT_MAX_RETRIES = 2
-BLOCKED_RESOURCE_TYPES = {"image", "stylesheet", "font"}
 
 # Transient error patterns worth retrying
 _TRANSIENT_ERRORS = (
@@ -58,7 +59,7 @@ class Fetcher:
     Args:
         db: Database to store page records.
         saved_dir: Root directory for archived page folders.
-        page_timeout: Playwright page load timeout in milliseconds.
+        page_timeout: Browser page load timeout in milliseconds.
         max_concurrency: Maximum concurrent page fetches for batch operations.
         max_retries: Maximum retry attempts for transient failures.
     """
@@ -177,15 +178,25 @@ class Fetcher:
         (slug_dir / "page.pdf").write_bytes(pdf_bytes)
 
     def _download_pdf(self, url: str) -> bytes | None:
-        """Download a PDF via HTTP from a direct .pdf URL. Returns the raw
-        bytes, or None if the download failed."""
-        request = urllib.request.Request(url)
+        """Download a file via curl_cffi (TLS-impersonated) from a direct URL.
+
+        Returns the raw bytes, or None if the request failed or the server
+        answered with an error status. curl_cffi doesn't raise on 4xx/5xx, so
+        the status is checked explicitly."""
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                return response.read()
+            response = StaticFetcher.get(
+                url,
+                impersonate="chrome",
+                timeout=self.page_timeout / 1000,
+                stealthy_headers=True,
+            )
         except Exception as e:
             logger.warning(f"PDF download failed {url}: {e}")
             return None
+        if response.status >= 400:
+            logger.warning(f"PDF download failed {url}: HTTP {response.status}")
+            return None
+        return response.body
 
     def _fetch_pdf(
         self,
@@ -220,7 +231,7 @@ class Fetcher:
         """Process URLs, skip cached, fetch the rest concurrently.
 
         PDF URLs are downloaded directly (no browser needed). HTML URLs go
-        through patchright.
+        through the stealth browser session.
         """
         to_fetch_html: list[tuple[str, str, str, str]] = []
         to_fetch_pdf: list[tuple[str, str, str, str]] = []
@@ -261,87 +272,57 @@ class Fetcher:
         if not to_fetch_html:
             return results
 
-        # HTML URLs share one persistent Chrome context (patchright best
-        # practice: no fingerprint injection), fetched concurrently.
-        semaphore = asyncio.Semaphore(self.max_concurrency)
-        async with async_playwright() as p:
-            with tempfile.TemporaryDirectory() as user_data_dir:
-                context = await p.chromium.launch_persistent_context(
-                    user_data_dir=user_data_dir,
-                    channel="chrome",
-                    headless=True,
-                    no_viewport=True,
-                    ignore_https_errors=True,
-                )
-                fetched = await asyncio.gather(
-                    *(
-                        self._fetch_one(semaphore, context, *item)
-                        for item in to_fetch_html
-                    )
-                )
-                await context.close()
+        # HTML URLs share one stealthy browser session. ``disable_resources``
+        # drops images/stylesheets/fonts (and more) for speed; ``network_idle``
+        # lets JS-rendered pages settle so content() isn't an empty shell. The
+        # session's page pool caps concurrency at ``max_pages``; retries are
+        # left to our own transient-only loop below (``retries=1``).
+        async with AsyncStealthySession(
+            max_pages=self.max_concurrency,
+            headless=True,
+            disable_resources=True,
+            network_idle=True,
+            timeout=self.page_timeout,
+            retries=1,
+        ) as session:
+            fetched = await asyncio.gather(
+                *(self._fetch_one(session, *item) for item in to_fetch_html)
+            )
 
         results.extend(page for page in fetched if page is not None)
         return results
 
     async def _fetch_one(
         self,
-        semaphore: asyncio.Semaphore,
-        context: object,
+        session: AsyncStealthySession,
         processed_url: str,
         original_url: str,
         domain: str,
         slug: str,
     ) -> Page | None:
-        """Fetch a single URL (async) inside the patchright context and
-        archive its raw HTML. Retries transient errors (timeouts, connection
-        resets) up to max_retries times before recording a failure. Returns
-        the Page, or None on failure."""
+        """Fetch a single URL (async) through the stealth session and archive
+        its raw HTML. Retries transient errors (timeouts, connection resets) up
+        to max_retries times before recording a failure. Returns the Page, or
+        None on failure."""
         html: str | None = None
         last_reason = ""
 
         for attempt in range(1, self.max_retries + 1):
-            async with semaphore:
-                pw_page = await context.new_page()
-                await pw_page.route(
-                    "**/*",
-                    lambda route: (
-                        route.abort()
-                        if route.request.resource_type in BLOCKED_RESOURCE_TYPES
-                        else route.continue_()
-                    ),
-                )
-                try:
-                    await pw_page.goto(
-                        processed_url,
-                        wait_until="domcontentloaded",
-                        timeout=self.page_timeout,
-                    )
-                    # SPAs render content after domcontentloaded; let the
-                    # network settle so client-side content is present.
-                    try:
-                        await pw_page.wait_for_load_state(
-                            "networkidle", timeout=NETWORKIDLE_MS
-                        )
-                    except PlaywrightTimeoutError:
-                        pass
-                    html = await pw_page.content()
-                except Exception as e:
-                    last_reason = self._format_fetch_error(e)
+            try:
+                response = await session.fetch(processed_url)
+                html = response.html_content
+            except Exception as e:
+                last_reason = self._format_fetch_error(e)
 
-                    # Browser triggered a file download, so try the PDF path
-                    if "Download is starting" in last_reason:
-                        await pw_page.close()
-                        return self._fetch_pdf(
-                            processed_url,
-                            original_url,
-                            domain,
-                            slug,
-                            fail_reason="download triggered but PDF fetch failed",
-                        )
-                finally:
-                    if not pw_page.is_closed():
-                        await pw_page.close()
+                # Browser triggered a file download, so try the PDF path
+                if "Download is starting" in last_reason:
+                    return self._fetch_pdf(
+                        processed_url,
+                        original_url,
+                        domain,
+                        slug,
+                        fail_reason="download triggered but PDF fetch failed",
+                    )
 
             if html is not None:
                 break

@@ -1,9 +1,9 @@
 """Fetch stage: download indexed URLs and archive their raw content.
 
 Thin orchestration around :class:`arciv.core.fetch.Fetcher`, which does the
-patchright browser work (and direct HTTP for PDFs). Raw content lands in
-``saved/<slug>/page.html`` or ``page.pdf``; converting it to markdown is
-the parse stage's job (see ``arciv.core.pipeline.parse``).
+Scrapling browser work for HTML (and curl_cffi downloads for PDFs). Raw content
+lands in ``saved/<slug>/page.html`` or ``page.pdf``; converting it to markdown
+is the parse stage's job (see ``arciv.core.pipeline.parse``).
 """
 
 from collections import Counter
