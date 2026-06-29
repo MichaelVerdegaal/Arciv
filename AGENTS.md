@@ -21,9 +21,10 @@ Three stages, no writeback into the notes. Each stage has a dedicated CLI comman
    pending pages. Each link
    gets a row with the URL, the full normalized filepath it was found in, and an indexed-at
    timestamp. Indexing operates on registered sources (`arciv source add <dir> <name>`).
-2. **Fetching** (`arciv fetch`, `arciv/core/pipeline/fetch.py` + `arciv/core/fetch/`). Download raw
-   content with patchright (async, concurrency-controlled); PDFs via direct HTTP. Writes
-   `page.html` / `page.pdf` to disk, no conversion.
+2. **Fetching** (`arciv fetch`, `arciv/core/pipeline/fetch.py` + `arciv/core/fetch/`). Download
+   HTML through Scrapling's stealth browser session (patchright, async, concurrency-controlled);
+   PDFs and direct downloads through Scrapling's curl_cffi fetcher. Both return one `Response`
+   type. Writes `page.html` / `page.pdf` to disk, no conversion.
 3. **Parsing** (`arciv parse`, `arciv/core/pipeline/parse.py` + `arciv/core/parse/`). Validate
    fetched HTML, convert to markdown via trafilatura (HTML) or liteparse (PDF), write
    `page.md` next to the raw file, fill in title/author/word count.
@@ -50,7 +51,7 @@ Three stages, no writeback into the notes. Each stage has a dedicated CLI comman
 
 ### Key Libraries
 
-- `patchright`: async web scraping (undetected Playwright fork)
+- `scrapling`: unified fetch layer (patchright stealth browser for HTML, curl_cffi for PDFs/downloads)
 - `trafilatura`: HTML content extraction
 - `liteparse`: PDF text extraction
 - `tldextract`: domain parsing (registered domain grouping)
@@ -80,8 +81,8 @@ uv tool install .                # Install the CLI as a global tool
 The scope is settled: Arciv is the main archival tool for all reading material, shipped as a
 single CLI tool. The CLI foundation (layered `get`, separated stages, sources) is in place. The
 web app has been removed (it was not worth the maintenance cost while the archival experience is
-still settling). PLAN.md is the live roadmap; the next steps are moving the fetch layer to
-Scrapling and redesigning the URL rule system as TOML data.
+still settling). PLAN.md is the live roadmap; the fetch layer now runs on Scrapling, and the
+next step is redesigning the URL rule system as TOML data.
 
 ## Context
 
