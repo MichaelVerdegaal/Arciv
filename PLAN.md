@@ -1,168 +1,232 @@
 # Plan
 
-Arciv is my main archival tool for all reading material: blog posts, research papers,
-documentation. Not books, not videos. The strategy: build the entire backend as a super
-streamlined CLI tool first. When that foundation is right, the frontend part will barely have
-to do anything.
+Arciv is my archival tool for reading material: blog posts, research papers, documentation.
+Not books, not videos. It extracts URLs from notes (`.md`, `.txt`, `.rst`), fetches and parses
+them to clean markdown, and stores metadata in SQLite.
 
-## Architecture: two parts
+This is now a single CLI tool. The web app is being removed (see below): the maintenance cost
+isn't worth it while the archival experience is still settling, and dropping it deletes a whole
+runtime, the async worker, and the read-only DB contract along with it.
 
-The project splits into two deployables to keep responsibilities isolated:
+## Architecture: one deliverable
 
-1. **CLI tool** (this repo's `arciv/` package) holds all archival logic. Runnable easily as a uv
-   tool (`uv tool install`), deliberately **not** containerized.
-2. **Web app** (`arciv_api/`) is one Python (FastAPI) service that imports the arciv library
-   (never shells out), reads through read-only connections, and renders its own HTML with
-   Jinja2 + Datastar (BeerCSS). Gets a dedicated container. (Originally planned as a
-   separate backend plus an Astro frontend; collapsing to one server-rendered service dropped
-   the second runtime and the internal-vs-public URL juggling the split needed.)
+The `arciv/` package, runnable as a uv tool (`uv tool install`), holding all archival logic.
+Deliberately not containerized. There is no second service and no separate frontend runtime.
 
-The CLI is complete; the web app implements browse, page detail, domains, sources, status, and
-the archive job flow (a single in-process fetch+parse worker behind `POST /archive`).
+Data lives under the OS user data dir via platformdirs (Linux: `~/.local/share/arciv`),
+overridable with `ARCIV_DATA_DIR`. It sits outside any checkout so it survives reinstalls.
 
-## CLI design: ✅ implemented
+## CLI: implemented
 
-A layered approach: single URL, single file, single dir.
+Layered pipeline, run whole or per stage.
 
 ```bash
-arciv get <URL>            # archive one URL directly (single only, on purpose)
-arciv get --file <path>    # archive all links within a single file
-arciv get --dir <path>     # archive all links of all files within a directory
+arciv get <URL>            # archive one URL
+arciv get --file <path>    # archive all links in one file
+arciv get --dir <path>     # archive all links in a directory
 ```
 
-`get` runs the full pipeline (index, then fetch, then parse) under a single command. Each
-stage also has a dedicated command, which makes developing the library easier:
+`get` runs index, then fetch, then parse under one command. Each stage is also its own command
+(`index`, `fetch`, `parse`) for development.
 
-- **`arciv index`**: extracts all links from wherever specified (`.md`, `.txt`, and
-  `.rst` files). For each link a row is stored with the link value itself, the full
-  normalized filepath where it was found, and the time it was indexed.
-- **`arciv fetch`**: the patchright/playwright magic, downloads pending URLs (browser for
-  HTML, direct HTTP for PDFs) and archives the raw content on disk.
-- **`arciv parse`**: looks at the fetched HTML pages / PDFs and parses them to markdown.
+- `index`: extract links from `.md` / `.txt` / `.rst`, store link, normalized source filepath,
+  and index time.
+- `fetch`: download pending URLs and save raw content to disk.
+- `parse`: convert fetched HTML / PDFs to markdown.
 
-### Sources: ✅ implemented
+### Sources: implemented
 
-A "Source" is a registered file directory (entirely limited to directories for now):
+A source is a registered directory.
 
 ```bash
-arciv source add <directory> <name>  # register a source and archive it
-arciv source update <name>           # re-index, fetch, and parse one source
-arciv source update --all            # update every registered source
-arciv source remove <name>           # unregister it (asks first; pages kept)
+arciv source add <dir> <name>          # register and archive (--no-archive to skip)
+arciv source update <name> | --all     # re-index, fetch, parse
+arciv source remove <name>             # unregister (pages kept)
 arciv source remove <name> --remove-files  # also delete files only it links
-arciv source                         # list registered sources
-arciv list --source <name>           # list the pages indexed from one source
-arciv index <name>                   # index a single source (stage only)
-arciv index --all                    # index every registered source (stage only)
+arciv source                           # list sources
+arciv list --source <name>             # pages indexed from one source
 ```
 
-`source add` archives the source after registering (pass `--no-archive` to
-skip); `source update` re-runs the whole pipeline as one batched fetch, so
-adding or re-syncing a source is a single command instead of `source add` +
-`index` + `fetch` + `parse`. `source remove` asks before unregistering and,
-with `--remove-files`, deletes the archived files of pages this source links
-exclusively (pages another source or an ad-hoc `get` still link are kept). The
-web app exposes the same: add/remove a source, view its indexed
-files and the links found in each, and re-archive, with the slow fetch+parse
-running in a background batch.
+`source remove --remove-files` deletes archived files of pages this source links exclusively;
+pages another source or an ad-hoc `get` still link are kept (URL ownership is computed before
+the FK cascade).
 
-### Data directory: ✅ implemented
+### Other commands: implemented
 
-The data root defaults to the OS user data dir via platformdirs (Linux:
-`~/.local/share/arciv`, Windows: `%LOCALAPPDATA%\arciv`). Chosen with the Docker backend
-in mind: it lives outside any repo checkout, so the backend container can mount it directly.
-`ARCIV_DATA_DIR` still overrides it (e.g. `ARCIV_DATA_DIR=data` in `.env` when developing
-from a clone).
+`status`, `list` (tab-separated `fetched-at  domain  url`, newest first, with `-n` / `--reverse`
+/ `--domain`), `path <URL>` (prints a page's archived markdown path for `less $(arciv path ...)`),
+`db dir` / `db remove`, `prune missing|failed|all`.
 
-## 1. Web app: ✅ implemented
+### Identity / dedup: resolved
 
-A web UI is a must-have: the CLI alone is too annoying for viewing stored results, and
-browsing the archive is the best way to gain insight into what was fetched earlier. Built as a
-single server-rendered FastAPI service (Jinja2 + Datastar, BeerCSS), deliberately not
-Astro: Arciv is heading toward CLI parity in the browser (archive a URL with live status),
-which is a reactive webapp, not a static content showcase. References:
+`canonicalize` is the canonical key: lowercase host, drop default ports, strip `www.`, trim
+trailing slash, drop tracking params, sort the query. It runs last in URL processing and feeds
+both the page identity and the slug, so equivalent forms collapse to one row. No separate dedup
+pass or migration needed; single-user means re-index and move on.
 
-- https://news.ycombinator.com/item?id=48475483
-- https://news.ycombinator.com/item?id=48437609
+## 1. Remove the web app
 
-The web app imports the arciv library (it does not shell out) and reads `arciv.db` /
-`saved/<slug>/` under the data dir through read-only connections; the storage contract it
-builds against is documented in AGENTS.md. It renders its own HTML (page markdown is rendered
-to HTML in Python and sanitized), so there is no separate frontend runtime. It gets a
-dedicated container (the CLI does not).
+Delete the FastAPI service, Jinja2/Datastar templates, the asyncio queue worker and lifespan
+manager, the read-only `PageDatabase` path, and the AGENTS.md storage contract. This is mostly
+subtraction and unblocks the two changes below by shrinking the surface they touch. Salvage
+nothing for now; if a read-only viewer is ever wanted it can come back as a small `arciv show`
+that renders markdown to a pager or browser, no server.
 
-Routes: `GET /` (browse), `/page/{slug}` (+ `/progress` poll), `/domains`, `/sources`
-(+ `/sources/{name}` detail, `POST /sources`, `/sources/{name}/archive`,
-`/sources/{name}/delete`), `/status`, `/rules`, and `POST /archive`. Source writes use a
-short-lived read-write connection in a thread (the rules pattern); the slow fetch+parse runs
-in a background batch off the request. Page views (status):
+## 2. Fetch layer: move to Scrapling
 
-- **Archive index**: ✅ sortable/filterable list of title, domain, word count, fetch date, link
-- **Page detail**: ✅ rendered markdown, source files, fetch metadata, live archive status
-- **Sources**: ✅ add/remove a source, view its indexed files and the links found in each,
-  and re-archive; plus a **Status** dashboard
-- **Search**: parked (client-side over titles, or SQLite FTS5 once the gap is felt)
+Committed. Scrapling's `StealthyFetcher` runs patchright (the engine I already use) wrapped in a
+nicer interface, with CDP-leak patching, canvas noise, a Cloudflare Turnstile auto-solver, and
+ProxyRotator / spider helpers available for later. So this is an ergonomics-and-extras move, not
+an engine change, and there's no stealth regression versus running patchright directly.
 
-The DB runs in WAL mode; the web app opens it read-only (a `mode=ro` connection that skips the
-schema) with one short-lived connection per request, implemented in `PageDatabase`.
+The win is a unified fetch layer: `StealthyFetcher` (patchright) for HTML and `Fetcher`
+(curl_cffi, TLS-impersonated) for PDFs and direct downloads, both returning one Response type.
+This collapses today's patchright + niquests + urllib spread into one library.
 
-## 2. CLI polish (ongoing)
+Two things to confirm during the migration, since they're where a wrapper can cost you:
 
-Only what real usage demands.
+- Route blocking still works (drop images/stylesheets/fonts for speed).
+- The underlying Playwright Page is still reachable, in case response interception is ever wanted
+  for image archiving.
 
-- `arciv status` (✅ implemented): pipeline-state counts and failure summary. Recent
-  fetches were dropped from it; that's `arciv list`'s job now.
-- `arciv list` (✅ implemented): fetched pages as `fetched-at TAB domain TAB url`, newest
-  first. `-n`/`--limit` caps the row count (0 = everything), `--reverse` flips to oldest
-  first, `--domain <d>` restricts to one registered domain (exact match, e.g. `medium.com`).
-  Columns stay tab-separated so finer filtering is still `arciv list -n 0 | grep <pat>`.
-- `arciv path <URL>` (✅ implemented): prints the filepath of a page's archived markdown,
-  composing with standard tools (`less $(arciv path <URL>)`, `grep ... $(arciv path ...)`)
-  instead of reimplementing them. The URL is normalized the same way as at index time, so
-  e.g. fragment variants resolve to the same page.
-- `arciv db` (✅ implemented): `db dir` prints the data directory (answers "where does
-  my archive live", also without `ARCIV_DATA_DIR` set); `db remove` deletes the SQLite
-  DB after confirmation (`--force` skips asking; archived files under `saved/` are kept).
-- `arciv prune <mode>` (✅ implemented): delete stale page rows and their archived
-  `saved/<slug>/` folders. Three modes, narrowest first: `missing` drops failed rows no
-  note links to anymore, `failed` drops every failed row, `all` wipes the whole index.
-  Asks for confirmation unless `--force`; registered sources are untouched. (v1 pruned
-  failed rows whose URLs vanished from the notes during indexing; that auto-pruning was
-  dropped in the stage split because partial per-source indexing made it unsafe, so pruning
-  is now an explicit command instead.)
-- Logging cleanup (later): prune noisy statements and add a `--verbose` flag, so default
-  runs stay quiet and the detail lives behind the flag.
+If both hold, the unification is worth the dependency. Budget a focused day or two, mostly
+re-testing against the known-gap targets and wiring the session lifecycle into the CLI, not the
+"one-line swap" the docs imply.
+
+nodriver is the documented fallback, not a migration: if a specific target I care about blocks
+`StealthyFetcher` even with the Turnstile solver, reach for nodriver for that one target. Its
+cost (asyncio object model, no Playwright API) isn't worth paying for a hard gate I don't
+currently hit.
+
+## 3. Rule system redesign
+
+The current system has two flaws. Code rewriters (github, huggingface, raw.github) are flexible
+but not extendible. The data rules are extendible but not flexible, and their behavior is
+confusing because the rewrite span is derived from the match type (replace the netloc for a
+domain match, the prefix for `starts_with`, and so on). The redesign fixes both by decoupling
+matching from action and making rules data, not code or SQL.
+
+### Model
+
+A rule is a match plus an ordered list of actions. The match decides only whether the actions
+apply. The actions transform the URL in sequence.
+
+Match types: `domain` (registrable, tldextract), `host` (exact), `starts_with`, `regex`. Drop
+`ends_with` and `exact`; nothing real uses them.
+
+Action types:
+
+- `skip`: end processing, don't archive.
+- `prepend`: put text in front of the whole URL (mirror gateways).
+- `replace`: literal old to new substring.
+- `regex_replace`: pattern to replacement with `$1` capture groups.
+
+`append` (suffix) gets added when a URL actually needs it, not before. The split that keeps users
+out of regex: `prepend` and `replace` are the regex-free path they live in; `regex_replace` is
+the escape hatch I author once for the github family and ship as a default. No user writes a
+regex.
+
+### The four real rewrites, as data
+
+- medium: match `domain medium.com`, `prepend https://freedium-mirror.cfd/`. Preserves the
+  subdomain the old netloc-hack dropped.
+- huggingface pdf: match `regex huggingface\.co/.+/blob/.+\.pdf`, `replace /blob/` with
+  `/resolve/`. Regex match so it fires only on the pdf case; regex-free action.
+- github: match `regex ^https://github\.com/[^/]+/[^/]+/(?:blob|tree)/(?!.*\.(?:md|txt|rst)$)`,
+  `regex_replace ^https://github\.com/([^/]+)/([^/]+)/(?:blob|tree)/.*` to
+  `https://github.com/$1/$2`. The negative lookahead in the match keeps READMEs and other
+  readable files archived instead of collapsed to repo root, so no halt-the-chain action is
+  needed.
+- raw.github: match `host raw.githubusercontent.com`,
+  `regex_replace ^https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/.*` to
+  `https://github.com/$1/$2`.
+
+### Plumbing stays in code
+
+The universal "never fetch this" guards run before any rule, as code, not rules: media file
+extensions, `/_next/image` proxy, IP-address hosts, localhost. These are immutable plumbing
+(nobody un-skips a media file), so a guard is faster than a per-URL regex and keeps the rule list
+clean. Policy skips that someone might reasonably edit (youtube, sharepoint, azure, lnkd.in,
+google search results) live as default rules with a `skip` action.
+
+### Storage
+
+Rules move out of the DB entirely: delete the `Rule` table, the seed-into-SQL, and the
+`rules add` / `rules remove` CRUD. Keep `arciv rules test <url>`, which loads the rules and prints
+which rule and action fired.
+
+Format is TOML (`tomllib`, stdlib in 3.12, read-only is all that's needed). Array-of-tables with
+nested actions:
+
+```toml
+[[rule]]
+name = "medium to freedium"
+type = "domain"
+match = "medium.com"
+  [[rule.action]]
+  type = "prepend"
+  text = "https://freedium-mirror.cfd/"
+
+[[rule]]
+name = "huggingface readable pdf"
+type = "regex"
+match = 'huggingface\.co/.+/blob/.+\.pdf'
+  [[rule.action]]
+  type = "replace"
+  old = "/blob/"
+  new = "/resolve/"
+```
+
+Chaining is dumb sequential application: no conditionals, no inter-action state, no halt action.
+Nothing chains today (every rule is one action); build the list shape because it's nearly free,
+but don't add control flow until a real rule needs it.
+
+### Sequencing
+
+1. Build the match/action engine and ship the defaults as a packaged TOML, loaded at runtime
+   (this is the "defaults in creation SQL is weird" fix: the SQL goes away, not relocates).
+2. Move github/hf/raw.github out of code into those defaults.
+3. Then add user rules: a `rules.toml` the user creates in the data dir, loaded ahead of the
+   defaults so user rules win on first match. This last step is for once the core rewrite is
+   done.
 
 ## Known fetch/parse gaps
 
-- ~~Wikipedia pages lost every section heading~~ Fixed: MediaWiki puts an "[edit]" link
-  next to each heading inside a small wrapper div, and trafilatura's link-density pruning
-  deleted the whole div. The `mw-editsection` spans are now pruned before extraction.
-  Re-run `arciv parse --reparse` to repair already-archived pages.
-- medium.com is paywalled. Research how the freedium.cfd mirror works (its source code is
-  fully available); could inform a rewrite rule or fetch fallback.
-- Cookie-consent walls eat some pages (e.g. gigaom rejected as "too short")
-- researchgate.net abstract pages are too short, but link a downloadable PDF
-- ~179 long-tail singletons accepted as gaps (JS SPAs, auth-walled, dead domains)
+- medium.com paywall: handled by the freedium mirror rule.
+- github / huggingface path surgery: handled by the redesigned rules.
+- Cookie-consent walls eat some pages (rejected as "too short").
+- researchgate.net abstract pages are too short but link a downloadable PDF.
+- ~179 long-tail singletons accepted as gaps (JS SPAs, auth walls, dead domains). A stealthier
+  fetcher doesn't fix these; they're payment, consent, or dead-domain problems, not fingerprint
+  problems.
 
 ## Parking lot
 
-- FTS5 / semantic search: only once the search gap is actually felt
-- RAG over the archive: retrieval first, generation maybe never
-- Wayback Machine fallback for paywalled content
-- Automatic re-scraping of updated pages
+- Image archiving: a branch saves images and inlines markdown links to them, parked because it
+  added an obscene amount of code for reading material where the text is the point. If revisited,
+  do it as response interception in the same `StealthyFetcher` pass, not a second urllib
+  round-trip.
+- FTS5 / semantic search: only once the search gap is actually felt.
+- Wayback Machine fallback for paywalled content.
+- Automatic re-scraping of updated pages.
+- Crawl / depth.
 
 ## Rejected
 
-- Obsidian plugin: Arciv is not Obsidian-specific (and is moving further away from that);
-  the CLI + web UI path is the direction.
+- Web app, for now: maintenance cost too high while archival is still settling.
+- Rules in the DB: the table and CRUD existed to serve the web UI over HTTP; with that gone, a
+  hand-edited TOML file is simpler than rows mutated through a CLI.
+- Old/new-only rewrite (no regex action): can't express github (variable-length delete, host
+  swap), so it would need rewriting on the first real rule.
+- YAML for rules: pulls a parser dependency for nothing over stdlib TOML.
+- Obsidian plugin: Arciv is not Obsidian-specific.
 
 ## Principles
 
-- **2am test**: Can I understand and debug this at 2am? If not, rewrite it.
-- **Build for what exists, not what might exist**: No frontend scaffolding until the page
-  views are decided. Schema can anticipate future needs, but code paths should only exist for
-  what's implemented.
-- **Retrieval over organization**: The goal is to *find* things, not to *categorize* them.
-- **Swap later is fine**: Embedding model, database, scraper, all are replaceable. Ship
-  something that works, iterate based on real usage.
+- 2am test: can I understand and debug this at 2am? The plumbing-as-code, rules-as-data split
+  follows from this, code for immutable structural facts, data for editable policy.
+- Build for what exists, not what might exist: no `append` action, no chain control flow, no
+  proxy rotation wiring until a real case needs it.
+- Retrieval over organization: find things, don't categorize them.
+- Swap later is fine: fetcher, database, parser are all replaceable. Ship what works, iterate on
+  real usage.
