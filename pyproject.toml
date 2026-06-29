@@ -20,20 +20,11 @@ dependencies = [
 arciv = "arciv.cli.cli:cli"
 
 [dependency-groups]
-app = [
-    "uvicorn[standard]>=0.49.0", # ASGI server for the backend
-    "fastapi>=0.136.3",          # Backend API framework (arciv_api)
-    "jinja2>=3.1.6",
-    "markdown>=3.10.2",
-    "nh3>=0.3.5",
-    "datastar-py>=1.0.2",
-]
 dev = [
     "ruff>=0.15.15",       # Linting / formatting
     "pytest>=8.3.0",       # Test runner
     "pytest-cov>=6.0.0",   # Coverage reporting
     "hypothesis>=6.120.0", # Property-based testing
-    "httpx>=0.28.1",       # Test client for the API
 ]
 
 [build-system]
@@ -43,22 +34,13 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["arciv"]
 
-[tool.uv]
-# Install the web app's runtime deps alongside dev tooling for local work and
-# tests (so `uv run pytest` and `uv run uvicorn arciv_api.app:app` just work).
-# The container installs only the `app` group explicitly, keeping its image lean.
-default-groups = ["dev", "app"]
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# arciv_api lives at the repo root but is not part of the arciv wheel, so put
-# the root on the path for tests to import it.
-pythonpath = ["."]
-addopts = "--cov=arciv --cov=arciv_api --cov-report=term-missing"
+addopts = "--cov=arciv --cov-report=term-missing"
 
 [tool.coverage.run]
 branch = true
-source = ["arciv", "arciv_api"]
+source = ["arciv"]
 
 [tool.coverage.report]
 show_missing = true

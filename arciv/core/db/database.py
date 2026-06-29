@@ -163,18 +163,10 @@ class PageDatabase:
 
     Args:
         db_path: Path to the SQLite database file. Created if it doesn't exist.
-        read_only: Open without writing: a ``mode=ro`` connection that skips
-            schema creation, for the backend's concurrent read endpoints. The
-            file must already exist. Defaults to False (the read-write path
-            the CLI uses).
     """
 
-    def __init__(self, db_path: Path, read_only: bool = False) -> None:
+    def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
-        self.read_only = read_only
-        if read_only:
-            self._open_readonly(db_path)
-            return
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
@@ -182,16 +174,12 @@ class PageDatabase:
         self._conn.execute("PRAGMA foreign_keys=ON")
         # Whether this is a brand-new database: the rules table is created by the
         # schema below, so its prior absence means a first-ever open. Default
-        # rules are seeded only then, so deleting every rule in the UI sticks
-        # instead of being re-seeded on the next open.
+        # rules are seeded only then, so deleting every rule sticks instead of
+        # being re-seeded on the next open.
         rules_existed = self._table_exists("rules")
         self._conn.executescript(_SCHEMA)
         # executescript commits and resets pragmas set before it
         self._conn.execute("PRAGMA foreign_keys=ON")
-        # Wait briefly for a lock rather than failing outright: the web app's
-        # archive worker writes while the API (and CLI) may also be open on the
-        # same WAL database.
-        self._conn.execute("PRAGMA busy_timeout=5000")
         if not rules_existed:
             self._seed_default_rules()
         self._ensure_unique_slug_index()
@@ -224,8 +212,8 @@ class PageDatabase:
     def _ensure_unique_slug_index(self) -> None:
         """Enforce one page per slug, with an actionable error on collision.
 
-        The slug names the ``saved/<slug>/`` folder and is the id the web app
-        looks pages up by, so it must be unique; a unique index also backfills
+        The slug names the ``saved/<slug>/`` folder, so it must be unique; a
+        unique index also backfills
         the guarantee onto databases created before it, since this runs on every
         open. Created here rather than in ``_SCHEMA`` so that if existing rows
         already share a slug (a hash collision, or a legacy blank slug) the
@@ -247,21 +235,6 @@ class PageDatabase:
                 f"shared by multiple URLs ({examples}). This is most likely a "
                 "slug hash collision; resolve the duplicate rows before upgrading."
             ) from exc
-
-    def _open_readonly(self, db_path: Path) -> None:
-        """Open a connection that can read but never write the database.
-
-        Uses a ``mode=ro`` URI so the open leaves the file untouched: a normal
-        open runs ``executescript`` (a write), and the backend must not write
-        to the database the CLI owns. Meant for one short-lived connection per
-        request. ``check_same_thread`` is off because FastAPI serves ``def``
-        endpoints from a threadpool; a per-request connection is fine as long
-        as it is not shared between threads at the same time.
-        """
-        uri = f"{db_path.resolve().as_uri()}?mode=ro"
-        self._conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA busy_timeout=5000")
 
     def close(self) -> None:
         """Close the database connection."""
