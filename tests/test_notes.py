@@ -51,6 +51,27 @@ class TestExtractUrls:
         note = make_note("Just a note without links.")
         assert note.extract_urls() == []
 
+    def test_bare_url_strips_unbalanced_trailing_paren(self, make_note):
+        # A bare URL wrapped in prose parens: the opening "(" isn't part of
+        # the URL, so the trailing ")" is unbalanced and must be dropped.
+        note = make_note("see (https://example.com/post) here")
+        assert note.extract_urls() == ["https://example.com/post"]
+
+
+class TestNoteErrors:
+    def test_missing_path_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            Note(tmp_path / "does-not-exist.md")
+
+    def test_unreadable_path_raises_ioerror(self, tmp_path):
+        # A directory passes the exists() check but can't be read as text.
+        with pytest.raises(IOError):
+            Note(tmp_path)
+
+    def test_repr_shows_filename_and_extension(self, make_note):
+        note = make_note("body", name="daily.md")
+        assert repr(note) == "Note(daily.md)"
+
 
 class TestLoadNotes:
     def test_txt_note_extracts_urls(self, tmp_path):
