@@ -40,8 +40,12 @@ Three stages, no writeback into the notes. Each stage has a dedicated CLI comman
   either stage. `links` holds one row per indexed link: `url`, `file_path` (full normalized
   path), `source_name` (NULL for ad-hoc files; cleared when a source is removed),
   `indexed_at`. `sources` holds registered directories: `name` (PK), `path`, `added_at`.
-  `rules` holds the URL-processing rules applied in order during indexing/archiving (see
-  PLAN.md item 3 for the planned move out of the DB into TOML).
+- URL-processing rules are TOML, not a DB table: the packaged
+  `arciv/core/fetch/default_rules.toml` (loaded at runtime) plus an optional
+  `<data dir>/rules.toml` the user hand-edits, loaded ahead of the defaults so user rules
+  win on first match. The match/action engine and loader live in `arciv/core/fetch/rules.py`;
+  the universal never-fetch guards (media files, image proxies, IP/localhost hosts) stay in
+  code in `arciv/core/fetch/url_processing.py`, ahead of the rules.
 - `<data dir>/saved/<slug>/` — one folder per page: `page.html` (raw fetch) or `page.pdf`, plus
   `page.md` once parsed. Slug format is `<domain>-<hash8>`, sanitized to be a safe directory
   name on Linux and Windows.
@@ -81,8 +85,9 @@ uv tool install .                # Install the CLI as a global tool
 The scope is settled: Arciv is the main archival tool for all reading material, shipped as a
 single CLI tool. The CLI foundation (layered `get`, separated stages, sources) is in place. The
 web app has been removed (it was not worth the maintenance cost while the archival experience is
-still settling). PLAN.md is the live roadmap; the fetch layer now runs on Scrapling, and the
-next step is redesigning the URL rule system as TOML data.
+still settling). PLAN.md is the live roadmap; the fetch layer now runs on Scrapling, and the URL
+rule system is TOML data (packaged defaults plus an optional user `rules.toml`), no longer a DB
+table.
 
 ## Context
 

@@ -9,7 +9,7 @@ from loguru import logger
 from typer.testing import CliRunner
 
 import arciv.cli.cli as cli_module
-from arciv.core.db import Page, PageDatabase, Rule, Source
+from arciv.core.db import Page, PageDatabase, Source
 from arciv.core.fetch import slug_for_url
 from arciv.core.pipeline import ArchiveResult
 from arciv.cli import output
@@ -39,6 +39,7 @@ def data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(cli_module, "DATA_DIR", tmp_path)
     monkeypatch.setattr(cli_module, "DB_PATH", tmp_path / "arciv.db")
     monkeypatch.setattr(cli_module, "SAVED_DIR", tmp_path / "saved")
+    monkeypatch.setattr(cli_module, "USER_RULES_PATH", tmp_path / "rules.toml")
     monkeypatch.setattr(cli_module, "configure_logger", fake_configure)
     output.set_json_output(False)
     yield tmp_path
@@ -599,139 +600,99 @@ class TestSourceGroup:
         assert (data_dir / "saved" / shared.slug).exists()
 
 
+def _write_user_rules(data_dir, toml_text: str) -> None:
+    """Write a user rules.toml at the path the CLI loads (see data_dir)."""
+    (data_dir / "rules.toml").write_text(toml_text, encoding="utf-8")
+
+
+_SKIP_RULE = """\
+[[rule]]
+name = "myskip"
+type = "host"
+match = "skip-me.example.com"
+  [[rule.action]]
+  type = "skip"
+  reason = "nope"
+"""
+
+_REWRITE_RULE = """\
+[[rule]]
+name = "myrewrite"
+type = "host"
+match = "rewrite-me.example.com"
+  [[rule.action]]
+  type = "prepend"
+  text = "https://mirror/"
+"""
+
+
 class TestRules:
-    """`rules list/add/remove` give the CLI parity with the web rule view.
+    """`rules list` shows the active (user + default) rules."""
 
-    A fresh database is seeded with built-in default rules, so these tests
-    target a distinctive pattern of their own rather than asserting on the
-    whole (defaulted) table.
-    """
-
-    PATTERN = "cli-test.example.com"
-
-    def _added_rule(self, data_dir):
-        with PageDatabase(data_dir / "arciv.db") as db:
-            matches = [r for r in db.list_rules() if r.pattern == self.PATTERN]
-        return matches
-
-    def test_add_inserts_rule_at_the_end(self, runner, data_dir):
-        result = runner.invoke(
-            cli_module.cli, ["rules", "add", "domain", self.PATTERN, "skip"]
-        )
-        assert result.exit_code == 0
-        matches = self._added_rule(data_dir)
-        assert len(matches) == 1
-        assert matches[0].match_type == "domain"
-        assert matches[0].action == "skip"
-        # Appended, never reordering the seeded defaults.
-        with PageDatabase(data_dir / "arciv.db") as db:
-            assert db.list_rules()[-1].pattern == self.PATTERN
-
-    def test_add_rewrite_with_replacement(self, runner, data_dir):
-        result = runner.invoke(
-            cli_module.cli,
-            ["rules", "add", "domain", self.PATTERN, "rewrite", "-r", "scribe.rip"],
-        )
-        assert result.exit_code == 0
-        matches = self._added_rule(data_dir)
-        assert matches[0].action == "rewrite"
-        assert matches[0].replacement == "scribe.rip"
-
-    def test_add_rewrite_without_replacement_is_usage(self, runner, data_dir):
-        result = runner.invoke(
-            cli_module.cli, ["rules", "add", "domain", self.PATTERN, "rewrite"]
-        )
-        assert result.exit_code == output.EXIT_USAGE
-        assert "replacement" in result.output
-        assert self._added_rule(data_dir) == []
-
-    def test_add_unknown_match_type_is_usage(self, runner, data_dir):
-        result = runner.invoke(
-            cli_module.cli, ["rules", "add", "bogus", self.PATTERN, "skip"]
-        )
-        assert result.exit_code == output.EXIT_USAGE
-        assert "match type" in result.output
-
-    def test_add_unknown_action_is_usage(self, runner, data_dir):
-        result = runner.invoke(
-            cli_module.cli, ["rules", "add", "domain", self.PATTERN, "bogus"]
-        )
-        assert result.exit_code == output.EXIT_USAGE
-        assert "action" in result.output
-
-    def test_list_is_tab_separated_with_id_first(self, runner, data_dir):
-        with PageDatabase(data_dir / "arciv.db") as db:
-            rule = db.add_rule(
-                Rule(match_type="domain", pattern=self.PATTERN, action="skip")
-            )
+    def test_list_shows_default_rules(self, runner, data_dir):
         result = runner.invoke(cli_module.cli, ["rules", "list"])
         assert result.exit_code == 0
+        assert "youtube" in result.stdout
+        assert "medium to freedium" in result.stdout
+
+    def test_list_is_tab_separated_name_first(self, runner, data_dir):
+        result = runner.invoke(cli_module.cli, ["rules", "list"])
         row = next(
-            line for line in result.stdout.splitlines() if self.PATTERN in line
+            line for line in result.stdout.splitlines() if line.startswith("youtube\t")
         ).split("\t")
-        assert row == [str(rule.id), "domain", self.PATTERN, "skip", ""]
+        assert row[0] == "youtube"
+        assert row[1] == "domain"
+        assert row[2] == "youtube.com"
+        assert "skip" in row[3]
+
+    def test_list_includes_user_rules_first(self, runner, data_dir):
+        _write_user_rules(data_dir, _SKIP_RULE)
+        result = runner.invoke(cli_module.cli, ["rules", "list"])
+        lines = result.stdout.splitlines()
+        assert lines[0].startswith("myskip\t")
 
     def test_list_emits_jsonl(self, runner, data_dir):
-        with PageDatabase(data_dir / "arciv.db") as db:
-            rule = db.add_rule(
-                Rule(
-                    match_type="domain",
-                    pattern=self.PATTERN,
-                    action="rewrite",
-                    replacement="scribe.rip",
-                )
-            )
+        _write_user_rules(data_dir, _SKIP_RULE)
         result = runner.invoke(cli_module.cli, ["--json", "rules", "list"])
         records = [json.loads(line) for line in result.stdout.splitlines()]
-        record = next(r for r in records if r["pattern"] == self.PATTERN)
-        assert record["replacement"] == "scribe.rip"
-        assert record["id"] == rule.id
-
-    def test_remove_deletes_rule(self, runner, data_dir):
-        with PageDatabase(data_dir / "arciv.db") as db:
-            rule = db.add_rule(
-                Rule(match_type="domain", pattern=self.PATTERN, action="skip")
-            )
-        result = runner.invoke(cli_module.cli, ["rules", "remove", str(rule.id)])
-        assert result.exit_code == 0
-        assert self._added_rule(data_dir) == []
-
-    def test_remove_unknown_id_is_noinput(self, runner, data_dir):
-        result = runner.invoke(cli_module.cli, ["rules", "remove", "999999"])
-        assert result.exit_code == output.EXIT_NOINPUT
+        record = next(r for r in records if r["name"] == "myskip")
+        assert record["type"] == "host"
+        assert record["match"] == "skip-me.example.com"
+        assert record["actions"][0]["type"] == "skip"
 
 
 class TestRulesTest:
     """`rules test <url>` reports skip / rewrite / passthrough verdicts."""
 
     def test_skip_names_the_rule(self, runner, data_dir):
-        with PageDatabase(data_dir / "arciv.db") as db:
-            rule = db.add_rule(
-                Rule(match_type="host", pattern="skip-me.example.com", action="skip")
-            )
+        _write_user_rules(data_dir, _SKIP_RULE)
         result = runner.invoke(
             cli_module.cli, ["rules", "test", "https://skip-me.example.com/post"]
         )
         assert result.exit_code == 0
         assert result.stdout.startswith("skipped:")
-        assert f"rule {rule.id}" in result.stdout
+        assert "rule 'myskip'" in result.stdout
 
     def test_rewrite_shows_target_and_rule(self, runner, data_dir):
-        with PageDatabase(data_dir / "arciv.db") as db:
-            rule = db.add_rule(
-                Rule(
-                    match_type="host",
-                    pattern="rewrite-me.example.com",
-                    action="rewrite",
-                    replacement="scribe.rip",
-                )
-            )
+        _write_user_rules(data_dir, _REWRITE_RULE)
         result = runner.invoke(
             cli_module.cli, ["rules", "test", "https://rewrite-me.example.com/post"]
         )
         assert result.exit_code == 0
-        assert "rewritten -> https://scribe.rip/post" in result.stdout
-        assert f"rule {rule.id}" in result.stdout
+        assert (
+            "rewritten -> https://mirror/https://rewrite-me.example.com/post"
+            in result.stdout
+        )
+        assert "rule 'myrewrite'" in result.stdout
+
+    def test_guard_skip_has_no_rule(self, runner, data_dir):
+        # A media URL is skipped by an in-code guard, so no rule is named.
+        result = runner.invoke(
+            cli_module.cli, ["rules", "test", "https://example.com/photo.png"]
+        )
+        assert result.exit_code == 0
+        assert result.stdout.startswith("skipped:")
+        assert "rule" not in result.stdout
 
     def test_passthrough_when_no_rule_fires(self, runner, data_dir):
         result = runner.invoke(
@@ -742,10 +703,7 @@ class TestRulesTest:
         assert "rule" not in result.stdout
 
     def test_json_emits_structured_verdict(self, runner, data_dir):
-        with PageDatabase(data_dir / "arciv.db") as db:
-            rule = db.add_rule(
-                Rule(match_type="host", pattern="skip-me.example.com", action="skip")
-            )
+        _write_user_rules(data_dir, _SKIP_RULE)
         result = runner.invoke(
             cli_module.cli,
             ["--json", "rules", "test", "https://skip-me.example.com/post"],
@@ -753,8 +711,8 @@ class TestRulesTest:
         assert result.exit_code == 0
         obj = json.loads(result.stdout)
         assert obj["verdict"] == "skipped"
-        assert obj["rule_id"] == rule.id
-        assert obj["reason"]
+        assert obj["rule"] == "myskip"
+        assert obj["reason"] == "nope"
 
 
 class TestGlobalOptions:

@@ -15,9 +15,10 @@ from arciv.settings import (
     DEFAULT_MAX_RETRIES,
     SAVED_DIR,
     TIMEOUT_MS,
+    USER_RULES_PATH,
 )
 from arciv.core.db import Page, PageDatabase
-from arciv.core.fetch import Fetcher
+from arciv.core.fetch import Fetcher, load_rules
 
 
 def fetch_urls(db: PageDatabase, urls: list[str], refetch: bool = False) -> list[Page]:
@@ -29,6 +30,7 @@ def fetch_urls(db: PageDatabase, urls: list[str], refetch: bool = False) -> list
         page_timeout=TIMEOUT_MS,
         max_concurrency=DEFAULT_CONCURRENCY,
         max_retries=DEFAULT_MAX_RETRIES,
+        rules=load_rules(USER_RULES_PATH),
     )
     return fetcher.fetch_batch(urls, refetch=refetch)
 
