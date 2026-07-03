@@ -2,6 +2,7 @@
 
 import pytest
 
+import arciv.core.pipeline.parse as parse_module
 from arciv.core.db import Page, PageDatabase
 from arciv.core.pipeline.parse import parse_pending
 
@@ -45,6 +46,12 @@ def _save_html(saved_dir, slug: str, html: str):
     slug_dir = saved_dir / slug
     slug_dir.mkdir(parents=True, exist_ok=True)
     (slug_dir / "page.html").write_text(html, encoding="utf-8")
+
+
+def _save_pdf(saved_dir, slug: str, pdf_bytes: bytes):
+    slug_dir = saved_dir / slug
+    slug_dir.mkdir(parents=True, exist_ok=True)
+    (slug_dir / "page.pdf").write_bytes(pdf_bytes)
 
 
 class TestParsePending:
@@ -128,3 +135,89 @@ class TestParsePending:
         # --reparse retries rejected pages and clears the failure
         assert parse_pending(db, saved_dir=saved, reparse=True, min_words=10) == 1
         assert db.get("https://example.com/a").fail_reason is None
+
+
+class TestParsePdf:
+    def test_writes_markdown_from_pdf(self, db, tmp_path, make_pdf):
+        saved = tmp_path / "saved"
+        url = "https://example.com/paper.pdf"
+        db.upsert(_fetched_page(url, "example.com-pdf00001", content_type="pdf"))
+        _save_pdf(saved, "example.com-pdf00001", make_pdf("word " * 60))
+
+        parsed = parse_pending(db, saved_dir=saved, min_words=10)
+
+        assert parsed == 1
+        md = (saved / "example.com-pdf00001" / "page.md").read_text("utf-8")
+        assert "word" in md
+        page = db.get(url)
+        assert page.parsed is True
+        assert page.word_count >= 60
+
+    def test_rejects_too_short_pdf(self, db, tmp_path, make_pdf):
+        saved = tmp_path / "saved"
+        url = "https://example.com/paper.pdf"
+        db.upsert(_fetched_page(url, "example.com-pdf00002", content_type="pdf"))
+        _save_pdf(saved, "example.com-pdf00002", make_pdf("tiny pdf body"))
+
+        parsed = parse_pending(db, saved_dir=saved, min_words=100_000)
+
+        assert parsed == 0
+        page = db.get(url)
+        assert page.parsed is False
+        assert "too short" in page.fail_reason
+        assert "pdf" in page.fail_reason
+
+    def test_corrupt_pdf_is_rejected_with_reason(self, db, tmp_path):
+        saved = tmp_path / "saved"
+        url = "https://example.com/paper.pdf"
+        db.upsert(_fetched_page(url, "example.com-pdf00003", content_type="pdf"))
+        _save_pdf(saved, "example.com-pdf00003", b"not actually a pdf")
+
+        parsed = parse_pending(db, saved_dir=saved, min_words=10)
+
+        assert parsed == 0
+        page = db.get(url)
+        assert page.parsed is False
+        assert "PDF parse error" in page.fail_reason
+
+
+class TestHtmlRejection:
+    def test_block_page_is_rejected(self, db, tmp_path):
+        saved = tmp_path / "saved"
+        db.upsert(_fetched_page("https://example.com/a", "example.com-aaaaaaaa"))
+        # A Cloudflare "Just a moment..." page, padded past the size floor.
+        block = (
+            "<html><head><title>Just a moment...</title></head>"
+            "<body>" + ("<p>x</p>" * 200) + "</body></html>"
+        )
+        _save_html(saved, "example.com-aaaaaaaa", block)
+
+        assert parse_pending(db, saved_dir=saved, min_words=10) == 0
+        page = db.get("https://example.com/a")
+        assert page.parsed is False
+        assert "block page" in page.fail_reason
+
+    def test_extraction_failure_is_rejected(self, db, tmp_path, monkeypatch):
+        saved = tmp_path / "saved"
+        db.upsert(_fetched_page("https://example.com/a", "example.com-aaaaaaaa"))
+        _save_html(saved, "example.com-aaaaaaaa", _make_html("epsilon"))
+        # trafilatura returns nothing usable for this page.
+        monkeypatch.setattr(parse_module, "parse_html", lambda *a, **k: None)
+
+        assert parse_pending(db, saved_dir=saved, min_words=10) == 0
+        assert db.get("https://example.com/a").fail_reason == "extraction failed"
+
+    def test_raw_text_too_short_reports_bytes(self, db, tmp_path):
+        # A short raw-text page (under 1 KB) must report the size in bytes,
+        # not kilobytes.
+        saved = tmp_path / "saved"
+        url = "https://raw.example.com/readme.md"
+        db.upsert(_fetched_page(url, "example.com-rawtext0"))
+        _save_html(saved, "example.com-rawtext0", "short text")
+
+        assert parse_pending(db, saved_dir=saved, min_words=100_000) == 0
+        reason = db.get(url).fail_reason
+        assert "too short" in reason
+        assert "text" in reason
+        # size reported in bytes (not KB) for sub-1 KB content
+        assert "10 B" in reason
