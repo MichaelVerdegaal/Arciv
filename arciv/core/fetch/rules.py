@@ -232,6 +232,31 @@ _DEFAULT_RULES: tuple[Rule, ...] = tuple(
     )
 )
 
+# Per-process cache of parsed user rules, keyed by path. The stored
+# (mtime_ns, size, rules) is reused only while the file is unchanged, so an
+# index run that calls load_rules once per source doesn't re-read and re-parse
+# the same TOML each time, while an edit mid-process is still picked up.
+_USER_RULES_CACHE: dict[Path, tuple[int, int, tuple[Rule, ...]]] = {}
+
+
+def _load_user_rules(user_path: Path) -> tuple[Rule, ...]:
+    """Parse the user rules file, reusing the cache when it hasn't changed."""
+    try:
+        stat = user_path.stat()
+    except OSError:
+        return ()
+    key = (stat.st_mtime_ns, stat.st_size)
+    cached = _USER_RULES_CACHE.get(user_path)
+    if cached is not None and cached[:2] == key:
+        return cached[2]
+    try:
+        rules = tuple(_parse_rules(user_path.read_text(encoding="utf-8")))
+    except (tomllib.TOMLDecodeError, OSError) as exc:
+        logger.warning(f"Ignoring user rules at {user_path}: {exc}")
+        return ()
+    _USER_RULES_CACHE[user_path] = (*key, rules)
+    return rules
+
 
 def load_rules(user_path: Path | None = None) -> list[Rule]:
     """Load the active rule list: user rules first, then packaged defaults.
@@ -240,12 +265,12 @@ def load_rules(user_path: Path | None = None) -> list[Rule]:
     it exists and placed ahead of the defaults, so a user rule wins on first
     match. With ``user_path`` None or missing, only the packaged defaults apply.
     A malformed user file is ignored (with a warning) rather than crashing.
+
+    The parsed user file is cached per path (invalidated by mtime/size), so
+    repeated calls within a run reuse the parse instead of re-reading the TOML.
     """
     rules: list[Rule] = []
-    if user_path is not None and user_path.is_file():
-        try:
-            rules.extend(_parse_rules(user_path.read_text(encoding="utf-8")))
-        except (tomllib.TOMLDecodeError, OSError) as exc:
-            logger.warning(f"Ignoring user rules at {user_path}: {exc}")
+    if user_path is not None:
+        rules.extend(_load_user_rules(user_path))
     rules.extend(_DEFAULT_RULES)
     return rules

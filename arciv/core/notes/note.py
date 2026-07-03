@@ -5,6 +5,15 @@ from pathlib import Path
 # Only split when the boundary is not part of a query string value.
 _CONCAT_SPLIT_RE = re.compile(r"(?<=[^\s?=&])(?=https?://)")
 
+# Markdown link ``[text](url)``. The balanced-paren group in the URL keeps
+# forms like ``(machine_learning)`` intact instead of stopping at the first ")".
+_MD_LINK_RE = re.compile(
+    r"\[(?:[^\[\]]|\[[^\]]*\])*\]\((https?://(?:\([^\s\)]*\)|[^\s\)])+)\)"
+)
+
+# Bare URL not already inside a markdown link's parens.
+_BARE_URL_RE = re.compile(r"(?<!\]\()https?://[^\s<>\[\]\"]+")
+
 # File extensions treated as notes when indexing a directory
 NOTE_EXTENSIONS = (".md", ".txt", ".rst")
 
@@ -86,17 +95,13 @@ class Note:
         """
         raw_urls: list[str] = []
 
-        # First pass: extract URLs from markdown links [text](url)
-        # Balanced-paren group tried first so (machine_learning) stays intact
-        _MD_LINK_RE = (
-            r"\[(?:[^\[\]]|\[[^\]]*\])*\]\((https?://(?:\([^\s\)]*\)|[^\s\)])+)\)"
-        )
-        for match in re.finditer(_MD_LINK_RE, self.text):
+        # First pass: extract URLs from markdown links [text](url), tried first
+        # so trailing junk after the closing paren isn't captured.
+        for match in _MD_LINK_RE.finditer(self.text):
             raw_urls.append(match.group(1))
 
         # Second pass: bare URLs not inside markdown link parens
-        _BARE_URL_RE = r"(?<!\]\()https?://[^\s<>\[\]\"]+"
-        for match in re.finditer(_BARE_URL_RE, self.text):
+        for match in _BARE_URL_RE.finditer(self.text):
             url = match.group(0).rstrip(".,;:!?'")
             # Strip trailing parens only when unbalanced
             while url.endswith(")") and url.count(")") > url.count("("):
