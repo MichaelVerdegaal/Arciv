@@ -6,6 +6,7 @@ Pages are created in pending state; downloading them is the fetch stage's
 job (see ``arciv.core.pipeline.fetch``).
 """
 
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -26,12 +27,12 @@ from arciv.core.fetch import (
 def _page_entry(processed_url: str, original_url: str) -> tuple[str, str, str, str]:
     """Build the (url, original_url, domain, slug) tuple for ensure_pages."""
     domain = registered_domain(processed_url) or split_url(processed_url)[0]
-    return (processed_url, original_url, domain, slug_for_url(processed_url))
+    return (processed_url, original_url, domain, slug_for_url(processed_url, domain))
 
 
 def _index_notes(
     db: PageDatabase,
-    notes: list[Note],
+    notes: Iterable[Note],
     source_name: str | None = None,
 ) -> list[str]:
     """Extract, normalize, and register the links of the given notes.
@@ -67,7 +68,9 @@ def _index_notes(
     )
     db.replace_links_for_files(file_paths, link_entries)
 
-    logger.info(f"Indexed {len(original_urls)} unique URLs from {len(notes)} file(s)")
+    logger.info(
+        f"Indexed {len(original_urls)} unique URLs from {len(file_paths)} file(s)"
+    )
     return list(original_urls)
 
 
@@ -85,9 +88,8 @@ def index_directory(
     """Index all links of all note files within a directory (recursive)
     and return the unique processed URLs found. source_name is the
     registered source the directory belongs to, if any."""
-    notes = load_notes(dir_path)
-    logger.info(f"Found {len(notes)} notes in {dir_path}")
-    return _index_notes(db, notes, source_name=source_name)
+    logger.info(f"Indexing notes in {dir_path}")
+    return _index_notes(db, load_notes(dir_path), source_name=source_name)
 
 
 def index_source(db: PageDatabase, name: str) -> list[str]:

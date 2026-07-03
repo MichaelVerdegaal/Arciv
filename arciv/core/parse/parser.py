@@ -3,7 +3,7 @@
 import re
 from dataclasses import dataclass
 
-from trafilatura import bare_extraction, extract
+from trafilatura import extract
 
 from .clean_markdown import clean_markdown
 from .html_fixes import PRUNE_XPATHS, fix_html
@@ -90,33 +90,22 @@ def html_to_markdown(
 
 
 def extract_metadata(html_content: str) -> tuple[str | None, str | None]:
-    """Extract title and author from HTML content.
+    """Extract the page title from the HTML ``<title>`` tag.
 
-    Uses trafilatura's bare_extraction for metadata parsing.
+    Title is read straight from the ``<title>`` tag. Author is not extracted
+    (always None): trafilatura only fills in author when explicitly asked to
+    parse metadata (``with_metadata=True``), which costs a second full-document
+    parse the archive doesn't otherwise need, so we skip it rather than pay for
+    a field we don't store.
 
     Args:
         html_content: Raw HTML string.
 
     Returns:
-        Tuple of (title, author). Either may be None if not found.
+        Tuple of (title, author). Title is None if no ``<title>`` tag is
+        present; author is always None.
     """
-    try:
-        result = bare_extraction(html_content)
-    except Exception:
-        return _title_from_tag(html_content), None
-
-    if not result:
-        return _title_from_tag(html_content), None
-
-    # trafilatura 2.x returns a Document object with attributes
-    title = getattr(result, "title", None)
-    author = getattr(result, "author", None)
-
-    # Fall back to <title> tag if trafilatura didn't extract one
-    if not title:
-        title = _title_from_tag(html_content)
-
-    return title or None, author or None
+    return _title_from_tag(html_content), None
 
 
 def _title_from_tag(html_content: str) -> str | None:
@@ -135,7 +124,9 @@ def _title_from_tag(html_content: str) -> str | None:
     return None
 
 
-def parse_html(html_content: str, clean: bool = True) -> ConversionResult | None:
+def parse_html(
+    html_content: str, clean: bool = True, min_words: int | None = None
+) -> ConversionResult | None:
     """Convert HTML to markdown and extract metadata.
 
     This is the main entry point for parsing scraped HTML into structured
@@ -144,6 +135,12 @@ def parse_html(html_content: str, clean: bool = True) -> ConversionResult | None
     Args:
         html_content: Raw HTML string.
         clean: Whether to apply markdown cleaning.
+        min_words: The caller's length-gate threshold, if known. Used only to
+            skip a redundant second extraction: the code-inclusive count exists
+            to rescue code-heavy pages that fall *below* the gate, so when the
+            stored word count already clears ``min_words`` it cannot change the
+            outcome and the extra parse is elided. Pass None (the default) to
+            always compute it.
 
     Returns:
         Conversion result with markdown content, word count, and metadata.
@@ -153,19 +150,25 @@ def parse_html(html_content: str, clean: bool = True) -> ConversionResult | None
     if md_content is None:
         return None
 
-    # The length gate runs on a code-inclusive extraction so that code-heavy
-    # pages with real prose aren't rejected as "too short" just because their
-    # <pre>/<code> blocks were stripped from the stored markdown.
-    full_md = html_to_markdown(html_content, strip_code=False)
-    full_word_count = count_words(full_md) if full_md else 0
-
     if clean:
         md_content = clean_markdown(md_content)
+    word_count = count_words(md_content)
+
+    # The length gate runs on a code-inclusive extraction so that code-heavy
+    # pages with real prose aren't rejected as "too short" just because their
+    # <pre>/<code> blocks were stripped from the stored markdown. That second
+    # extraction is expensive and only matters when the stored count is short,
+    # so skip it once ``word_count`` already clears the caller's threshold.
+    if min_words is not None and word_count >= min_words:
+        full_word_count = word_count
+    else:
+        full_md = html_to_markdown(html_content, strip_code=False)
+        full_word_count = count_words(full_md) if full_md else 0
 
     title, author = extract_metadata(html_content)
     return ConversionResult(
         md_content=md_content,
-        word_count=count_words(md_content),
+        word_count=word_count,
         full_word_count=full_word_count,
         title=title,
         author=author,
