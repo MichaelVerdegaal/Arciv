@@ -36,17 +36,21 @@ _BLOCK_BODY_MARKERS = (
 )
 
 
-def check_html(html: str) -> str | None:
+def check_html(html: str, size: int | None = None) -> str | None:
     """Validate fetched HTML before archiving.
 
     Args:
         html: Raw HTML string from the browser.
+        size: The HTML's size in UTF-8 bytes, if the caller already computed
+            it. Passed through to avoid re-encoding the (up to 10 MB) string a
+            second time; computed here when None.
 
     Returns:
         None if the content looks legitimate, or a failure reason string
         explaining why the content should be rejected.
     """
-    size = len(html.encode("utf-8"))
+    if size is None:
+        size = len(html.encode("utf-8"))
 
     if size > MAX_HTML_BYTES:
         return f"html too large ({size // (1024 * 1024)}MB)"

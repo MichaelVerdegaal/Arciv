@@ -103,7 +103,7 @@ def is_pdf_url(url: str) -> bool:
 _UNSAFE_SLUG_CHARS_RE = re.compile(r"[^A-Za-z0-9.\-]")
 
 
-def slug_for_url(url: str) -> str:
+def slug_for_url(url: str, domain: str | None = None) -> str:
     """Generate a slug (folder name) for a URL.
 
     The slug is used as the directory name under ``saved/`` where the
@@ -112,11 +112,17 @@ def slug_for_url(url: str) -> str:
 
     Args:
         url: The processed/normalized URL.
+        domain: The URL's registered domain, if the caller already resolved it
+            (via ``split_url``/``registered_domain``). Passed through to skip a
+            redundant ``split_url`` — and its tldextract call — since callers
+            building a page entry compute the same domain right alongside the
+            slug. When None it is resolved here.
 
     Returns:
         Slug in format "{domain}-{hash}", e.g. "github.com-a1b2c3d4".
     """
-    domain, _ = split_url(url)
+    if domain is None:
+        domain, _ = split_url(url)
     safe_domain = _UNSAFE_SLUG_CHARS_RE.sub("-", domain) or "unknown"
     url_hash = hashlib.md5(url.encode("utf-8", errors="surrogatepass")).hexdigest()[:8]
     return f"{safe_domain}-{url_hash}"

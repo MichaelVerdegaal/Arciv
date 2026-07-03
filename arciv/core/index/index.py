@@ -26,7 +26,7 @@ from arciv.core.fetch import (
 def _page_entry(processed_url: str, original_url: str) -> tuple[str, str, str, str]:
     """Build the (url, original_url, domain, slug) tuple for ensure_pages."""
     domain = registered_domain(processed_url) or split_url(processed_url)[0]
-    return (processed_url, original_url, domain, slug_for_url(processed_url))
+    return (processed_url, original_url, domain, slug_for_url(processed_url, domain))
 
 
 def _index_notes(

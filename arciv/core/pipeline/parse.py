@@ -136,12 +136,12 @@ def _parse_html(
         logger.info(f"Parsed {page.url} (raw text, {word_count} words)")
         return result
 
-    block_reason = check_html(html)
+    block_reason = check_html(html, raw_bytes)
     if block_reason:
         _reject(db, page, block_reason)
         return None
 
-    conversion = parse_html(html, clean=True)
+    conversion = parse_html(html, clean=True, min_words=min_words)
     if conversion is None:
         _reject(db, page, "extraction failed")
         return None

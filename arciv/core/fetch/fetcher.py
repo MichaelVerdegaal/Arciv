@@ -106,7 +106,7 @@ class Fetcher:
         existing = self.db.get(processed_url)
         original_url = existing.original_url if existing else input_url
         domain = registered_domain(processed_url) or split_url(processed_url)[0]
-        slug = slug_for_url(processed_url)
+        slug = slug_for_url(processed_url, domain)
         return original_url, domain, slug
 
     def _store_success(
@@ -204,7 +204,7 @@ class Fetcher:
             return None
         return response.body
 
-    def _fetch_pdf(
+    async def _fetch_pdf(
         self,
         processed_url: str,
         original_url: str,
@@ -212,8 +212,15 @@ class Fetcher:
         slug: str,
         fail_reason: str = "PDF download failed",
     ) -> Page | None:
-        """Download a PDF, save it to disk, and record the outcome."""
-        pdf_bytes = self._download_pdf(processed_url)
+        """Download a PDF, save it to disk, and record the outcome.
+
+        The curl_cffi download is synchronous and can block for the full
+        timeout, so it runs in a worker thread to keep it off the event loop —
+        otherwise one slow PDF would stall every concurrent browser fetch. The
+        disk and DB writes stay on the loop thread, since the sqlite connection
+        is single-threaded.
+        """
+        pdf_bytes = await asyncio.to_thread(self._download_pdf, processed_url)
         if pdf_bytes is None:
             self._store_failure(processed_url, original_url, domain, slug, fail_reason)
             return None
@@ -268,11 +275,20 @@ class Fetcher:
 
         results: list[Page] = []
 
-        # PDFs are downloaded directly over HTTP; no browser needed.
-        for processed_url, original_url, domain, slug in to_fetch_pdf:
-            page = self._fetch_pdf(processed_url, original_url, domain, slug)
-            if page is not None:
-                results.append(page)
+        # PDFs are downloaded directly over HTTP; no browser needed. Each
+        # download blocks in a worker thread (see _fetch_pdf), so run them
+        # concurrently, capped at max_concurrency to bound open connections.
+        if to_fetch_pdf:
+            pdf_sem = asyncio.Semaphore(self.max_concurrency)
+
+            async def _bounded_pdf(entry: tuple[str, str, str, str]) -> Page | None:
+                async with pdf_sem:
+                    return await self._fetch_pdf(*entry)
+
+            pdf_pages = await asyncio.gather(
+                *(_bounded_pdf(entry) for entry in to_fetch_pdf)
+            )
+            results.extend(page for page in pdf_pages if page is not None)
 
         if not to_fetch_html:
             return results
@@ -321,7 +337,7 @@ class Fetcher:
 
                 # Browser triggered a file download, so try the PDF path
                 if "Download is starting" in last_reason:
-                    return self._fetch_pdf(
+                    return await self._fetch_pdf(
                         processed_url,
                         original_url,
                         domain,
