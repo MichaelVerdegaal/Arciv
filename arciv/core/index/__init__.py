@@ -3,7 +3,7 @@
 For every link found, a row is stored with the processed URL, the full
 normalized path of the file it was found in, and the time it was indexed.
 Pages are created in pending state; downloading them is the fetch stage's
-job (see ``arciv.core.pipeline.fetch``).
+job (see ``arciv.core.pipeline.fetch_pipeline``).
 """
 
 from .index import (

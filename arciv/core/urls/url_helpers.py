@@ -1,7 +1,7 @@
 """url_helpers.py - Pure URL utilities: decomposition, classification, slugs.
 
 These are stateless helpers with no opinion about the skip/rewrite pipeline
-(that lives in :mod:`arciv.core.fetch.url_processing`). They cover splitting a
+(that lives in :mod:`arciv.core.urls.url_processing`). They cover splitting a
 URL into domain and path, recognising PDF/raw-text URLs, generating the
 on-disk slug, and collapsing equivalent URL forms to one canonical string.
 """

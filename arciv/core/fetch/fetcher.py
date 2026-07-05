@@ -11,7 +11,7 @@ One fetch layer, two engines from Scrapling, one ``Response`` type:
 Each page goes: fetch HTML → write ``page.html`` to the slug folder → record
 in DB. PDF URLs are downloaded directly and stored as ``page.pdf``. Validation
 and markdown conversion happen later, in the parse stage (see
-``arciv.core.pipeline.parse``).
+``arciv.core.pipeline.parse_pipeline``).
 """
 
 import asyncio
@@ -26,18 +26,20 @@ from scrapling.fetchers import Fetcher as StaticFetcher
 
 from arciv.core.db import Page, PageDatabase
 
-from .rules import Rule, load_rules
-from .url_helpers import (
+from arciv.core.urls import (
+    Rule,
     is_pdf_url,
+    load_rules,
+    process_url,
     registered_domain,
     slug_for_url,
     split_url,
 )
-from .url_processing import process_url
 
 # Neutral mechanism defaults so a Fetcher is usable without settings (e.g.
 # in tests). The env-tunable values the CLI actually runs with live in
-# arciv.settings and are injected by the pipeline layer (pipeline/fetch.py).
+# arciv.settings and are injected by the pipeline layer
+# (pipeline/fetch_pipeline.py).
 TIMEOUT_MS = 30_000
 DEFAULT_CONCURRENCY = 8
 DEFAULT_MAX_RETRIES = 2

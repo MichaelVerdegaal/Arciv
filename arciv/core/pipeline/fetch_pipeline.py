@@ -3,7 +3,7 @@
 Thin orchestration around :class:`arciv.core.fetch.Fetcher`, which does the
 Scrapling browser work for HTML (and curl_cffi downloads for PDFs). Raw content
 lands in ``saved/<slug>/page.html`` or ``page.pdf``; converting it to markdown
-is the parse stage's job (see ``arciv.core.pipeline.parse``).
+is the parse stage's job (see ``arciv.core.pipeline.parse_pipeline``).
 """
 
 from collections import Counter
@@ -18,7 +18,8 @@ from arciv.settings import (
     USER_RULES_PATH,
 )
 from arciv.core.db import Page, PageDatabase
-from arciv.core.fetch import Fetcher, load_rules
+from arciv.core.fetch import Fetcher
+from arciv.core.urls import load_rules
 
 
 def fetch_urls(db: PageDatabase, urls: list[str], refetch: bool = False) -> list[Page]:

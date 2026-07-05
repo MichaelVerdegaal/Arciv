@@ -5,7 +5,7 @@ import re
 from hypothesis import given
 from hypothesis import strategies as st
 
-from arciv.core.fetch import (
+from arciv.core.urls import (
     Action,
     Rule,
     canonicalize,

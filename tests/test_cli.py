@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 
 import arciv.cli.cli as cli_module
 from arciv.core.db import Page, PageDatabase, Source
-from arciv.core.fetch import slug_for_url
+from arciv.core.urls import slug_for_url
 from arciv.core.pipeline import ArchiveResult
 from arciv.cli import output
 from arciv.settings import configure_logger

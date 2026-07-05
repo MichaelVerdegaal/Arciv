@@ -8,9 +8,9 @@ before its URLs are archived.
 
 import pytest
 
-import arciv.core.pipeline.archive as archive_module
+import arciv.core.pipeline.archive_pipeline as archive_module
 from arciv.core.db import Page, PageDatabase, Source
-from arciv.core.fetch import slug_for_url
+from arciv.core.urls import slug_for_url
 from arciv.core.pipeline import archive_source, archive_urls
 
 

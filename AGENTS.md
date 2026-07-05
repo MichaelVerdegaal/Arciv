@@ -21,11 +21,11 @@ Three stages, no writeback into the notes. Each stage has a dedicated CLI comman
    pending pages. Each link
    gets a row with the URL, the full normalized filepath it was found in, and an indexed-at
    timestamp. Indexing operates on registered sources (`arciv source add <dir> <name>`).
-2. **Fetching** (`arciv fetch`, `arciv/core/pipeline/fetch.py` + `arciv/core/fetch/`). Download
+2. **Fetching** (`arciv fetch`, `arciv/core/pipeline/fetch_pipeline.py` + `arciv/core/fetch/`). Download
    HTML through Scrapling's stealth browser session (patchright, async, concurrency-controlled);
    PDFs and direct downloads through Scrapling's curl_cffi fetcher. Both return one `Response`
    type. Writes `page.html` / `page.pdf` to disk, no conversion.
-3. **Parsing** (`arciv parse`, `arciv/core/pipeline/parse.py` + `arciv/core/parse/`). Validate
+3. **Parsing** (`arciv parse`, `arciv/core/pipeline/parse_pipeline.py` + `arciv/core/parse/`). Validate
    fetched HTML, convert to markdown via trafilatura (HTML) or liteparse (PDF), write
    `page.md` next to the raw file, fill in title/author/word count.
 
@@ -41,11 +41,12 @@ Three stages, no writeback into the notes. Each stage has a dedicated CLI comman
   path), `source_name` (NULL for ad-hoc files; cleared when a source is removed),
   `indexed_at`. `sources` holds registered directories: `name` (PK), `path`, `added_at`.
 - URL-processing rules are TOML, not a DB table: the packaged
-  `arciv/core/fetch/default_rules.toml` (loaded at runtime) plus an optional
+  `arciv/core/urls/default_rules.toml` (loaded at runtime) plus an optional
   `<data dir>/rules.toml` the user hand-edits, loaded ahead of the defaults so user rules
-  win on first match. The match/action engine and loader live in `arciv/core/fetch/rules.py`;
-  the universal never-fetch guards (media files, image proxies, IP/localhost hosts) stay in
-  code in `arciv/core/fetch/url_processing.py`, ahead of the rules.
+  win on first match. URL handling lives in `arciv/core/urls/`, shared by the index and
+  fetch stages: the match/action engine and loader in `rules.py`; the universal never-fetch
+  guards (media files, image proxies, IP/localhost hosts) stay in code in
+  `url_processing.py`, ahead of the rules.
 - `<data dir>/saved/<slug>/` — one folder per page: `page.html` (raw fetch) or `page.pdf`, plus
   `page.md` once parsed. Slug format is `<domain>-<hash8>`, sanitized to be a safe directory
   name on Linux and Windows.

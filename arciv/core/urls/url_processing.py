@@ -8,9 +8,9 @@ A URL runs through, in order:
    extensions, the Next.js image proxy, IP-address and localhost hosts. These
    are immutable "never fetch this" facts, so they live in code, ahead of any
    rule.
-3. The loaded rules (see :mod:`arciv.core.fetch.rules`): the first matching rule
+3. The loaded rules (see :mod:`arciv.core.urls.rules`): the first matching rule
    skips or rewrites the URL.
-4. :func:`~arciv.core.fetch.url_helpers.canonicalize`, collapsing equivalent
+4. :func:`~arciv.core.urls.url_helpers.canonicalize`, collapsing equivalent
    forms to one identity.
 
 :func:`evaluate_url` returns the full structured verdict (used by
@@ -131,7 +131,7 @@ def process_url(url: str, rules: Sequence[Rule] = ()) -> tuple[str | None, str]:
     Args:
         url: The URL to process.
         rules: Rules to apply, in order (see
-            :func:`arciv.core.fetch.rules.load_rules`). Defaults to none; the
+            :func:`arciv.core.urls.rules.load_rules`). Defaults to none; the
             plumbing skips always run regardless.
 
     Returns:

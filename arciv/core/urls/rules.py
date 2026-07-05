@@ -9,7 +9,7 @@ its actions run, then rule processing stops. See PLAN.md item 3 and the packaged
 Loading puts the user's ``rules.toml`` (in the data dir) ahead of the packaged
 defaults, so a user rule wins on first match. The match/action engine here is
 pure; the structural checks, plumbing guards, and canonicalization around it
-live in :mod:`arciv.core.fetch.url_processing`.
+live in :mod:`arciv.core.urls.url_processing`.
 """
 
 import re

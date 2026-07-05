@@ -3,7 +3,7 @@
 For every link found, a row is stored with the processed URL, the full
 normalized path of the file it was found in, and the time it was indexed.
 Pages are created in pending state; downloading them is the fetch stage's
-job (see ``arciv.core.pipeline.fetch``).
+job (see ``arciv.core.pipeline.fetch_pipeline``).
 """
 
 from collections.abc import Iterable
@@ -15,7 +15,7 @@ from loguru import logger
 from arciv.settings import USER_RULES_PATH
 from arciv.core.db import PageDatabase
 from arciv.core.notes import Note, load_note, load_notes
-from arciv.core.fetch import (
+from arciv.core.urls import (
     load_rules,
     process_url,
     registered_domain,

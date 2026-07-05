@@ -71,7 +71,7 @@ from arciv.settings import (
     configure_logger,
 )
 from arciv.core.db import PageDatabase, Source
-from arciv.core.fetch import evaluate_url, load_rules, process_url
+from arciv.core.urls import evaluate_url, load_rules, process_url
 from arciv.core.pipeline import (
     ArchiveResult,
     archive_source,
