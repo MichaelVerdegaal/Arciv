@@ -181,8 +181,11 @@ def parse_pending(
     """
     pages = db.get_fetched() if reparse else db.get_unparsed()
     count = 0
-    for page in pages:
-        if parse_page(db, page, saved_dir, min_words) is not None:
-            count += 1
+    # Each page's accept/reject is an upsert; bulk() batches those commits
+    # instead of paying a WAL fsync per page.
+    with db.bulk():
+        for page in pages:
+            if parse_page(db, page, saved_dir, min_words) is not None:
+                count += 1
     logger.info(f"Parsed {count} pages")
     return count

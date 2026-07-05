@@ -183,6 +183,57 @@ class TestStateQueries:
         db.upsert(_page("https://example.com/b"))
         assert len(db.get_all()) == 2
 
+    def test_get_many_returns_only_known_urls(self, db):
+        db.upsert(_page("https://example.com/a", title="A"))
+        db.upsert(_page("https://example.com/b", title="B"))
+        pages = db.get_many(
+            ["https://example.com/a", "https://example.com/b", "https://nope.com"]
+        )
+        assert set(pages) == {"https://example.com/a", "https://example.com/b"}
+        assert pages["https://example.com/a"].title == "A"
+
+    def test_get_many_empty_input(self, db):
+        assert db.get_many([]) == {}
+
+    def test_get_many_spans_chunks(self, db):
+        # More URLs than one IN (...) chunk holds still resolve in full.
+        urls = [f"https://example.com/{i}" for i in range(501 + 10)]
+        for url in urls:
+            db.upsert(_page(url))
+        assert set(db.get_many(urls)) == set(urls)
+
+    def test_url_variants_match_page_queries(self, db):
+        db.upsert(_page("https://example.com/todo"))
+        db.upsert(_page("https://example.com/done", parsed_at="2026-06-11T01:00:00"))
+        db.upsert(_page("https://example.com/rejected", fail_reason="too short"))
+        db.upsert(_page("https://example.com/pending", fetched_at=None))
+        assert set(db.get_unfetched_urls()) == {p.url for p in db.get_unfetched()}
+        assert set(db.get_unparsed_urls()) == {p.url for p in db.get_unparsed()}
+        assert set(db.get_fetched_urls()) == {p.url for p in db.get_fetched()}
+        assert set(db.get_all_urls()) == {p.url for p in db.get_all()}
+
+    def test_count_unfetched(self, db):
+        db.upsert(_page("https://example.com/fetched"))
+        db.upsert(
+            _page("https://example.com/failed", fetched_at=None, fail_reason="timeout")
+        )
+        db.upsert(_page("https://example.com/pending", fetched_at=None))
+        assert db.count_unfetched() == 1
+
+    def test_failures_for_scopes_to_given_urls(self, db):
+        db.upsert(
+            _page(
+                "https://a.com/1",
+                domain="a.com",
+                fetched_at=None,
+                fail_reason="timeout",
+            )
+        )
+        db.upsert(_page("https://b.com/2", domain="b.com", fail_reason="too short"))
+        db.upsert(_page("https://c.com/3", domain="c.com"))  # no failure
+        failures = db.failures_for(["https://a.com/1", "https://c.com/3"])
+        assert failures == [("a.com", "timeout")]
+
     def test_fail_summary_covers_fetch_and_parse_failures(self, db):
         # fetch failure: never fetched
         db.upsert(
@@ -278,6 +329,45 @@ class TestStateQueries:
     def test_list_fetched_domain_with_no_matches_is_empty(self, db):
         db.upsert(_page("https://a.com/1", domain="a.com"))
         assert db.list_fetched(domain="nope.com") == []
+
+
+class TestBulkCommits:
+    def _visible_rows(self, db) -> int:
+        """Count committed rows through a second connection, so uncommitted
+        writes on the main connection stay invisible."""
+        other = sqlite3.connect(db.db_path)
+        try:
+            return other.execute("SELECT COUNT(*) FROM pages").fetchone()[0]
+        finally:
+            other.close()
+
+    def test_bulk_defers_commits_until_exit(self, db):
+        with db.bulk():
+            db.upsert(_page("https://example.com/a"))
+            db.upsert(_page("https://example.com/b"))
+            assert self._visible_rows(db) == 0
+        assert self._visible_rows(db) == 2
+
+    def test_bulk_commits_every_n_writes(self, db, monkeypatch):
+        monkeypatch.setattr("arciv.core.db.database._BULK_COMMIT_EVERY", 2)
+        with db.bulk():
+            db.upsert(_page("https://example.com/a"))
+            db.upsert(_page("https://example.com/b"))
+            assert self._visible_rows(db) == 2
+            db.upsert(_page("https://example.com/c"))
+            assert self._visible_rows(db) == 2
+        assert self._visible_rows(db) == 3
+
+    def test_bulk_flushes_completed_work_on_error(self, db):
+        with pytest.raises(RuntimeError):
+            with db.bulk():
+                db.upsert(_page("https://example.com/a"))
+                raise RuntimeError("boom")
+        assert self._visible_rows(db) == 1
+
+    def test_upsert_outside_bulk_commits_immediately(self, db):
+        db.upsert(_page("https://example.com/a"))
+        assert self._visible_rows(db) == 1
 
 
 class TestLinks:

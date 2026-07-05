@@ -38,8 +38,8 @@ def fetch_urls(db: PageDatabase, urls: list[str], refetch: bool = False) -> list
 def fetch_pending(db: PageDatabase, refetch: bool = False) -> list[Page]:
     """Fetch every indexed URL that hasn't been downloaded yet; with refetch,
     re-download every known page, even fetched/failed ones."""
-    pages = db.get_all() if refetch else db.get_unfetched()
-    return fetch_urls(db, [page.url for page in pages], refetch=refetch)
+    urls = db.get_all_urls() if refetch else db.get_unfetched_urls()
+    return fetch_urls(db, urls, refetch=refetch)
 
 
 def report(db: PageDatabase, archived: int, urls: list[str]) -> None:
@@ -51,16 +51,12 @@ def report(db: PageDatabase, archived: int, urls: list[str]) -> None:
     ``arciv status``, not here.
     """
     total = db.count()
-    pending = len(db.get_unfetched())
+    pending = db.count_unfetched()
     logger.info(
         f"Done: {archived} new pages archived, {total} total in DB, {pending} pending"
     )
 
-    run_failures = Counter(
-        (page.domain, page.fail_reason)
-        for url in urls
-        if (page := db.get(url)) is not None and page.fail_reason is not None
-    )
+    run_failures = Counter(db.failures_for(urls))
     if not run_failures:
         return
     failed_total = sum(run_failures.values())

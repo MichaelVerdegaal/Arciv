@@ -119,12 +119,16 @@ def register_urls(db: PageDatabase, urls: list[str]) -> list[str]:
     Returns the processed URLs that were registered; skipped URLs excluded.
     """
     rules = load_rules(USER_RULES_PATH)
-    registered: dict[str, None] = {}
+    registered: dict[str, str] = {}  # processed URL -> first original input
     for url in urls:
         processed, skip_reason = process_url(url, rules)
         if processed is None:
             logger.warning(f"Skipped {url}: {skip_reason}")
             continue
-        registered[processed] = None
-        db.ensure_pages([_page_entry(processed, url)])
+        registered.setdefault(processed, url)
+    # One ensure_pages call (one transaction) for the whole batch, as
+    # _index_notes does, instead of a commit per URL.
+    db.ensure_pages(
+        [_page_entry(processed, original) for processed, original in registered.items()]
+    )
     return list(registered)

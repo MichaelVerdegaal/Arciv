@@ -368,11 +368,7 @@ def _count_failed(db: PageDatabase, urls: list[str]) -> int:
     (fetch failures plus parse rejections/skips), matching the run-scoped
     failure summary ``report`` logs to stderr.
     """
-    return sum(
-        1
-        for url in urls
-        if (page := db.get(url)) is not None and page.fail_reason is not None
-    )
+    return len(db.failures_for(urls))
 
 
 def _emit_archive_summary(db: PageDatabase, result: ArchiveResult) -> None:
@@ -611,8 +607,7 @@ def fetch(
     with PageDatabase(DB_PATH) as db:
         # Select the URLs up front so report() can scope its failure summary
         # to exactly the pages this run touched (refetch reprocesses all).
-        pages = db.get_all() if refetch else db.get_unfetched()
-        urls = [page.url for page in pages]
+        urls = db.get_all_urls() if refetch else db.get_unfetched_urls()
         fetched = fetch_urls(db, urls, refetch=refetch)
         if json_output():
             # fetch neither indexes nor parses, so those counts stay 0.
@@ -637,10 +632,9 @@ def parse(
     """
     with PageDatabase(DB_PATH) as db:
         if json_output():
-            # Capture the pages this run will attempt up front so the failed
+            # Capture the URLs this run will attempt up front so the failed
             # count is scoped to them (rejections set fail_reason).
-            targets = db.get_fetched() if reparse else db.get_unparsed()
-            urls = [page.url for page in targets]
+            urls = db.get_fetched_urls() if reparse else db.get_unparsed_urls()
             parsed = parse_pending(db, reparse=reparse)
             emit_pipeline_summary(parsed=parsed, failed=_count_failed(db, urls))
         else:

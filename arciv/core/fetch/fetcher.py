@@ -86,24 +86,27 @@ class Fetcher:
 
     # -- internal helpers --
 
-    def _needs_fetch(self, processed_url: str, refetch: bool) -> bool:
-        """True for new URLs, pending URLs, and all URLs when refetch is
-        set; already-fetched or failed URLs are skipped."""
+    @staticmethod
+    def _needs_fetch(existing: Page | None, refetch: bool) -> bool:
+        """True for new URLs (no existing row), pending URLs, and all URLs
+        when refetch is set; already-fetched or failed URLs are skipped."""
         if refetch:
             return True
-        existing = self.db.get(processed_url)
         if existing is None:
             return True
         # Pending = not fetched AND no fail reason
         return not existing.fetched and existing.fail_reason is None
 
-    def _entry_for(self, processed_url: str, input_url: str) -> tuple[str, str, str]:
+    @staticmethod
+    def _entry_for(
+        existing: Page | None, processed_url: str, input_url: str
+    ) -> tuple[str, str, str]:
         """Build the (original_url, domain, slug) triple for a URL.
 
-        Prefers the original_url already recorded by the index stage so a
-        fetch of an indexed page doesn't overwrite it with the processed URL.
+        Prefers the original_url already recorded on the existing row by the
+        index stage so a fetch of an indexed page doesn't overwrite it with
+        the processed URL.
         """
-        existing = self.db.get(processed_url)
         original_url = existing.original_url if existing else input_url
         domain = registered_domain(processed_url) or split_url(processed_url)[0]
         slug = slug_for_url(processed_url, domain)
@@ -248,7 +251,7 @@ class Fetcher:
         """
         to_fetch_html: list[tuple[str, str, str, str]] = []
         to_fetch_pdf: list[tuple[str, str, str, str]] = []
-        seen_processed: set[str] = set()
+        candidates: dict[str, str] = {}  # processed URL -> first input URL
 
         # Re-process with the current rules so a rule edited after indexing still
         # applies (and re-canonicalises) before anything is downloaded.
@@ -257,15 +260,19 @@ class Fetcher:
             if processed_url is None:
                 logger.warning(f"Skipped {url}: {skip_reason}")
                 continue
+            candidates.setdefault(processed_url, url)
 
-            if processed_url in seen_processed:
+        # One batched lookup instead of two db.get() round-trips per URL:
+        # the same row answers both "needs fetch?" and "which original_url?".
+        existing_pages = self.db.get_many(list(candidates))
+        for processed_url, input_url in candidates.items():
+            existing = existing_pages.get(processed_url)
+            if not self._needs_fetch(existing, refetch):
                 continue
-            seen_processed.add(processed_url)
 
-            if not self._needs_fetch(processed_url, refetch):
-                continue
-
-            original_url, domain, slug = self._entry_for(processed_url, url)
+            original_url, domain, slug = self._entry_for(
+                existing, processed_url, input_url
+            )
             entry = (processed_url, original_url, domain, slug)
 
             if is_pdf_url(processed_url):
@@ -275,40 +282,46 @@ class Fetcher:
 
         results: list[Page] = []
 
-        # PDFs are downloaded directly over HTTP; no browser needed. Each
-        # download blocks in a worker thread (see _fetch_pdf), so run them
-        # concurrently, capped at max_concurrency to bound open connections.
-        if to_fetch_pdf:
-            pdf_sem = asyncio.Semaphore(self.max_concurrency)
+        # Every fetch outcome is recorded with an upsert; those all run on the
+        # event loop thread (the sqlite connection is single-threaded), so
+        # bulk() batches their commits instead of fsyncing once per page.
+        with self.db.bulk():
+            # PDFs are downloaded directly over HTTP; no browser needed. Each
+            # download blocks in a worker thread (see _fetch_pdf), so run them
+            # concurrently, capped at max_concurrency to bound open connections.
+            if to_fetch_pdf:
+                pdf_sem = asyncio.Semaphore(self.max_concurrency)
 
-            async def _bounded_pdf(entry: tuple[str, str, str, str]) -> Page | None:
-                async with pdf_sem:
-                    return await self._fetch_pdf(*entry)
+                async def _bounded_pdf(
+                    entry: tuple[str, str, str, str],
+                ) -> Page | None:
+                    async with pdf_sem:
+                        return await self._fetch_pdf(*entry)
 
-            pdf_pages = await asyncio.gather(
-                *(_bounded_pdf(entry) for entry in to_fetch_pdf)
-            )
-            results.extend(page for page in pdf_pages if page is not None)
+                pdf_pages = await asyncio.gather(
+                    *(_bounded_pdf(entry) for entry in to_fetch_pdf)
+                )
+                results.extend(page for page in pdf_pages if page is not None)
 
-        if not to_fetch_html:
-            return results
+            if not to_fetch_html:
+                return results
 
-        # HTML URLs share one stealthy browser session. ``disable_resources``
-        # drops images/stylesheets/fonts (and more) for speed; ``network_idle``
-        # lets JS-rendered pages settle so content() isn't an empty shell. The
-        # session's page pool caps concurrency at ``max_pages``; retries are
-        # left to our own transient-only loop below (``retries=1``).
-        async with AsyncStealthySession(
-            max_pages=self.max_concurrency,
-            headless=True,
-            disable_resources=True,
-            network_idle=True,
-            timeout=self.page_timeout,
-            retries=1,
-        ) as session:
-            fetched = await asyncio.gather(
-                *(self._fetch_one(session, *item) for item in to_fetch_html)
-            )
+            # HTML URLs share one stealthy browser session. ``disable_resources``
+            # drops images/stylesheets/fonts (and more) for speed; ``network_idle``
+            # lets JS-rendered pages settle so content() isn't an empty shell. The
+            # session's page pool caps concurrency at ``max_pages``; retries are
+            # left to our own transient-only loop below (``retries=1``).
+            async with AsyncStealthySession(
+                max_pages=self.max_concurrency,
+                headless=True,
+                disable_resources=True,
+                network_idle=True,
+                timeout=self.page_timeout,
+                retries=1,
+            ) as session:
+                fetched = await asyncio.gather(
+                    *(self._fetch_one(session, *item) for item in to_fetch_html)
+                )
 
         results.extend(page for page in fetched if page is not None)
         return results

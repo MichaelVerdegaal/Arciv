@@ -200,31 +200,31 @@ but don't add control flow until a real rule needs it.
   fetcher doesn't fix these; they're payment, consent, or dead-domain problems, not fingerprint
   problems.
 
-## Efficiency follow-ups (next PR)
+## Efficiency follow-ups: implemented
 
-A batch of DB round-trip reductions, deferred to their own PR to keep the diff
-reviewable. All are self-contained and covered by existing tests.
+A batch of DB round-trip reductions, done as their own PR to keep the diff
+reviewable. All were self-contained and covered by existing tests.
 
-- **Duplicate `db.get()` per URL in a fetch batch** (`fetch/fetcher.py`,
-  `_needs_fetch` then `_entry_for`): each URL is looked up twice. Pass the row
-  from the first lookup into the second, or fetch the batch in one
-  `SELECT ... WHERE url IN (...)`.
-- **`register_urls` commits once per URL** (`index/index.py`): `ensure_pages`
-  is called inside the loop with a single-element list, so a few thousand URLs
-  through `arciv get -` means a transaction each. Collect the entries and call
-  `ensure_pages` once after the loop, as `_index_notes` already does.
-- **N+1 queries in run-scoped failure reporting** (`cli/cli.py` `_count_failed`,
-  `pipeline/fetch.py` `report`): a separate `db.get(url)` per touched URL.
-  Replace with one `SELECT domain, fail_reason ... WHERE url IN (...)`.
-- **Per-row commit in batch parse/fetch loops** (`db/database.py` `upsert` via
-  `_accept`/`_reject` and `_store_success`/`_store_failure`): every page commits
-  immediately (a WAL fsync each). Batch the commits (one transaction around the
-  loop, or commit every N pages). The fetch-side commit also runs on the event
-  loop, so batching helps there twice.
-- **Counts materialize full row sets** (`pipeline/fetch.py` `report` uses
-  `len(db.get_unfetched())`; `cli.py` materialises `get_all()`/`get_fetched()`
-  only to read `.url`): add `SELECT COUNT(*)` / `SELECT url` variants so no Page
-  objects are built just to count or list URLs.
+- **Duplicate `db.get()` per URL in a fetch batch** (`fetch/fetcher.py`): the
+  batch now looks every candidate up once via a chunked
+  `get_many(...)` (`SELECT ... WHERE url IN (...)`) and passes the row into
+  both `_needs_fetch` and `_entry_for`.
+- **`register_urls` commits once per URL** (`index/index.py`): entries are
+  collected in the loop and `ensure_pages` is called once after it, as
+  `_index_notes` already did.
+- **N+1 queries in run-scoped failure reporting** (`cli/cli.py`
+  `_count_failed`, `pipeline/fetch.py` `report`): both use one chunked
+  `db.failures_for(urls)` (`SELECT domain, fail_reason ... WHERE url IN (...)`)
+  instead of a `db.get(url)` per touched URL.
+- **Per-row commit in batch parse/fetch loops** (`db/database.py`): a
+  `db.bulk()` context manager defers `upsert` commits and flushes every 50
+  writes (and on exit, including on error), used around the parse loop and the
+  fetch batch — the fetch-side commit also ran on the event loop, so batching
+  helps there twice.
+- **Counts materialize full row sets**: `count_unfetched()` and URL-only
+  variants (`get_all_urls`, `get_unfetched_urls`, `get_fetched_urls`,
+  `get_unparsed_urls`) replace the call sites that built Page objects just to
+  count rows or read `.url`.
 
 ## Parking lot
 
