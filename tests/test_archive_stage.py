@@ -70,7 +70,10 @@ def test_archive_source_indexes_then_archives(db, tmp_path, monkeypatch):
 
     # The note's link was indexed (and attributed to the source) before fetch.
     assert captured["urls"] == ["https://example.com/post"]
-    assert db.get_urls_for_source("notes") == ["https://example.com/post"]
+    attributed = db._conn.execute(
+        "SELECT url FROM links WHERE source_name = 'notes'"
+    ).fetchall()
+    assert [row["url"] for row in attributed] == ["https://example.com/post"]
     assert result.parsed == 1
 
 

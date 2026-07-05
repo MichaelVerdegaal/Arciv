@@ -35,6 +35,15 @@ def _source(name: str = "notes", path: str = "/vault/notes") -> Source:
     return Source(name=name, path=path, added_at="2026-06-11T00:00:00+00:00")
 
 
+def _link_rows(db) -> list[tuple[str, str, str | None]]:
+    """(url, file_path, source_name) link rows, read straight from the table
+    since links have no public read API (test observation only)."""
+    rows = db._conn.execute(
+        "SELECT url, file_path, source_name FROM links ORDER BY file_path, url"
+    ).fetchall()
+    return [(row["url"], row["file_path"], row["source_name"]) for row in rows]
+
+
 class TestCrud:
     def test_upsert_and_get(self, db):
         page = _page("https://example.com/a", title="Hello")
@@ -158,13 +167,13 @@ class TestSlugConstraint:
 
 
 class TestStateQueries:
-    def test_get_unfetched_is_pending_only(self, db):
+    def test_get_unfetched_urls_is_pending_only(self, db):
         db.upsert(_page("https://example.com/fetched"))
         db.upsert(
             _page("https://example.com/failed", fetched_at=None, fail_reason="timeout")
         )
         db.upsert(_page("https://example.com/pending", fetched_at=None))
-        assert {p.url for p in db.get_unfetched()} == {"https://example.com/pending"}
+        assert db.get_unfetched_urls() == ["https://example.com/pending"]
 
     def test_get_unparsed_excludes_rejected_and_parsed(self, db):
         db.upsert(_page("https://example.com/todo"))
@@ -177,11 +186,6 @@ class TestStateQueries:
         db.upsert(_page("https://example.com/rejected", fail_reason="too short"))
         db.upsert(_page("https://example.com/pending", fetched_at=None))
         assert {p.url for p in db.get_fetched()} == {"https://example.com/rejected"}
-
-    def test_get_all(self, db):
-        db.upsert(_page("https://example.com/a"))
-        db.upsert(_page("https://example.com/b"))
-        assert len(db.get_all()) == 2
 
     def test_get_many_returns_only_known_urls(self, db):
         db.upsert(_page("https://example.com/a", title="A"))
@@ -202,15 +206,20 @@ class TestStateQueries:
             db.upsert(_page(url))
         assert set(db.get_many(urls)) == set(urls)
 
-    def test_url_variants_match_page_queries(self, db):
+    def test_url_variants_select_the_right_states(self, db):
         db.upsert(_page("https://example.com/todo"))
         db.upsert(_page("https://example.com/done", parsed_at="2026-06-11T01:00:00"))
         db.upsert(_page("https://example.com/rejected", fail_reason="too short"))
         db.upsert(_page("https://example.com/pending", fetched_at=None))
-        assert set(db.get_unfetched_urls()) == {p.url for p in db.get_unfetched()}
+        assert db.get_unfetched_urls() == ["https://example.com/pending"]
         assert set(db.get_unparsed_urls()) == {p.url for p in db.get_unparsed()}
         assert set(db.get_fetched_urls()) == {p.url for p in db.get_fetched()}
-        assert set(db.get_all_urls()) == {p.url for p in db.get_all()}
+        assert set(db.get_all_urls()) == {
+            "https://example.com/todo",
+            "https://example.com/done",
+            "https://example.com/rejected",
+            "https://example.com/pending",
+        }
 
     def test_count_unfetched(self, db):
         db.upsert(_page("https://example.com/fetched"))
@@ -371,7 +380,7 @@ class TestBulkCommits:
 
 
 class TestLinks:
-    def test_replace_and_get_files_for_url(self, db):
+    def test_replace_inserts_link_rows(self, db):
         db.upsert(_page("https://example.com/a"))
         db.replace_links_for_files(
             ["/vault/note1.md", "/vault/note2.md"],
@@ -380,23 +389,10 @@ class TestLinks:
                 ("https://example.com/a", "/vault/note2.md", None, "t1"),
             ],
         )
-        assert db.get_files_for_url("https://example.com/a") == [
-            "/vault/note1.md",
-            "/vault/note2.md",
+        assert _link_rows(db) == [
+            ("https://example.com/a", "/vault/note1.md", None),
+            ("https://example.com/a", "/vault/note2.md", None),
         ]
-
-    def test_get_urls_for_file(self, db):
-        db.upsert(_page("https://example.com/a"))
-        db.upsert(_page("https://example.com/b"))
-        db.replace_links_for_files(
-            ["/vault/daily.md"],
-            [
-                ("https://example.com/a", "/vault/daily.md", None, "t1"),
-                ("https://example.com/b", "/vault/daily.md", None, "t1"),
-            ],
-        )
-        urls = db.get_urls_for_file("/vault/daily.md")
-        assert set(urls) == {"https://example.com/a", "https://example.com/b"}
 
     def test_reindex_replaces_links_of_same_file(self, db):
         db.upsert(_page("https://example.com/old"))
@@ -409,7 +405,9 @@ class TestLinks:
             ["/vault/daily.md"],
             [("https://example.com/new", "/vault/daily.md", None, "t2")],
         )
-        assert db.get_urls_for_file("/vault/daily.md") == ["https://example.com/new"]
+        assert _link_rows(db) == [
+            ("https://example.com/new", "/vault/daily.md", None),
+        ]
 
     def test_reindex_leaves_other_files_alone(self, db):
         db.upsert(_page("https://example.com/a"))
@@ -421,12 +419,12 @@ class TestLinks:
             ["/vault/two.md"],
             [("https://example.com/a", "/vault/two.md", None, "t2")],
         )
-        assert db.get_files_for_url("https://example.com/a") == [
-            "/vault/one.md",
-            "/vault/two.md",
+        assert _link_rows(db) == [
+            ("https://example.com/a", "/vault/one.md", None),
+            ("https://example.com/a", "/vault/two.md", None),
         ]
 
-    def test_get_urls_for_source(self, db):
+    def test_links_carry_source_attribution(self, db):
         db.add_source(_source("notes"))
         db.upsert(_page("https://example.com/a"))
         db.upsert(_page("https://example.com/b"))
@@ -437,31 +435,10 @@ class TestLinks:
                 ("https://example.com/b", "/vault/notes/x.md", None, "t1"),
             ],
         )
-        assert db.get_urls_for_source("notes") == ["https://example.com/a"]
-
-    def test_list_source_links_pairs_files_with_pages(self, db):
-        db.add_source(_source("notes"))
-        db.upsert(_page("https://example.com/a", title="Page A"))
-        db.upsert(_page("https://example.com/b", title="Page B"))
-        db.replace_links_for_files(
-            ["/vault/notes/one.md", "/vault/notes/two.md"],
-            [
-                ("https://example.com/a", "/vault/notes/one.md", "notes", "t1"),
-                ("https://example.com/b", "/vault/notes/one.md", "notes", "t1"),
-                ("https://example.com/a", "/vault/notes/two.md", "notes", "t1"),
-            ],
-        )
-        links = db.list_source_links("notes")
-        # Ordered by file path, then URL; each pair carries the full Page.
-        assert [(fp, page.url) for fp, page in links] == [
-            ("/vault/notes/one.md", "https://example.com/a"),
-            ("/vault/notes/one.md", "https://example.com/b"),
-            ("/vault/notes/two.md", "https://example.com/a"),
+        assert _link_rows(db) == [
+            ("https://example.com/a", "/vault/notes/x.md", "notes"),
+            ("https://example.com/b", "/vault/notes/x.md", None),
         ]
-        assert links[0][1].title == "Page A"
-
-    def test_list_source_links_empty_for_unknown_source(self, db):
-        assert db.list_source_links("ghost") == []
 
     def test_link_requires_existing_page(self, db):
         # foreign_keys=ON: links cannot point at unknown pages
@@ -501,166 +478,14 @@ class TestSources:
         )
         db.remove_source("notes")
         # Link row survives, but no longer attributed to the source
-        assert db.get_files_for_url("https://example.com/a") == ["/vault/notes/x.md"]
-        assert db.get_urls_for_source("notes") == []
+        assert _link_rows(db) == [
+            ("https://example.com/a", "/vault/notes/x.md", None),
+        ]
 
     def test_list_sources_ordered_by_name(self, db):
         db.add_source(_source(name="zeta", path="/z"))
         db.add_source(_source(name="alpha", path="/a"))
         assert [s.name for s in db.list_sources()] == ["alpha", "zeta"]
-
-
-class TestPageState:
-    def test_parsed_page_is_done(self):
-        page = _page("https://x.com/a", parsed_at="2026-06-11T00:00:00")
-        assert page.state == "done"
-
-    def test_fetch_failure_is_failed(self):
-        page = _page("https://x.com/a", fetched_at=None, fail_reason="timeout")
-        assert page.state == "failed"
-
-    def test_too_short_rejection_is_skipped(self):
-        # fetched and extracted fine, just below the word threshold
-        page = _page(
-            "https://x.com/a", fail_reason="too short (12 words from 4 KB html)"
-        )
-        assert page.state == "skipped"
-
-    def test_other_parse_rejection_is_failed(self):
-        # fetched but rejected for a real error: fetched_at set AND fail_reason set
-        page = _page("https://x.com/a", fail_reason="extraction failed")
-        assert page.state == "failed"
-
-    def test_unfetched_is_pending(self):
-        assert _page("https://x.com/a", fetched_at=None).state == "pending"
-
-    def test_awaiting_parse_is_fetched(self):
-        # fetched, not yet parsed, no failure: raw content is on disk
-        assert _page("https://x.com/a").state == "fetched"
-
-
-class TestGetBySlug:
-    def test_returns_page_with_matching_slug(self, db):
-        db.upsert(_page("https://example.com/a", slug="example.com-slugaaaa"))
-        found = db.get_by_slug("example.com-slugaaaa")
-        assert found is not None
-        assert found.url == "https://example.com/a"
-
-    def test_unknown_slug_returns_none(self, db):
-        assert db.get_by_slug("nope-00000000") is None
-
-
-class TestListPages:
-    def _seed_mixed(self, db):
-        db.upsert(
-            _page(
-                "https://a.com/parsed",
-                domain="a.com",
-                fetched_at="2026-06-02T00:00:00",
-                parsed_at="2026-06-11T00:00:00",
-                word_count=300,
-            )
-        )
-        db.upsert(_page("https://a.com/pending", domain="a.com", fetched_at=None))
-        db.upsert(
-            _page(
-                "https://b.com/failed",
-                domain="b.com",
-                fetched_at=None,
-                fail_reason="timeout",
-            )
-        )
-        db.upsert(
-            _page(
-                "https://c.com/skipped",
-                domain="c.com",
-                fail_reason="too short (5 words from 2 KB html)",
-            )
-        )
-        # fetched but not parsed yet, no failure (on its own domain so the
-        # a.com domain filter test is unaffected)
-        db.upsert(_page("https://d.com/fetched", domain="d.com"))
-
-    def test_includes_pending_failed_and_skipped(self, db):
-        self._seed_mixed(db)
-        assert {p.url for p in db.list_pages()} == {
-            "https://a.com/parsed",
-            "https://a.com/pending",
-            "https://b.com/failed",
-            "https://c.com/skipped",
-            "https://d.com/fetched",
-        }
-
-    def test_status_done(self, db):
-        self._seed_mixed(db)
-        assert [p.url for p in db.list_pages(status="done")] == ["https://a.com/parsed"]
-
-    def test_status_failed_excludes_skipped(self, db):
-        self._seed_mixed(db)
-        # "too short" rows are skipped, not failed, so failed is only the timeout
-        assert [p.url for p in db.list_pages(status="failed")] == [
-            "https://b.com/failed"
-        ]
-
-    def test_status_skipped(self, db):
-        self._seed_mixed(db)
-        assert [p.url for p in db.list_pages(status="skipped")] == [
-            "https://c.com/skipped"
-        ]
-
-    def test_status_pending(self, db):
-        self._seed_mixed(db)
-        # pending is now only the not-yet-fetched page; the fetched-but-unparsed
-        # one is its own "fetched" state, not pending.
-        assert [p.url for p in db.list_pages(status="pending")] == [
-            "https://a.com/pending"
-        ]
-
-    def test_status_fetched(self, db):
-        self._seed_mixed(db)
-        assert [p.url for p in db.list_pages(status="fetched")] == [
-            "https://d.com/fetched"
-        ]
-
-    def test_status_filter_matches_page_state(self, db):
-        # The SQL filter and Page.state are one definition: every row a
-        # status returns must report that same state.
-        self._seed_mixed(db)
-        for status in ("done", "fetched", "failed", "skipped", "pending"):
-            for page in db.list_pages(status=status):
-                assert page.state == status
-
-    def test_domain_filter(self, db):
-        self._seed_mixed(db)
-        assert {p.url for p in db.list_pages(domain="a.com")} == {
-            "https://a.com/parsed",
-            "https://a.com/pending",
-        }
-
-    def test_sort_by_word_count_desc(self, db):
-        db.upsert(_page("https://x.com/lo", word_count=10))
-        db.upsert(_page("https://x.com/hi", word_count=900))
-        db.upsert(_page("https://x.com/mid", word_count=100))
-        ordered = [p.url for p in db.list_pages(sort="word_count", order="desc")]
-        assert ordered == ["https://x.com/hi", "https://x.com/mid", "https://x.com/lo"]
-
-    def test_sort_by_title_asc(self, db):
-        db.upsert(_page("https://x.com/b", title="Banana"))
-        db.upsert(_page("https://x.com/a", title="Apple"))
-        ordered = [p.title for p in db.list_pages(sort="title", order="asc")]
-        assert ordered == ["Apple", "Banana"]
-
-    def test_limit_and_offset_page_through_results(self, db):
-        for i in range(5):
-            db.upsert(_page(f"https://x.com/{i}", word_count=i))
-        page1 = db.list_pages(sort="word_count", order="asc", limit=2, offset=0)
-        page2 = db.list_pages(sort="word_count", order="asc", limit=2, offset=2)
-        assert [p.word_count for p in page1] == [0, 1]
-        assert [p.word_count for p in page2] == [2, 3]
-
-    def test_invalid_sort_raises(self, db):
-        with pytest.raises(ValueError):
-            db.list_pages(sort="url; DROP TABLE pages")
 
 
 class TestPrune:
@@ -685,8 +510,7 @@ class TestPrune:
         self._seed(db)
         slugs = db.prune_pages("missing")
         assert slugs == [slug_for_url("https://a.com/failed-orphan")]
-        remaining = {p.url for p in db.get_all()}
-        assert remaining == {
+        assert set(db.get_all_urls()) == {
             "https://a.com/ok",
             "https://a.com/failed-linked",
         }
@@ -698,89 +522,26 @@ class TestPrune:
             slug_for_url("https://a.com/failed-linked"),
             slug_for_url("https://a.com/failed-orphan"),
         }
-        assert {p.url for p in db.get_all()} == {"https://a.com/ok"}
+        assert db.get_all_urls() == ["https://a.com/ok"]
         # the link to the deleted page is gone too (FK has no cascade)
-        assert db.get_files_for_url("https://a.com/failed-linked") == []
+        assert _link_rows(db) == []
 
     def test_all_drops_everything(self, db):
         self._seed(db)
         slugs = db.prune_pages("all")
         assert len(slugs) == 3
-        assert db.get_all() == []
+        assert db.get_all_urls() == []
 
     def test_dry_run_deletes_nothing(self, db):
         self._seed(db)
-        before = {p.url for p in db.get_all()}
+        before = set(db.get_all_urls())
         slugs = db.prune_pages("failed", dry_run=True)
         assert set(slugs) == {
             slug_for_url("https://a.com/failed-linked"),
             slug_for_url("https://a.com/failed-orphan"),
         }
-        assert {p.url for p in db.get_all()} == before
+        assert set(db.get_all_urls()) == before
 
     def test_invalid_mode_raises(self, db):
         with pytest.raises(ValueError):
             db.prune_pages("everything")
-
-    def test_invalid_order_raises(self, db):
-        with pytest.raises(ValueError):
-            db.list_pages(order="sideways")
-
-    def test_invalid_status_raises(self, db):
-        with pytest.raises(ValueError):
-            db.list_pages(status="bogus")
-
-
-class TestDomainCounts:
-    def test_counts_pages_per_domain_biggest_first(self, db):
-        db.upsert(_page("https://a.com/1", domain="a.com"))
-        db.upsert(_page("https://a.com/2", domain="a.com"))
-        db.upsert(_page("https://b.com/1", domain="b.com"))
-        assert db.domain_counts() == [("a.com", 2), ("b.com", 1)]
-
-    def test_counts_every_state_not_just_done(self, db):
-        db.upsert(_page("https://a.com/done", domain="a.com"))
-        db.upsert(_page("https://a.com/pending", domain="a.com", fetched_at=None))
-        db.upsert(
-            _page(
-                "https://a.com/failed",
-                domain="a.com",
-                fetched_at=None,
-                fail_reason="x",
-            )
-        )
-        assert db.domain_counts() == [("a.com", 3)]
-
-    def test_empty_db_is_empty(self, db):
-        assert db.domain_counts() == []
-
-
-class TestListSourcesWithCounts:
-    def test_counts_distinct_pages_per_source(self, db):
-        db.add_source(_source("notes", "/vault/notes"))
-        db.upsert(_page("https://a.com/1"))
-        db.upsert(_page("https://a.com/2"))
-        db.replace_links_for_files(
-            ["/vault/notes/x.md", "/vault/notes/y.md"],
-            [
-                ("https://a.com/1", "/vault/notes/x.md", "notes", "t1"),
-                # the same URL from a second file must not be double-counted
-                ("https://a.com/1", "/vault/notes/y.md", "notes", "t1"),
-                ("https://a.com/2", "/vault/notes/y.md", "notes", "t1"),
-            ],
-        )
-        result = db.list_sources_with_counts()
-        assert len(result) == 1
-        source, count = result[0]
-        assert source.name == "notes"
-        assert source.path == "/vault/notes"
-        assert count == 2
-
-    def test_source_with_no_links_counts_zero(self, db):
-        db.add_source(_source("empty", "/vault/empty"))
-        assert db.list_sources_with_counts() == [(_source("empty", "/vault/empty"), 0)]
-
-    def test_ordered_by_name(self, db):
-        db.add_source(_source("zeta", "/z"))
-        db.add_source(_source("alpha", "/a"))
-        assert [s.name for s, _ in db.list_sources_with_counts()] == ["alpha", "zeta"]

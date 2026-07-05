@@ -35,13 +35,6 @@ def fetch_urls(db: PageDatabase, urls: list[str], refetch: bool = False) -> list
     return fetcher.fetch_batch(urls, refetch=refetch)
 
 
-def fetch_pending(db: PageDatabase, refetch: bool = False) -> list[Page]:
-    """Fetch every indexed URL that hasn't been downloaded yet; with refetch,
-    re-download every known page, even fetched/failed ones."""
-    urls = db.get_all_urls() if refetch else db.get_unfetched_urls()
-    return fetch_urls(db, urls, refetch=refetch)
-
-
 def report(db: PageDatabase, archived: int, urls: list[str]) -> None:
     """Log totals after a run that archived ``archived`` pages.
 

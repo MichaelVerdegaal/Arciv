@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Self
 
-from .models import SKIP_REASON_PREFIX, Page, Source
+from .models import Page, Source
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS pages (
@@ -63,28 +63,6 @@ ON CONFLICT(url) DO UPDATE SET
     parsed_at    = excluded.parsed_at;
 """
 
-# Matches the fail_reason of a "skipped" page (too-short content). Kept next to
-# the predicates so the SQL filter and Page.state classify identically; the
-# trailing % lets it match the full "too short (12 words ...)" message.
-_SKIP_LIKE = f"{SKIP_REASON_PREFIX}%"
-
-# Maps a coarse UI state (see Page.state) to the SQL predicate that selects it,
-# so the row-level mapping in Page.state and the query-level filter in
-# list_pages stay a single definition. The five are mutually exclusive: a
-# parsed page is never also failed, "skipped" carves the too-short rejections
-# out of "failed", and "fetched" (raw content on disk, still unparsed) is split
-# from "pending" (not fetched yet).
-_STATE_PREDICATES: dict[str, str] = {
-    "done": "parsed_at IS NOT NULL",
-    "skipped": f"parsed_at IS NULL AND fail_reason LIKE '{_SKIP_LIKE}'",
-    "failed": (
-        "parsed_at IS NULL AND fail_reason IS NOT NULL "
-        f"AND fail_reason NOT LIKE '{_SKIP_LIKE}'"
-    ),
-    "fetched": "fetched_at IS NOT NULL AND parsed_at IS NULL AND fail_reason IS NULL",
-    "pending": "fetched_at IS NULL AND fail_reason IS NULL",
-}
-
 # Maps an `arciv prune` mode to the WHERE clause selecting the rows it removes.
 # "missing" is the narrow, safe default (dead failed rows with no surviving
 # link); "all" is the wipe. Fixed strings, never built from user input, so they
@@ -94,16 +72,6 @@ _PRUNE_PREDICATES: dict[str, str] = {
     "failed": "fail_reason IS NOT NULL",
     "all": "1 = 1",
 }
-
-# Columns list_pages may sort by, allow-listed so request input never reaches
-# the SQL string directly. fetched_at and title may be NULL (pending/unparsed
-# rows); SQLite orders NULLs first ascending, last descending.
-_SORT_COLUMNS: dict[str, str] = {
-    "fetched_at": "fetched_at",
-    "title": "title",
-    "word_count": "word_count",
-}
-
 
 # SQLite caps the number of bound parameters per statement (999 in older
 # builds), so ``IN (...)`` queries over arbitrary URL lists run in chunks
@@ -300,25 +268,6 @@ class PageDatabase:
             pages.update((row["url"], self._row_to_page(row)) for row in rows)
         return pages
 
-    def get_by_slug(self, slug: str) -> Page | None:
-        """Get a page by its slug (the ``saved/<slug>/`` folder name), or
-        None if no page has it.
-
-        The slug has a UNIQUE index, so this matches at most one row. The
-        backend uses it to resolve ``/page/<slug>`` to a page.
-        """
-        row = self._conn.execute(
-            "SELECT * FROM pages WHERE slug = ?", (slug,)
-        ).fetchone()
-        return self._row_to_page(row) if row else None
-
-    def get_unfetched(self) -> list[Page]:
-        """Get all pending pages: no fetched_at and no fail_reason."""
-        rows = self._conn.execute(
-            "SELECT * FROM pages WHERE fetched_at IS NULL AND fail_reason IS NULL"
-        ).fetchall()
-        return [self._row_to_page(row) for row in rows]
-
     def get_unparsed(self) -> list[Page]:
         """Get pages awaiting parse: fetched_at set, no parsed_at, no
         fail_reason."""
@@ -334,11 +283,6 @@ class PageDatabase:
         rows = self._conn.execute(
             "SELECT * FROM pages WHERE fetched_at IS NOT NULL"
         ).fetchall()
-        return [self._row_to_page(row) for row in rows]
-
-    def get_all(self) -> list[Page]:
-        """Get all pages in the database."""
-        rows = self._conn.execute("SELECT * FROM pages").fetchall()
         return [self._row_to_page(row) for row in rows]
 
     def _urls(self, where: str) -> list[str]:
@@ -434,67 +378,6 @@ class PageDatabase:
         ).fetchall()
         return [self._row_to_page(row) for row in rows]
 
-    def list_pages(
-        self,
-        status: str | None = None,
-        domain: str | None = None,
-        sort: str = "fetched_at",
-        order: str = "desc",
-        limit: int | None = None,
-        offset: int = 0,
-    ) -> list[Page]:
-        """List pages for the browse view: filtered, sorted, and paged.
-
-        Unlike list_fetched, this includes pending and failed pages, so the
-        archive view can show a page the moment it is registered.
-
-        Args:
-            status: Restrict to one coarse state ("done", "failed", or
-                "pending"; see Page.state). None returns every state.
-            domain: Restrict to one exact registered domain (e.g. medium.com).
-            sort: Column to order by: "fetched_at", "title", or "word_count".
-            order: "asc" or "desc" (default, newest/highest first).
-            limit: Maximum rows to return; None returns all matching rows.
-            offset: Rows to skip before collecting, for paging.
-
-        Returns:
-            The matching pages. The primary key (url) breaks sort ties so
-            paging stays stable across requests.
-
-        Raises:
-            ValueError: If status, sort, or order is not a recognized value.
-        """
-        if sort not in _SORT_COLUMNS:
-            raise ValueError(f"Invalid sort column: {sort!r}")
-        direction = order.lower()
-        if direction not in ("asc", "desc"):
-            raise ValueError(f"Invalid sort order: {order!r}")
-
-        clauses: list[str] = []
-        params: list[object] = []
-        if status is not None:
-            if status not in _STATE_PREDICATES:
-                raise ValueError(f"Invalid status: {status!r}")
-            clauses.append(f"({_STATE_PREDICATES[status]})")
-        if domain is not None:
-            clauses.append("domain = ?")
-            params.append(domain)
-
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        # sort and order are validated against fixed allow-lists above, so
-        # they are safe to interpolate; user-supplied values are bound params.
-        sql_dir = direction.upper()
-        order_by = f"ORDER BY {_SORT_COLUMNS[sort]} {sql_dir}, url {sql_dir}"
-
-        # SQLite reads a negative LIMIT as "no limit"; OFFSET still applies.
-        params.append(-1 if limit is None else limit)
-        params.append(offset)
-        rows = self._conn.execute(
-            f"SELECT * FROM pages {where} {order_by} LIMIT ? OFFSET ?",
-            params,
-        ).fetchall()
-        return [self._row_to_page(row) for row in rows]
-
     def prune_pages(self, mode: str, dry_run: bool = False) -> list[str]:
         """Delete page rows (and their link rows) selected by ``mode``.
 
@@ -573,16 +456,6 @@ class PageDatabase:
         ).fetchall()
         return [(row["domain"], row["fail_reason"], row["n"]) for row in rows]
 
-    def domain_counts(self) -> list[tuple[str, int]]:
-        """Count pages per domain, biggest groups first (domain name breaks
-        ties). Covers every pipeline state, so the browse-by-domain view
-        counts pending and failed pages too."""
-        rows = self._conn.execute(
-            "SELECT domain, COUNT(*) AS n FROM pages "
-            "GROUP BY domain ORDER BY n DESC, domain ASC"
-        ).fetchall()
-        return [(row["domain"], row["n"]) for row in rows]
-
     # -- indexed links --
 
     def replace_links_for_files(
@@ -609,50 +482,6 @@ class PageDatabase:
             link_entries,
         )
         self._conn.commit()
-
-    def get_files_for_url(self, url: str) -> list[str]:
-        """Get the sorted, full normalized paths of files the URL was
-        indexed from."""
-        rows = self._conn.execute(
-            "SELECT file_path FROM links WHERE url = ? ORDER BY file_path",
-            (url,),
-        ).fetchall()
-        return [row["file_path"] for row in rows]
-
-    def get_urls_for_file(self, file_path: str) -> list[str]:
-        """Get the sorted processed URLs indexed from a file (full
-        normalized path)."""
-        rows = self._conn.execute(
-            "SELECT url FROM links WHERE file_path = ? ORDER BY url",
-            (file_path,),
-        ).fetchall()
-        return [row["url"] for row in rows]
-
-    def get_urls_for_source(self, source_name: str) -> list[str]:
-        """Get the sorted, distinct processed URLs indexed from a
-        registered source."""
-        rows = self._conn.execute(
-            "SELECT DISTINCT url FROM links WHERE source_name = ? ORDER BY url",
-            (source_name,),
-        ).fetchall()
-        return [row["url"] for row in rows]
-
-    def list_source_links(self, source_name: str) -> list[tuple[str, Page]]:
-        """List a source's indexed links as (file_path, Page) pairs.
-
-        Joins each link row of the source to its page, ordered by file path
-        then URL, so the web source-detail view can group links by the note
-        file they were found in and show each page's archival state. A URL
-        linked from two files in the source appears once per file.
-        """
-        rows = self._conn.execute(
-            "SELECT l.file_path AS file_path, p.* "
-            "FROM links l JOIN pages p ON p.url = l.url "
-            "WHERE l.source_name = ? "
-            "ORDER BY l.file_path, p.url",
-            (source_name,),
-        ).fetchall()
-        return [(row["file_path"], self._row_to_page(row)) for row in rows]
 
     # -- sources --
 
@@ -731,27 +560,5 @@ class PageDatabase:
         rows = self._conn.execute("SELECT * FROM sources ORDER BY name").fetchall()
         return [
             Source(name=row["name"], path=row["path"], added_at=row["added_at"])
-            for row in rows
-        ]
-
-    def list_sources_with_counts(self) -> list[tuple[Source, int]]:
-        """List sources, each paired with the number of distinct pages it
-        indexed.
-
-        Like list_sources, but every source carries a count of the distinct
-        page URLs linked from it (0 if it has indexed nothing yet). Ordered by
-        name; a LEFT JOIN keeps sources that have no links.
-        """
-        rows = self._conn.execute(
-            "SELECT s.name, s.path, s.added_at, COUNT(DISTINCT l.url) AS n "
-            "FROM sources s LEFT JOIN links l ON l.source_name = s.name "
-            "GROUP BY s.name, s.path, s.added_at "
-            "ORDER BY s.name"
-        ).fetchall()
-        return [
-            (
-                Source(name=row["name"], path=row["path"], added_at=row["added_at"]),
-                row["n"],
-            )
             for row in rows
         ]

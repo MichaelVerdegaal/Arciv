@@ -26,6 +26,15 @@ def _write_note(directory, name: str, body: str):
     return path
 
 
+def _link_rows(db) -> list[tuple[str, str, str | None]]:
+    """(url, file_path, source_name) link rows, read straight from the table
+    since links have no public read API (test observation only)."""
+    rows = db._conn.execute(
+        "SELECT url, file_path, source_name FROM links ORDER BY file_path, url"
+    ).fetchall()
+    return [(row["url"], row["file_path"], row["source_name"]) for row in rows]
+
+
 class TestIndexFile:
     def test_registers_pending_pages(self, db, tmp_path):
         note = _write_note(
@@ -40,15 +49,18 @@ class TestIndexFile:
     def test_stores_normalized_path_and_timestamp(self, db, tmp_path):
         note = _write_note(tmp_path, "daily.md", "https://example.com/post")
         index_file(db, note)
-        files = db.get_files_for_url("https://example.com/post")
-        assert files == [str(note.resolve())]
+        assert _link_rows(db) == [
+            ("https://example.com/post", str(note.resolve()), None)
+        ]
 
     def test_reindex_drops_removed_links(self, db, tmp_path):
         note = _write_note(tmp_path, "daily.md", "https://example.com/old")
         index_file(db, note)
         note.write_text("https://example.com/new", encoding="utf-8")
         index_file(db, note)
-        assert db.get_urls_for_file(str(note.resolve())) == ["https://example.com/new"]
+        assert _link_rows(db) == [
+            ("https://example.com/new", str(note.resolve()), None)
+        ]
 
 
 class TestIndexDirectory:
@@ -63,7 +75,7 @@ class TestIndexDirectory:
         _write_note(tmp_path, "b.md", "https://example.com/shared")
         urls = index_directory(db, tmp_path)
         assert urls == ["https://example.com/shared"]
-        assert len(db.get_files_for_url("https://example.com/shared")) == 2
+        assert len(_link_rows(db)) == 2
 
 
 class TestIndexSource:
@@ -77,13 +89,17 @@ class TestIndexSource:
         _write_note(tmp_path, "a.md", "https://example.com/a")
         db.add_source(Source(name="notes", path=str(tmp_path), added_at="t"))
         index_source(db, "notes")
-        assert db.get_urls_for_source("notes") == ["https://example.com/a"]
+        assert [(url, name) for url, _, name in _link_rows(db)] == [
+            ("https://example.com/a", "notes")
+        ]
 
     def test_adhoc_directory_links_have_no_source(self, db, tmp_path):
         _write_note(tmp_path, "a.md", "https://example.com/a")
         db.add_source(Source(name="notes", path=str(tmp_path), added_at="t"))
         index_directory(db, tmp_path)  # ad-hoc, not via the source
-        assert db.get_urls_for_source("notes") == []
+        assert [(url, name) for url, _, name in _link_rows(db)] == [
+            ("https://example.com/a", None)
+        ]
 
     def test_unknown_source_raises(self, db):
         with pytest.raises(KeyError):
@@ -104,7 +120,7 @@ class TestRegisterUrls:
         urls = register_urls(db, ["https://example.com/direct"])
         assert urls == ["https://example.com/direct"]
         assert db.get("https://example.com/direct") is not None
-        assert db.get_files_for_url("https://example.com/direct") == []
+        assert _link_rows(db) == []
 
     def test_skipped_urls_are_excluded(self, db):
         urls = register_urls(db, ["https://example.com/image.png"])

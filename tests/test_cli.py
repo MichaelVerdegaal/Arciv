@@ -301,7 +301,7 @@ class TestPrune:
         assert result.exit_code == 0
         assert "Pruned 1 page(s)" in result.output
         with PageDatabase(data_dir / "arciv.db") as db:
-            assert {p.url for p in db.get_all()} == {"https://example.com/ok"}
+            assert db.get_all_urls() == ["https://example.com/ok"]
         assert not (data_dir / "saved" / bad.slug).exists()
         assert (data_dir / "saved" / ok.slug).exists()
 
@@ -319,7 +319,7 @@ class TestPrune:
         result = runner.invoke(cli_module.cli, ["prune", "all"], input="n\n")
         assert result.exit_code != 0
         with PageDatabase(data_dir / "arciv.db") as db:
-            assert len(db.get_all()) == 2
+            assert db.count() == 2
 
     def test_invalid_mode_is_usage_error(self, runner, data_dir):
         result = runner.invoke(cli_module.cli, ["prune", "everything"])
