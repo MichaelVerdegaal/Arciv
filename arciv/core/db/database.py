@@ -1,6 +1,8 @@
 """SQLite database for tracked pages, indexed links, and sources."""
 
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Self
@@ -103,9 +105,26 @@ _SORT_COLUMNS: dict[str, str] = {
 }
 
 
+# SQLite caps the number of bound parameters per statement (999 in older
+# builds), so ``IN (...)`` queries over arbitrary URL lists run in chunks
+# comfortably under that floor.
+_SQL_VAR_LIMIT = 500
+
+# How many deferred writes a bulk() block accumulates before committing.
+# Each commit is a WAL fsync, so this trades a bounded amount of redoable
+# work on a crash against thousands of per-row fsyncs in a batch run.
+_BULK_COMMIT_EVERY = 50
+
+
 def _now() -> str:
     """Current UTC time as an ISO string."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def _chunked(items: list[str], size: int = _SQL_VAR_LIMIT) -> Iterator[list[str]]:
+    """Split a list into chunks that fit SQLite's bound-parameter cap."""
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
 
 
 class PageDatabase:
@@ -122,6 +141,10 @@ class PageDatabase:
 
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
+        # Bulk-commit state (see bulk()): depth of nested bulk() blocks and
+        # how many per-row writes are awaiting a commit.
+        self._bulk_depth = 0
+        self._pending_writes = 0
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
@@ -171,6 +194,37 @@ class PageDatabase:
 
     # -- helpers --
 
+    def _commit(self) -> None:
+        """Commit now, unless an enclosing bulk() block is deferring commits;
+        then only commit once _BULK_COMMIT_EVERY writes have accumulated."""
+        if self._bulk_depth == 0:
+            self._conn.commit()
+            return
+        self._pending_writes += 1
+        if self._pending_writes >= _BULK_COMMIT_EVERY:
+            self._conn.commit()
+            self._pending_writes = 0
+
+    @contextmanager
+    def bulk(self) -> Iterator[None]:
+        """Batch the commits of per-row writes made inside the block.
+
+        Every ``upsert`` normally commits immediately (a WAL fsync each),
+        which dominates batch fetch/parse loops. Inside a ``bulk()`` block
+        those commits are deferred and flushed every ``_BULK_COMMIT_EVERY``
+        writes, so a crash loses at most that many rows' progress. The
+        remainder is committed when the block exits — also on error, since
+        the rows already written record completed work.
+        """
+        self._bulk_depth += 1
+        try:
+            yield
+        finally:
+            self._bulk_depth -= 1
+            if self._bulk_depth == 0 and self._pending_writes:
+                self._conn.commit()
+                self._pending_writes = 0
+
     @staticmethod
     def _row_to_page(row: sqlite3.Row) -> Page:
         """Convert a database row to a Page object."""
@@ -211,7 +265,7 @@ class PageDatabase:
                 page.parsed_at,
             ),
         )
-        self._conn.commit()
+        self._commit()
 
     def ensure_pages(self, url_entries: list[tuple[str, str, str, str]]) -> None:
         """Create pending page entries for (url, original_url, domain, slug)
@@ -230,6 +284,21 @@ class PageDatabase:
         """Get a page by its processed/normalized URL (primary key)."""
         row = self._conn.execute("SELECT * FROM pages WHERE url = ?", (url,)).fetchone()
         return self._row_to_page(row) if row else None
+
+    def get_many(self, urls: list[str]) -> dict[str, Page]:
+        """Get pages for the given URLs in one query per chunk, keyed by URL.
+
+        URLs with no page row are simply absent from the result, so callers
+        use ``.get(url)`` where they would have checked ``get(url) is None``.
+        """
+        pages: dict[str, Page] = {}
+        for chunk in _chunked(urls):
+            placeholders = ",".join("?" * len(chunk))
+            rows = self._conn.execute(
+                f"SELECT * FROM pages WHERE url IN ({placeholders})", chunk
+            ).fetchall()
+            pages.update((row["url"], self._row_to_page(row)) for row in rows)
+        return pages
 
     def get_by_slug(self, slug: str) -> Page | None:
         """Get a page by its slug (the ``saved/<slug>/`` folder name), or
@@ -272,9 +341,42 @@ class PageDatabase:
         rows = self._conn.execute("SELECT * FROM pages").fetchall()
         return [self._row_to_page(row) for row in rows]
 
+    def _urls(self, where: str) -> list[str]:
+        """URLs of the pages matching a fixed WHERE clause (never user input),
+        without building Page objects."""
+        rows = self._conn.execute(f"SELECT url FROM pages WHERE {where}").fetchall()
+        return [row["url"] for row in rows]
+
+    def get_unfetched_urls(self) -> list[str]:
+        """URLs of all pending pages (see get_unfetched), URLs only."""
+        return self._urls("fetched_at IS NULL AND fail_reason IS NULL")
+
+    def get_unparsed_urls(self) -> list[str]:
+        """URLs of pages awaiting parse (see get_unparsed), URLs only."""
+        return self._urls(
+            "fetched_at IS NOT NULL AND parsed_at IS NULL AND fail_reason IS NULL"
+        )
+
+    def get_fetched_urls(self) -> list[str]:
+        """URLs of all fetched pages (see get_fetched), URLs only."""
+        return self._urls("fetched_at IS NOT NULL")
+
+    def get_all_urls(self) -> list[str]:
+        """URLs of every page in the database."""
+        return self._urls("1 = 1")
+
     def count(self) -> int:
         """Count total pages."""
         row = self._conn.execute("SELECT COUNT(*) AS n FROM pages").fetchone()
+        return row["n"]
+
+    def count_unfetched(self) -> int:
+        """Count pending pages (no fetched_at, no fail_reason) without
+        materializing their rows."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM pages "
+            "WHERE fetched_at IS NULL AND fail_reason IS NULL"
+        ).fetchone()
         return row["n"]
 
     def status_counts(self) -> dict[str, int]:
@@ -441,6 +543,25 @@ class PageDatabase:
         self._conn.execute(f"DELETE FROM pages WHERE {where}")
         self._conn.commit()
         return slugs
+
+    def failures_for(self, urls: list[str]) -> list[tuple[str, str]]:
+        """The (domain, fail_reason) of each given URL that currently has a
+        failure recorded, in one query per chunk.
+
+        Backs the run-scoped failure reports: callers pass the URLs a run
+        touched and count or group the failures among them, instead of a
+        ``get()`` round-trip per URL.
+        """
+        failures: list[tuple[str, str]] = []
+        for chunk in _chunked(urls):
+            placeholders = ",".join("?" * len(chunk))
+            rows = self._conn.execute(
+                "SELECT domain, fail_reason FROM pages "
+                f"WHERE fail_reason IS NOT NULL AND url IN ({placeholders})",
+                chunk,
+            ).fetchall()
+            failures.extend((row["domain"], row["fail_reason"]) for row in rows)
+        return failures
 
     def fail_summary(self) -> list[tuple[str | None, str, int]]:
         """Summarize failures as (domain, fail_reason, count) tuples,

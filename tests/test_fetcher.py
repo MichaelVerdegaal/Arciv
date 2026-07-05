@@ -62,49 +62,52 @@ class TestIsTransient:
 
 
 class TestNeedsFetch:
+    # The helpers take the already-looked-up row (the batch does one
+    # get_many() for all URLs), so tests hand them the Page directly.
+
     def test_new_url_needs_fetch(self, fetcher):
-        assert fetcher._needs_fetch("https://example.com/new", refetch=False) is True
+        assert fetcher._needs_fetch(None, refetch=False) is True
 
-    def test_pending_url_needs_fetch(self, db, fetcher):
-        db.upsert(_page("https://example.com/p", fetched_at=None))
-        assert fetcher._needs_fetch("https://example.com/p", refetch=False) is True
+    def test_pending_url_needs_fetch(self, fetcher):
+        existing = _page("https://example.com/p", fetched_at=None)
+        assert fetcher._needs_fetch(existing, refetch=False) is True
 
-    def test_failed_url_is_skipped(self, db, fetcher):
-        db.upsert(
-            _page("https://example.com/f", fetched_at=None, fail_reason="timeout")
+    def test_failed_url_is_skipped(self, fetcher):
+        existing = _page(
+            "https://example.com/f", fetched_at=None, fail_reason="timeout"
         )
-        assert fetcher._needs_fetch("https://example.com/f", refetch=False) is False
+        assert fetcher._needs_fetch(existing, refetch=False) is False
 
-    def test_already_fetched_is_skipped(self, db, fetcher):
-        db.upsert(_page("https://example.com/a", fetched_at="2026-06-11T00:00:00"))
-        assert fetcher._needs_fetch("https://example.com/a", refetch=False) is False
+    def test_already_fetched_is_skipped(self, fetcher):
+        existing = _page("https://example.com/a", fetched_at="2026-06-11T00:00:00")
+        assert fetcher._needs_fetch(existing, refetch=False) is False
 
-    def test_refetch_forces_already_fetched(self, db, fetcher):
-        db.upsert(_page("https://example.com/a", fetched_at="2026-06-11T00:00:00"))
-        assert fetcher._needs_fetch("https://example.com/a", refetch=True) is True
+    def test_refetch_forces_already_fetched(self, fetcher):
+        existing = _page("https://example.com/a", fetched_at="2026-06-11T00:00:00")
+        assert fetcher._needs_fetch(existing, refetch=True) is True
 
-    def test_refetch_forces_failed(self, db, fetcher):
-        db.upsert(
-            _page("https://example.com/f", fetched_at=None, fail_reason="timeout")
+    def test_refetch_forces_failed(self, fetcher):
+        existing = _page(
+            "https://example.com/f", fetched_at=None, fail_reason="timeout"
         )
-        assert fetcher._needs_fetch("https://example.com/f", refetch=True) is True
+        assert fetcher._needs_fetch(existing, refetch=True) is True
 
 
 class TestEntryFor:
     def test_new_url_uses_input_url_as_original(self, fetcher):
         original, domain, slug = fetcher._entry_for(
-            "https://example.com/a", "https://example.com/a?utm_source=x"
+            None, "https://example.com/a", "https://example.com/a?utm_source=x"
         )
         assert original == "https://example.com/a?utm_source=x"
         assert domain == "example.com"
         assert slug == slug_for_url("https://example.com/a")
 
-    def test_preserves_original_url_recorded_at_index_time(self, db, fetcher):
+    def test_preserves_original_url_recorded_at_index_time(self, fetcher):
         # The index stage already stored the pre-rewrite URL; a later fetch
         # must not overwrite it with the processed URL.
-        db.upsert(_page("https://example.com/a", original_url="https://orig.example/a"))
+        existing = _page("https://example.com/a", original_url="https://orig.example/a")
         original, _, _ = fetcher._entry_for(
-            "https://example.com/a", "https://input.example/a"
+            existing, "https://example.com/a", "https://input.example/a"
         )
         assert original == "https://orig.example/a"
 
