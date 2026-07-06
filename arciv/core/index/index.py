@@ -7,14 +7,14 @@ job (see ``arciv.core.pipeline.fetch_pipeline``).
 """
 
 from collections.abc import Iterable
-from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
 
 from arciv.settings import USER_RULES_PATH
+from arciv.core.clock import utc_now_iso
 from arciv.core.db import PageDatabase
-from arciv.core.notes import Note, load_note, load_notes
+from arciv.core.notes import extract_urls, find_notes, read_note
 from arciv.core.urls import (
     load_rules,
     process_url,
@@ -32,29 +32,39 @@ def _page_entry(processed_url: str, original_url: str) -> tuple[str, str, str, s
 
 def _index_notes(
     db: PageDatabase,
-    notes: Iterable[Note],
+    note_paths: Iterable[Path],
     source_name: str | None = None,
 ) -> list[str]:
-    """Extract, normalize, and register the links of the given notes.
+    """Extract, normalize, and register the links of the given note files.
 
     Creates pending page rows for new URLs and replaces the link rows of
     each note file with the freshly extracted set, stamped with the
     current time. Returns all unique processed URLs found in the notes.
     source_name is the registered source the notes belong to, if any.
+
+    An unreadable file (permissions, not UTF-8) is skipped with a warning
+    so one stray binary in a vault never aborts the whole run; its
+    previously indexed links are left untouched.
     """
-    indexed_at = datetime.now(timezone.utc).isoformat()
+    indexed_at = utc_now_iso()
     rules = load_rules(USER_RULES_PATH)
     file_paths: list[str] = []
     original_urls: dict[str, str] = {}
     link_entries: list[tuple[str, str, str | None, str]] = []
     seen_links: set[tuple[str, str]] = set()
 
-    for note in notes:
-        file_path = str(note.note_path.resolve())
+    for note_path in note_paths:
+        try:
+            text = read_note(note_path)
+        except (OSError, UnicodeDecodeError) as e:
+            logger.warning(f"Skipping unreadable note {note_path}: {e}")
+            continue
+        file_path = str(note_path.resolve())
         file_paths.append(file_path)
-        for link in note.extract_urls():
-            processed, _ = process_url(link, rules)
+        for link in extract_urls(text):
+            processed, skip_reason = process_url(link, rules)
             if processed is None:
+                logger.debug(f"Skipped {link} ({note_path.name}): {skip_reason}")
                 continue
             if (processed, file_path) in seen_links:
                 continue
@@ -77,7 +87,7 @@ def _index_notes(
 def index_file(db: PageDatabase, file_path: Path) -> list[str]:
     """Index all links within a single note file (.md, .txt, or .rst)
     and return the unique processed URLs found."""
-    return _index_notes(db, [load_note(file_path)])
+    return _index_notes(db, [file_path])
 
 
 def index_directory(
@@ -89,7 +99,7 @@ def index_directory(
     and return the unique processed URLs found. source_name is the
     registered source the directory belongs to, if any."""
     logger.info(f"Indexing notes in {dir_path}")
-    return _index_notes(db, load_notes(dir_path), source_name=source_name)
+    return _index_notes(db, find_notes(dir_path), source_name=source_name)
 
 
 def index_source(db: PageDatabase, name: str) -> list[str]:
@@ -126,8 +136,6 @@ def register_urls(db: PageDatabase, urls: list[str]) -> list[str]:
             logger.warning(f"Skipped {url}: {skip_reason}")
             continue
         registered.setdefault(processed, url)
-    # One ensure_pages call (one transaction) for the whole batch, as
-    # _index_notes does, instead of a commit per URL.
     db.ensure_pages(
         [_page_entry(processed, original) for processed, original in registered.items()]
     )

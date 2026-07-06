@@ -4,9 +4,12 @@ Arciv is my archival tool for reading material: blog posts, research papers, doc
 Not books, not videos. It extracts URLs from notes (`.md`, `.txt`, `.rst`), fetches and parses
 them to clean markdown, and stores metadata in SQLite.
 
-This is now a single CLI tool. The web app is being removed (see below): the maintenance cost
-isn't worth it while the archival experience is still settling, and dropping it deletes a whole
+This is now a single CLI tool. The web app has been removed: the maintenance cost
+wasn't worth it while the archival experience is still settling, and dropping it deleted a whole
 runtime, the async worker, and the read-only DB contract along with it.
+
+Sections marked "done" are kept as a record of the reasoning; the unmarked sections
+and the parking lot are the live roadmap.
 
 ## Architecture: one deliverable
 
@@ -64,7 +67,7 @@ trailing slash, drop tracking params, sort the query. It runs last in URL proces
 both the page identity and the slug, so equivalent forms collapse to one row. No separate dedup
 pass or migration needed; single-user means re-index and move on.
 
-## 1. Remove the web app
+## 1. Remove the web app: done
 
 Delete the FastAPI service, Jinja2/Datastar templates, the asyncio queue worker and lifespan
 manager, the read-only `PageDatabase` path, and the AGENTS.md storage contract. This is mostly
@@ -72,7 +75,7 @@ subtraction and unblocks the two changes below by shrinking the surface they tou
 nothing for now; if a read-only viewer is ever wanted it can come back as a small `arciv show`
 that renders markdown to a pager or browser, no server.
 
-## 2. Fetch layer: move to Scrapling
+## 2. Fetch layer: move to Scrapling: done
 
 Committed. Scrapling's `StealthyFetcher` runs patchright (the engine I already use) wrapped in a
 nicer interface, with CDP-leak patching, canvas noise, a Cloudflare Turnstile auto-solver, and
@@ -98,7 +101,7 @@ nodriver is the documented fallback, not a migration: if a specific target I car
 cost (asyncio object model, no Playwright API) isn't worth paying for a hard gate I don't
 currently hit.
 
-## 3. Rule system redesign
+## 3. Rule system redesign: done
 
 The current system has two flaws. Code rewriters (github, huggingface, raw.github) are flexible
 but not extendible. The data rules are extendible but not flexible, and their behavior is

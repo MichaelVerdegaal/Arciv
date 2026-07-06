@@ -11,7 +11,7 @@ import asyncio
 import pytest
 
 from arciv.core.db import Page, PageDatabase
-from arciv.core.urls import slug_for_url
+from arciv.core.urls import Action, Rule, slug_for_url
 from arciv.core.fetch.fetcher import Fetcher
 
 
@@ -141,6 +141,76 @@ class TestStore:
         stored = db.get("https://example.com/a")
         assert stored.fetched is False
         assert stored.fail_reason == "timeout"
+
+
+class TestRuleDivergence:
+    """A stored URL the current rules no longer target must not stay
+    pending forever; the divergence is recorded as its fail_reason."""
+
+    def test_batch_marks_pending_row_skipped_by_rule(self, db, tmp_path):
+        db.upsert(_page("https://example.com/old", fetched_at=None))
+        rules = [
+            Rule(
+                name="kill",
+                match_type="domain",
+                pattern="example.com",
+                actions=(Action("skip", reason="no longer wanted"),),
+            )
+        ]
+        fetcher = Fetcher(db, tmp_path / "saved", rules=rules)
+        assert fetcher.fetch_batch(["https://example.com/old"]) == []
+        stored = db.get("https://example.com/old")
+        assert stored.fail_reason is not None
+        assert "skipped by rule change" in stored.fail_reason
+
+    def test_batch_marks_pending_row_rewritten_by_rule(self, db, tmp_path):
+        db.upsert(_page("https://example.com/old", fetched_at=None))
+        # The rewrite target is already fetched, so no network is touched.
+        db.upsert(_page("https://example.com/new", fetched_at="2026-06-11T00:00:00"))
+        rules = [
+            Rule(
+                name="move",
+                match_type="domain",
+                pattern="example.com",
+                actions=(Action("replace", old="/old", new="/new"),),
+            )
+        ]
+        fetcher = Fetcher(db, tmp_path / "saved", rules=rules)
+        fetcher.fetch_batch(["https://example.com/old"])
+        stored = db.get("https://example.com/old")
+        assert stored.fail_reason is not None
+        assert "rewritten by rule change" in stored.fail_reason
+        # The already-fetched target row is untouched.
+        assert db.get("https://example.com/new").fail_reason is None
+
+    def test_fetched_rows_are_never_demoted(self, db, tmp_path):
+        # A rule change must not put a failure on content already archived.
+        db.upsert(_page("https://example.com/done", fetched_at="2026-06-11T00:00:00"))
+        rules = [
+            Rule(
+                name="kill",
+                match_type="domain",
+                pattern="example.com",
+                actions=(Action("skip"),),
+            )
+        ]
+        fetcher = Fetcher(db, tmp_path / "saved", rules=rules)
+        fetcher.fetch_batch(["https://example.com/done"])
+        assert db.get("https://example.com/done").fail_reason is None
+
+
+class TestIsolation:
+    def test_isolated_records_unexpected_failure(self, db, fetcher):
+        # An exception that escapes a per-URL task must not propagate (it
+        # would cancel the whole gather batch); it becomes that page's failure.
+        async def boom():
+            raise OSError("disk full")
+
+        url = "https://example.com/a"
+        entry = (url, url, "example.com", slug_for_url(url))
+        result = asyncio.run(fetcher._isolated(entry, boom()))
+        assert result is None
+        assert db.get(url).fail_reason == "unexpected: disk full"
 
 
 class TestSaveToDisk:

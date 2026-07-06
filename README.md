@@ -16,6 +16,11 @@ Three stages, no writeback into your notes:
 2. **Fetching**: download raw pages (browser for HTML, direct HTTP for PDFs)
 3. **Parsing**: validate and convert to markdown, archived on disk with SQLite tracking state
 
+The stored markdown is deliberately plain prose: bold/italic/inline-code markers are
+stripped (the text is kept) so the archive reads uniformly. The raw HTML stays on disk
+next to the markdown, so nothing is lost if you ever want the original formatting back
+(`arciv parse --reparse` re-converts from disk).
+
 ## Usage
 
 Archive things directly, a single URL, a single file, or a whole directory:
@@ -78,7 +83,10 @@ arciv rules test https://medium.com/@me/post  # show how the rules treat a URL
 ```
 
 A rule is a match (`domain`, `host`, `starts_with`, or `regex`) plus an ordered
-list of actions (`skip`, `prepend`, `replace`, `regex_replace`):
+list of actions (`skip`, `prepend`, `replace`, `regex_replace`). Rewrite rules
+should be idempotent — processing runs again at fetch time, so an action whose
+output its own match would rewrite differently (e.g. a `prepend` the match still
+fires on) would stack. The shipped defaults are; keep yours that way too:
 
 ```toml
 [[rule]]
@@ -100,10 +108,11 @@ without a full index run.
 ### Global options and pipes
 
 Data goes to stdout; all logs and diagnostics go to stderr, so `arciv list | cat`
-shows only data. Global flags go *before* the command:
+shows only data. Global flags work before or after the command:
 
 ```bash
 arciv -v fetch         # more detail (-v debug, -vv trace)
+arciv fetch -v         # same thing
 arciv -q fetch         # errors only
 arciv --color never list
 arciv --json status    # machine-readable output on stdout

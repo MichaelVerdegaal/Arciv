@@ -41,18 +41,19 @@ def json_output() -> bool:
 def emit(text: str = "", *, null: bool = False) -> None:
     """Write one record to stdout.
 
+    Both separators are written as raw bytes so the output is identical on
+    every platform: no CRLF translation on Windows corrupting a NUL record
+    or turning data lines into ``\\r\\n``.
+
     Args:
         text: The record to write (without a trailing separator).
         null: Terminate with a NUL byte instead of a newline, like
             ``find -print0``, so records survive odd characters and feed
-            ``xargs -0``. Writes raw bytes to avoid CRLF translation on
-            Windows corrupting the separator.
+            ``xargs -0``.
     """
-    if null:
-        sys.stdout.buffer.write(text.encode("utf-8") + b"\0")
-        sys.stdout.buffer.flush()
-    else:
-        typer.echo(text)
+    separator = b"\0" if null else b"\n"
+    sys.stdout.buffer.write(text.encode("utf-8") + separator)
+    sys.stdout.buffer.flush()
 
 
 def emit_json(obj: Any) -> None:

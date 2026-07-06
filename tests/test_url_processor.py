@@ -22,7 +22,7 @@ from arciv.core.urls import (
 # the policy skips. Behaviour tests that exercise a default rule pass these.
 DEFAULTS = load_rules()
 
-_SLUG_RE = re.compile(r"^.+-[0-9a-f]{8}$")
+_SLUG_RE = re.compile(r"^.+-[0-9a-f]{16}$")
 
 # Characters that are path separators or illegal in Windows directory names
 _UNSAFE_FS_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f\s]')
@@ -505,7 +505,7 @@ class TestSlug:
     )
     def test_slug_is_always_a_safe_directory_name(self, host, path):
         """Slugs become directory names under saved/, so for ANY url they
-        must be non-empty, end in the 8-hex hash, and contain no characters
+        must be non-empty, end in the 16-hex hash, and contain no characters
         that are unsafe on Linux or Windows filesystems."""
         slug = slug_for_url(f"https://{host}/{path}")
         assert _SLUG_RE.match(slug)

@@ -3,12 +3,16 @@
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Self
 
+from arciv.core.clock import utc_now_iso
+
 from .models import Page, Source
 
+# Deliberately no indexes on links.source_name or pages.fetched_at even
+# though list/--source filter and sort on them: at personal-archive scale
+# (thousands of rows) a table scan is instant and the index upkeep isn't free.
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS pages (
     url          TEXT PRIMARY KEY,
@@ -84,11 +88,6 @@ _SQL_VAR_LIMIT = 500
 _BULK_COMMIT_EVERY = 50
 
 
-def _now() -> str:
-    """Current UTC time as an ISO string."""
-    return datetime.now(timezone.utc).isoformat()
-
-
 def _chunked(items: list[str], size: int = _SQL_VAR_LIMIT) -> Iterator[list[str]]:
     """Split a list into chunks that fit SQLite's bound-parameter cap."""
     for start in range(0, len(items), size):
@@ -118,6 +117,9 @@ class PageDatabase:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
+        # Wait for a concurrent writer instead of raising "database is
+        # locked" (e.g. `arciv status` during a long fetch in another shell)
+        self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.executescript(_SCHEMA)
         # executescript commits and resets pragmas set before it
         self._conn.execute("PRAGMA foreign_keys=ON")
@@ -228,7 +230,7 @@ class PageDatabase:
                 page.author,
                 page.word_count,
                 page.fail_reason,
-                page.added_at or _now(),
+                page.added_at or utc_now_iso(),
                 page.fetched_at,
                 page.parsed_at,
             ),
@@ -238,14 +240,30 @@ class PageDatabase:
     def ensure_pages(self, url_entries: list[tuple[str, str, str, str]]) -> None:
         """Create pending page entries for (url, original_url, domain, slug)
         tuples not yet in the database. Existing pages are left unchanged;
-        new pages get ``added_at`` set to the current time."""
-        added_at = _now()
-        self._conn.executemany(
-            "INSERT OR IGNORE INTO pages "
-            "(url, original_url, domain, slug, added_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            [entry + (added_at,) for entry in url_entries],
-        )
+        new pages get ``added_at`` set to the current time.
+
+        Raises:
+            RuntimeError: If a new URL's slug collides with a different URL's
+                slug (a hash collision). ``ON CONFLICT(url)`` only tolerates
+                the expected already-registered case, so a slug collision is
+                loud instead of the URL silently never being registered.
+        """
+        added_at = utc_now_iso()
+        try:
+            self._conn.executemany(
+                "INSERT INTO pages "
+                "(url, original_url, domain, slug, added_at) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(url) DO NOTHING",
+                [entry + (added_at,) for entry in url_entries],
+            )
+        except sqlite3.IntegrityError as exc:
+            self._conn.rollback()
+            raise RuntimeError(
+                "Slug collision while registering pages: a new URL hashes to "
+                "a slug an existing page already owns. Resolve the duplicate "
+                f"before re-indexing. ({exc})"
+            ) from exc
         self._conn.commit()
 
     def get(self, url: str) -> Page | None:

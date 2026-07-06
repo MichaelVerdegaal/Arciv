@@ -109,6 +109,22 @@ class TestCrud:
         )
         assert db.get("https://example.com/a").title == "Kept"
 
+    def test_ensure_pages_slug_collision_is_loud(self, db):
+        # A new URL whose slug collides with a different URL's slug must
+        # raise, not be silently dropped (INSERT OR IGNORE would swallow it).
+        db.upsert(_page("https://example.com/a", slug="example.com-collide0"))
+        with pytest.raises(RuntimeError, match="[Ss]lug collision"):
+            db.ensure_pages(
+                [
+                    (
+                        "https://example.com/b",
+                        "https://example.com/b",
+                        "example.com",
+                        "example.com-collide0",
+                    ),
+                ]
+            )
+
 
 class TestSlugConstraint:
     def test_duplicate_slug_is_rejected(self, db):

@@ -27,25 +27,27 @@ from .rules import Rule, apply_rules
 from .url_helpers import canonicalize, registered_domain, split_url
 
 # Non-content file extensions never worth fetching (the bytes aren't readable
-# material). Matched case-insensitively, before the rules.
+# material: media files, or data formats like .json/.xml). Matched
+# case-insensitively against the URL path only, so a query value that happens
+# to end in ".mp4" doesn't skip the page.
 _MEDIA_EXT_RE = re.compile(
     r"\.(?:png|jpg|jpeg|gif|svg|webp|bmp|tiff|ico|mp4|mp3|avi|mov|wmv|flv|mkv"
-    r"|json|xml)(?:\?|$)",
+    r"|json|xml)$",
     re.IGNORECASE,
 )
 # A bare IPv4 host (after stripping any www./port), e.g. 192.168.2.13.
 _IPV4_HOST_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 
 
-def _plumbing_skip(url: str, host: str) -> str | None:
+def _plumbing_skip(url: str, host: str, path: str) -> str | None:
     """Universal never-fetch guard: a skip reason, or None to keep going.
 
     These are immutable plumbing (nobody un-skips a media file or a localhost
     address), so they run in code ahead of the editable rules and return the
     reason shown to the user.
     """
-    if _MEDIA_EXT_RE.search(url):
-        return "media/non-content file"
+    if _MEDIA_EXT_RE.search(path):
+        return "non-content file extension"
     if "/_next/image" in url:
         return "image proxy endpoint"
     bare_host = host.removeprefix("www.").split(":", 1)[0]
@@ -105,7 +107,7 @@ def evaluate_url(url: str, rules: Sequence[Rule] = ()) -> UrlVerdict:
         url = f"https://{lowered}{url[len('https://') + len(host) :]}"
         host = lowered
 
-    guard_reason = _plumbing_skip(url, host)
+    guard_reason = _plumbing_skip(url, host, parsed.path)
     if guard_reason is not None:
         return UrlVerdict(None, "skipped", guard_reason, None)
 

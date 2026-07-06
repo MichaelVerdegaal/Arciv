@@ -1,59 +1,16 @@
 """Arciv CLI: archive management commands (built on Typer).
 
-One-shot archiving with ``get`` (index → fetch → parse in one go, nothing
-tracked — the ephemeral, pipe-friendly path):
-
-    arciv get https://example.com   # archive a single URL
-    arciv get --file note.md        # archive all links in one file
-    arciv get --dir ~/notes         # archive all links in a directory
-    arciv list --json | jq -r .url | arciv get -   # archive piped URLs
-
-Sources are registered directories you re-sync over time (the tracked path):
-
-    arciv source add ~/vault/notes notes  # register "notes" and archive it
-    arciv source update notes             # re-index, fetch, and parse it
-    arciv source update --all             # update every registered source
-    arciv source remove notes             # unregister it (asks first)
-    arciv source                          # list registered sources
-    arciv list --source notes             # pages indexed from one source
-
-Individual pipeline stages, mainly for development:
-
-    arciv index notes               # index one source
-    arciv index --all               # index every source
-    arciv fetch                     # download pending indexed URLs
-    arciv parse                     # convert fetched pages to markdown
-
-URL rules (skip or rewrite URLs before they are fetched):
-
-    arciv rules list                # list active rules, in the order they apply
-    arciv rules test <URL>          # show how the rules treat a URL
-
-Rules are data, not commands: edit the TOML at ``<data dir>/rules.toml`` (see
-``arciv db dir``); user rules load ahead of the packaged defaults.
-
-Inspection:
-
-    arciv status                    # pipeline counts + failure summary
-    arciv list                      # fetched pages: time, domain, URL
-    arciv path <URL>                # filepath of a page's markdown
-    arciv prune failed              # drop stale rows: missing | failed | all
-    arciv db dir                    # print the data directory path
-    arciv db remove                 # delete the database (asks first)
-
-Global options work before or after the command: ``-v``/``-vv`` for more
-detail, ``-q`` for errors only, ``--color auto|always|never``, and
-``--json`` to switch every command to machine-readable output on stdout.
-The mutating commands (``source update``, ``get``, ``fetch``, ``parse``) emit
-a structured ``{indexed, fetched, parsed, failed}`` summary under ``--json``.
-``arciv --version`` prints the installed version. Data goes to stdout; all
-logs and diagnostics go to stderr, so ``arciv list | cat`` shows only data.
+The command tour lives in README.md; the authoritative per-command help is
+``arciv --help`` and ``arciv <command> --help``. Two conventions apply
+everywhere: data goes to stdout while logs and diagnostics go to stderr
+(so ``arciv list | cat`` shows only data), and the global options
+(``-v``/``-q``, ``--color``, ``--json``) work before or after the command
+(see GlobalOptionGroup).
 """
 
 import json
 import shutil
 import sys
-from datetime import datetime, timezone
 from enum import Enum
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -70,6 +27,7 @@ from arciv.settings import (
     USER_RULES_PATH,
     configure_logger,
 )
+from arciv.core.clock import utc_now_iso
 from arciv.core.db import PageDatabase, Source
 from arciv.core.urls import evaluate_url, load_rules, process_url
 from arciv.core.pipeline import (
@@ -106,9 +64,16 @@ class GlobalOptionGroup(TyperGroup):
     (``arciv status --json``), which Click otherwise rejects as an unknown
     option. This group hoists the recognized global tokens to the front
     before parsing, so both orders work.
+
+    Known costs of this token surgery: a positional argument that happens to
+    equal a global token is stolen (write it after ``--``), and the two sets
+    below MUST list exactly the options of the ``main`` callback — a global
+    option added there but not here silently keeps the old before-only
+    behavior.
     """
 
     # Global flags that take no value, and the long options that take one.
+    # Keep in sync with the ``main`` callback's parameters (see docstring).
     _GLOBAL_FLAGS = frozenset({"-v", "--verbose", "-q", "--quiet", "--json"})
     _GLOBAL_VALUE_OPTS = frozenset({"--color"})
 
@@ -119,6 +84,11 @@ class GlobalOptionGroup(TyperGroup):
         while i < len(args):
             token = args[i]
             name = token.split("=", 1)[0]
+            if token == "--":
+                # End-of-options marker: everything after it is positional
+                # by convention and must never be hoisted.
+                rest.extend(args[i:])
+                break
             if token in self._GLOBAL_FLAGS:
                 hoisted.append(token)
             elif (
@@ -452,7 +422,7 @@ def source_add(
     source = Source(
         name=name,
         path=str(directory.resolve()),
-        added_at=datetime.now(timezone.utc).isoformat(),
+        added_at=utc_now_iso(),
     )
     with PageDatabase(DB_PATH) as db:
         if not db.add_source(source):
@@ -479,7 +449,7 @@ def source_update(
     then downloads and parses whatever is not fetched/parsed yet, in one batch.
     Provide a source name or --all, not both.
     """
-    if bool(name) == all_sources:
+    if (name is None) == (not all_sources):
         _fail("Provide a source name or --all, not both.", code=EXIT_USAGE)
 
     with PageDatabase(DB_PATH) as db:
@@ -500,6 +470,8 @@ def source_update(
                     f"indexed, {len(result.fetched)} fetched, {result.parsed} parsed"
                 )
             return
+        if name is None:  # unreachable after the XOR check; narrows the type
+            _fail("Provide a source name.", code=EXIT_USAGE)
         try:
             result = archive_source(db, name)
         except KeyError as e:
@@ -579,13 +551,15 @@ def index(
     ] = False,
 ) -> None:
     """Index stage: extract links from a registered SOURCE (or --all)."""
-    if bool(source) == all_sources:
+    if (source is None) == (not all_sources):
         _fail("Provide a source name or --all, not both.", code=EXIT_USAGE)
 
     with PageDatabase(DB_PATH) as db:
         if all_sources:
             urls = index_all(db)
         else:
+            if source is None:  # unreachable after the XOR check; narrows type
+                _fail("Provide a source name.", code=EXIT_USAGE)
             try:
                 urls = index_source(db, source)
             except KeyError as e:
@@ -682,6 +656,10 @@ def prune(
                 f"({_PRUNE_DESCRIPTIONS[mode]}) and their saved files?",
                 abort=True,
             )
+        # The selection reruns after the prompt, so another arciv process
+        # writing in between can make the deleted count differ from the
+        # confirmed one. Accepted: single-user tool, and the mode's predicate
+        # (not the row list) is what the user confirms.
         deleted = db.prune_pages(mode.value)
 
     removed_folders = 0

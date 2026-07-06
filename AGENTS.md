@@ -48,8 +48,8 @@ Three stages, no writeback into the notes. Each stage has a dedicated CLI comman
   guards (media files, image proxies, IP/localhost hosts) stay in code in
   `url_processing.py`, ahead of the rules.
 - `<data dir>/saved/<slug>/` — one folder per page: `page.html` (raw fetch) or `page.pdf`, plus
-  `page.md` once parsed. Slug format is `<domain>-<hash8>`, sanitized to be a safe directory
-  name on Linux and Windows.
+  `page.md` once parsed. Slug format is `<domain>-<hash16>` (older rows may carry the previous
+  8-char hash), sanitized to be a safe directory name on Linux and Windows.
 - The data root defaults to the OS user data dir via platformdirs (Linux:
   `~/.local/share/arciv`, Windows: `%LOCALAPPDATA%\arciv`) and is relocatable via
   `ARCIV_DATA_DIR` (e.g. `ARCIV_DATA_DIR=data` in `.env` when developing from a clone).

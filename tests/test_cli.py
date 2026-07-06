@@ -737,6 +737,12 @@ class TestGlobalOptions:
         result = runner.invoke(cli_module.cli, ["status", "-q"])
         assert result.exit_code == 0
 
+    def test_tokens_after_double_dash_are_not_hoisted(self, runner, data_dir):
+        # "--" ends option parsing; a literal "--json" after it must stay a
+        # positional argument (which status doesn't take), not become global.
+        result = runner.invoke(cli_module.cli, ["status", "--", "--json"])
+        assert result.exit_code != 0
+
 
 class TestVersion:
     def test_version_prints_and_exits(self, runner, data_dir):

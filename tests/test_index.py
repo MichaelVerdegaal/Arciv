@@ -70,6 +70,13 @@ class TestIndexDirectory:
         urls = index_directory(db, tmp_path)
         assert set(urls) == {"https://example.com/a", "https://example.com/b"}
 
+    def test_unreadable_note_is_skipped_not_fatal(self, db, tmp_path):
+        # One stray non-UTF-8 file in a vault must not abort the whole run.
+        _write_note(tmp_path, "good.md", "https://example.com/good")
+        (tmp_path / "binary.txt").write_bytes(b"\xff\xfe garbage \xff")
+        urls = index_directory(db, tmp_path)
+        assert urls == ["https://example.com/good"]
+
     def test_same_url_in_two_files_yields_two_link_rows(self, db, tmp_path):
         _write_note(tmp_path, "a.md", "https://example.com/shared")
         _write_note(tmp_path, "b.md", "https://example.com/shared")

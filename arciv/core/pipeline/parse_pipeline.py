@@ -9,12 +9,18 @@ so they don't pose as valid archive entries; their raw files stay on disk
 for debugging.
 """
 
-from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
 
-from arciv.core.parse import check_html, parse_html, pdf_to_text
+from arciv.core.clock import utc_now_iso
+from arciv.core.parse import (
+    check_html,
+    code_inclusive_word_count,
+    count_words,
+    parse_html,
+    pdf_to_text,
+)
 from arciv.core.db import Page, PageDatabase
 from arciv.core.urls import is_raw_text_url
 from arciv.settings import DEFAULT_MIN_WORDS, SAVED_DIR
@@ -51,7 +57,7 @@ def _accept(
     page.author = author
     page.word_count = word_count
     page.fail_reason = None
-    page.parsed_at = datetime.now(timezone.utc).isoformat()
+    page.parsed_at = utc_now_iso()
     db.upsert(page)
     return page
 
@@ -101,7 +107,7 @@ def _parse_pdf(
         _reject(db, page, f"PDF parse error: {e}")
         return None
 
-    word_count = len(text.split())
+    word_count = count_words(text)
     if word_count < min_words:
         _reject(db, page, _too_short_reason(word_count, pdf_path.stat().st_size, "pdf"))
         return None
@@ -128,7 +134,7 @@ def _parse_html(
     raw_bytes = len(html.encode("utf-8"))
 
     if is_raw_text_url(page.url):
-        word_count = len(html.split())
+        word_count = count_words(html)
         if word_count < min_words:
             _reject(db, page, _too_short_reason(word_count, raw_bytes, "text"))
             return None
@@ -141,14 +147,17 @@ def _parse_html(
         _reject(db, page, block_reason)
         return None
 
-    conversion = parse_html(html, clean=True, min_words=min_words)
+    conversion = parse_html(html, clean=True)
     if conversion is None:
         _reject(db, page, "extraction failed")
         return None
 
-    # Gate on the code-inclusive word count (max of stored vs. full) so
-    # code-heavy pages with real prose aren't rejected as "too short".
-    gate_count = max(conversion.word_count, conversion.full_word_count)
+    # The stored markdown strips code blocks, so code-heavy pages with real
+    # prose can fall short on word_count alone. Only then is the (expensive)
+    # code-inclusive count worth computing before rejecting.
+    gate_count = conversion.word_count
+    if gate_count < min_words:
+        gate_count = max(gate_count, code_inclusive_word_count(html))
     if gate_count < min_words:
         _reject(db, page, _too_short_reason(gate_count, raw_bytes, "html"))
         return None

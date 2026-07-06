@@ -1,3 +1,5 @@
+"""Note reading and URL extraction: the index stage's input."""
+
 import re
 from pathlib import Path
 
@@ -14,104 +16,85 @@ _MD_LINK_RE = re.compile(
 # Bare URL not already inside a markdown link's parens.
 _BARE_URL_RE = re.compile(r"(?<!\]\()https?://[^\s<>\[\]\"]+")
 
+# Traditional YAML frontmatter: --- at the start, anything until the next ---
+_FRONTMATTER_RE = re.compile(r"^---\s*\n.*?\n---\s*\n", re.DOTALL)
+
 # File extensions treated as notes when indexing a directory
-NOTE_EXTENSIONS = (".md", ".txt", ".rst")
+NOTE_EXTENSIONS = frozenset({".md", ".txt", ".rst"})
 
 
-class Note:
-    """Base class for a 'Note' object, containing metadata and text content."""
+def read_note(note_path: Path) -> str:
+    """Read a note file's text with YAML frontmatter stripped.
 
-    def __init__(
-        self,
-        note_path: str | Path,
-    ) -> None:
-        # Validate provided filepath
-        self.note_path: Path = self._validate_path(note_path)
+    Args:
+        note_path: Path to the note file.
 
-        # Set attributes
-        self.filename: str = self.note_path.stem
-        self.extension: str = self.note_path.suffix
+    Returns:
+        The note's text content, frontmatter removed, surrounding
+        whitespace trimmed.
 
-        # Read file text content
-        self.text: str = ""
-        self._read_content()
+    Raises:
+        OSError: If the file is missing, unreadable, or a directory.
+        UnicodeDecodeError: If the file is not valid UTF-8.
+    """
+    text = note_path.read_text(encoding="utf-8")
+    return _FRONTMATTER_RE.sub("", text).strip()
 
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.filename}{self.extension})"
 
-    def _read_content(self) -> None:
-        """Read the note file and store its text with YAML frontmatter stripped."""
-        try:
-            note_text = self.note_path.read_text(encoding="utf-8")
-        except Exception as e:
-            raise IOError(f"Note path {self.note_path} does not seem valid: {e}")
+def find_notes(note_dir: Path) -> list[Path]:
+    """Find every note file under a directory, recursively, sorted by path.
 
-        # Remove traditional YAML frontmatter (--- at start, anything until next ---)
-        frontmatter_pattern_re = r"^---\s*\n.*?\n---\s*\n"
-        content = re.sub(frontmatter_pattern_re, "", note_text, flags=re.DOTALL)
-        self.text = content.strip()
+    Args:
+        note_dir: Directory to search.
 
-    @staticmethod
-    def _validate_path(note_path: str | Path) -> Path:
-        """Validate that a note path exists and normalize it to a Path.
+    Returns:
+        The paths of all ``.md``/``.txt``/``.rst`` files found.
+    """
+    # Filter by suffix before sorting so only note paths are materialized,
+    # not every image/attachment in the vault.
+    return sorted(
+        path
+        for path in note_dir.rglob("*")
+        if path.suffix in NOTE_EXTENSIONS and path.is_file()
+    )
 
-        Args:
-            note_path: Path to the note file
 
-        Returns:
-            The note path as a pathlib Path
+def extract_urls(text: str) -> list[str]:
+    """Extract all URLs from note text.
 
-        Raises:
-            FileNotFoundError: If the path does not exist.
-        """
-        # Convert to Pathlib Path
-        if isinstance(note_path, str):
-            try:
-                note_path = Path(note_path)
-            except Exception as e:
-                raise ValueError(f"Filepath {note_path} does not seem valid: {e}")
+    Handles both markdown links ``[text](url)`` and bare URLs. Markdown
+    links are matched first to avoid capturing trailing junk after the
+    closing paren (e.g. ``[link](https://example.com)seasonalities``).
 
-        # Verify path exists
-        if not note_path.exists():
-            raise FileNotFoundError(f"Note path {note_path} does not exist")
+    Concatenated URLs (multiple ``https://`` in one match) are split.
+    Trailing parens are only stripped when unbalanced (more ``)`` than
+    ``(``) to preserve URLs like ``Leakage_(machine_learning)``.
 
-        # TODO: Verify note not empty (filesize > 0.0)
+    Args:
+        text: The note text to scan.
 
-        return note_path
+    Returns:
+        List of extracted URLs.
+    """
+    raw_urls: list[str] = []
 
-    def extract_urls(self) -> list[str]:
-        """Extract all URLs from the note content.
+    # First pass: extract URLs from markdown links [text](url), tried first
+    # so trailing junk after the closing paren isn't captured.
+    for match in _MD_LINK_RE.finditer(text):
+        raw_urls.append(match.group(1))
 
-        Handles both markdown links ``[text](url)`` and bare URLs. Markdown
-        links are matched first to avoid capturing trailing junk after the
-        closing paren (e.g. ``[link](https://example.com)seasonalities``).
+    # Second pass: bare URLs not inside markdown link parens
+    for match in _BARE_URL_RE.finditer(text):
+        url = match.group(0).rstrip(".,;:!?'")
+        # Strip trailing parens only when unbalanced
+        while url.endswith(")") and url.count(")") > url.count("("):
+            url = url[:-1]
+        raw_urls.append(url)
 
-        Concatenated URLs (multiple ``https://`` in one match) are split.
-        Trailing parens are only stripped when unbalanced (more ``)`` than
-        ``(``) to preserve URLs like ``Leakage_(machine_learning)``.
+    # Split concatenated URLs (e.g. "...7405d51cd839https://medium.com/...")
+    urls: list[str] = []
+    for url in raw_urls:
+        parts = _CONCAT_SPLIT_RE.split(url)
+        urls.extend(p for p in parts if p)
 
-        Returns:
-            List of extracted URLs
-        """
-        raw_urls: list[str] = []
-
-        # First pass: extract URLs from markdown links [text](url), tried first
-        # so trailing junk after the closing paren isn't captured.
-        for match in _MD_LINK_RE.finditer(self.text):
-            raw_urls.append(match.group(1))
-
-        # Second pass: bare URLs not inside markdown link parens
-        for match in _BARE_URL_RE.finditer(self.text):
-            url = match.group(0).rstrip(".,;:!?'")
-            # Strip trailing parens only when unbalanced
-            while url.endswith(")") and url.count(")") > url.count("("):
-                url = url[:-1]
-            raw_urls.append(url)
-
-        # Split concatenated URLs (e.g. "...7405d51cd839https://medium.com/...")
-        urls: list[str] = []
-        for url in raw_urls:
-            parts = _CONCAT_SPLIT_RE.split(url)
-            urls.extend(p for p in parts if p)
-
-        return urls
+    return urls

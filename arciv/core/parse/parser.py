@@ -21,16 +21,12 @@ class ConversionResult:
     Attributes:
         md_content: Extracted markdown content (code blocks stripped).
         word_count: Number of words in the stored markdown content.
-        full_word_count: Number of words in a code-inclusive extraction. Used
-            for the length gate so code-heavy pages (e.g. GitHub READMEs) with
-            real prose aren't rejected just because their code was stripped.
         title: HTML page title, if extractable.
         author: Page author, if extractable.
     """
 
     md_content: str
     word_count: int
-    full_word_count: int
     title: str | None = None
     author: str | None = None
 
@@ -124,9 +120,7 @@ def _title_from_tag(html_content: str) -> str | None:
     return None
 
 
-def parse_html(
-    html_content: str, clean: bool = True, min_words: int | None = None
-) -> ConversionResult | None:
+def parse_html(html_content: str, clean: bool = True) -> ConversionResult | None:
     """Convert HTML to markdown and extract metadata.
 
     This is the main entry point for parsing scraped HTML into structured
@@ -135,12 +129,6 @@ def parse_html(
     Args:
         html_content: Raw HTML string.
         clean: Whether to apply markdown cleaning.
-        min_words: The caller's length-gate threshold, if known. Used only to
-            skip a redundant second extraction: the code-inclusive count exists
-            to rescue code-heavy pages that fall *below* the gate, so when the
-            stored word count already clears ``min_words`` it cannot change the
-            outcome and the extra parse is elided. Pass None (the default) to
-            always compute it.
 
     Returns:
         Conversion result with markdown content, word count, and metadata.
@@ -152,24 +140,23 @@ def parse_html(
 
     if clean:
         md_content = clean_markdown(md_content)
-    word_count = count_words(md_content)
-
-    # The length gate runs on a code-inclusive extraction so that code-heavy
-    # pages with real prose aren't rejected as "too short" just because their
-    # <pre>/<code> blocks were stripped from the stored markdown. That second
-    # extraction is expensive and only matters when the stored count is short,
-    # so skip it once ``word_count`` already clears the caller's threshold.
-    if min_words is not None and word_count >= min_words:
-        full_word_count = word_count
-    else:
-        full_md = html_to_markdown(html_content, strip_code=False)
-        full_word_count = count_words(full_md) if full_md else 0
-
     title, author = extract_metadata(html_content)
     return ConversionResult(
         md_content=md_content,
-        word_count=word_count,
-        full_word_count=full_word_count,
+        word_count=count_words(md_content),
         title=title,
         author=author,
     )
+
+
+def code_inclusive_word_count(html_content: str) -> int:
+    """Word count of a code-inclusive extraction of the HTML.
+
+    The stored markdown strips ``<pre>``/``<code>`` blocks, so code-heavy
+    pages (e.g. GitHub READMEs) with real prose can fall below the length
+    gate on ``word_count`` alone. The gate calls this second, code-inclusive
+    extraction only when that happens; it is a full extra trafilatura pass,
+    so it is not computed as part of every :func:`parse_html`.
+    """
+    full_md = html_to_markdown(html_content, strip_code=False)
+    return count_words(full_md) if full_md else 0
