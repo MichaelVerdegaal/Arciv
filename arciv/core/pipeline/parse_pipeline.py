@@ -14,6 +14,7 @@ from pathlib import Path
 from loguru import logger
 
 from arciv.core.clock import utc_now_iso
+from arciv.core.db import Page, PageDatabase
 from arciv.core.parse import (
     check_html,
     code_inclusive_word_count,
@@ -21,7 +22,6 @@ from arciv.core.parse import (
     parse_html,
     pdf_to_text,
 )
-from arciv.core.db import Page, PageDatabase
 from arciv.core.urls import is_raw_text_url
 from arciv.settings import DEFAULT_MIN_WORDS, SAVED_DIR
 

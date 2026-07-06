@@ -10,6 +10,9 @@ from collections import Counter
 
 from loguru import logger
 
+from arciv.core.db import Page, PageDatabase
+from arciv.core.fetch import Fetcher
+from arciv.core.urls import load_rules
 from arciv.settings import (
     DEFAULT_CONCURRENCY,
     DEFAULT_MAX_RETRIES,
@@ -17,9 +20,6 @@ from arciv.settings import (
     TIMEOUT_MS,
     USER_RULES_PATH,
 )
-from arciv.core.db import Page, PageDatabase
-from arciv.core.fetch import Fetcher
-from arciv.core.urls import load_rules
 
 
 def fetch_urls(db: PageDatabase, urls: list[str], refetch: bool = False) -> list[Page]:

@@ -427,6 +427,15 @@ class TestCanonicalize:
     def test_unparseable_returned_unchanged(self):
         assert canonicalize("https://[") == "https://["
 
+    @given(st.text())
+    def test_idempotent(self, value):
+        """canonicalize is a fixed point: its output re-canonicalizes to
+        itself. The fetch stage re-canonicalizes stored keys, so a
+        non-idempotent normaliser would give a page two different identities
+        (index-time vs fetch-time) and orphan one of them."""
+        once = canonicalize(f"https://{value}")
+        assert canonicalize(once) == once
+
 
 class TestProcessUrlCanonicalization:
     """process_url applies canonicalize to its result."""

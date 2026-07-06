@@ -25,6 +25,18 @@ jobs:
       - run: uv run --no-sync ruff check
       - run: uv run --no-sync ruff format --check
 
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # mypy reads the types of the runtime deps it follows (typer, loguru,
+    # platformdirs), so it needs the full sync, not the dev-only group the
+    # lint job uses. The browser binary isn't needed for static analysis.
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --frozen
+      - run: uv run --no-sync mypy
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -40,7 +52,9 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: uv sync --frozen
-      - run: uv run pytest
+      # Coverage lives here, not in pyproject addopts, so a plain local
+      # `pytest` (single-test runs, debuggers) isn't slowed by instrumentation
+      - run: uv run pytest --cov=arciv --cov-report=term-missing
 
   windows-smoke:
     runs-on: windows-latest

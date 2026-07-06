@@ -2,17 +2,17 @@
 
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from loguru import logger
 from typer.testing import CliRunner
 
 import arciv.cli.cli as cli_module
-from arciv.core.db import Page, PageDatabase, Source
-from arciv.core.urls import slug_for_url
-from arciv.core.pipeline import ArchiveResult
 from arciv.cli import output
+from arciv.core.db import Page, PageDatabase, Source
+from arciv.core.pipeline import ArchiveResult
+from arciv.core.urls import slug_for_url
 from arciv.settings import configure_logger
 
 
@@ -177,9 +177,7 @@ class TestList:
             ],
         )
         with PageDatabase(data_dir / "arciv.db") as db:
-            db.add_source(
-                Source("notes", str(notes), datetime.now(timezone.utc).isoformat())
-            )
+            db.add_source(Source("notes", str(notes), datetime.now(UTC).isoformat()))
             # Only /1 is indexed from the source; /2 was archived ad-hoc.
             db.replace_links_for_files(
                 [],
@@ -448,9 +446,7 @@ class TestSourceGroup:
         notes = tmp_path / "notes"
         notes.mkdir()
         with PageDatabase(data_dir / "arciv.db") as db:
-            db.add_source(
-                Source("notes", str(notes), datetime.now(timezone.utc).isoformat())
-            )
+            db.add_source(Source("notes", str(notes), datetime.now(UTC).isoformat()))
         called = {}
 
         def fake_archive_source(db, name):
@@ -468,9 +464,7 @@ class TestSourceGroup:
         notes = tmp_path / "notes"
         notes.mkdir()
         with PageDatabase(data_dir / "arciv.db") as db:
-            db.add_source(
-                Source("notes", str(notes), datetime.now(timezone.utc).isoformat())
-            )
+            db.add_source(Source("notes", str(notes), datetime.now(UTC).isoformat()))
         captured = {}
         monkeypatch.setattr(cli_module, "index_all", lambda db: ["https://a.com/1"])
 
@@ -502,9 +496,7 @@ class TestSourceGroup:
         directory = tmp_path / name
         directory.mkdir(exist_ok=True)
         with PageDatabase(data_dir / "arciv.db") as db:
-            db.add_source(
-                Source(name, str(directory), datetime.now(timezone.utc).isoformat())
-            )
+            db.add_source(Source(name, str(directory), datetime.now(UTC).isoformat()))
 
     def test_bare_source_lists_registered(self, runner, data_dir, tmp_path):
         self._register(data_dir, tmp_path, "notes")
@@ -811,9 +803,7 @@ class TestPipelineJsonSummaries:
         notes = tmp_path / "notes"
         notes.mkdir()
         with PageDatabase(data_dir / "arciv.db") as db:
-            db.add_source(
-                Source("notes", str(notes), datetime.now(timezone.utc).isoformat())
-            )
+            db.add_source(Source("notes", str(notes), datetime.now(UTC).isoformat()))
         monkeypatch.setattr(
             cli_module,
             "archive_source",
@@ -864,9 +854,7 @@ class TestJson:
 
     def test_sources_emits_jsonl(self, runner, data_dir):
         with PageDatabase(data_dir / "arciv.db") as db:
-            db.add_source(
-                Source("notes", "/tmp/notes", datetime.now(timezone.utc).isoformat())
-            )
+            db.add_source(Source("notes", "/tmp/notes", datetime.now(UTC).isoformat()))
         result = runner.invoke(cli_module.cli, ["--json", "source"])
         records = [json.loads(line) for line in result.stdout.splitlines()]
         assert records == [{"name": "notes", "path": "/tmp/notes"}]

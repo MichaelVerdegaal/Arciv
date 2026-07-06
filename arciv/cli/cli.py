@@ -11,7 +11,7 @@ everywhere: data goes to stdout while logs and diagnostics go to stderr
 import json
 import shutil
 import sys
-from enum import Enum
+from enum import StrEnum
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Annotated, Literal, NoReturn
@@ -20,16 +20,15 @@ import typer
 from loguru import logger
 from typer.core import TyperGroup
 
-from arciv.settings import (
-    DATA_DIR,
-    DB_PATH,
-    SAVED_DIR,
-    USER_RULES_PATH,
-    configure_logger,
-)
 from arciv.core.clock import utc_now_iso
 from arciv.core.db import PageDatabase, Source
-from arciv.core.urls import evaluate_url, load_rules, process_url
+from arciv.core.index import (
+    index_all,
+    index_directory,
+    index_file,
+    index_source,
+    register_urls,
+)
 from arciv.core.pipeline import (
     ArchiveResult,
     archive_source,
@@ -38,13 +37,15 @@ from arciv.core.pipeline import (
     parse_pending,
     report,
 )
-from arciv.core.index import (
-    index_all,
-    index_directory,
-    index_file,
-    index_source,
-    register_urls,
+from arciv.core.urls import evaluate_url, load_rules, process_url
+from arciv.settings import (
+    DATA_DIR,
+    DB_PATH,
+    SAVED_DIR,
+    USER_RULES_PATH,
+    configure_logger,
 )
+
 from .output import (
     EXIT_NOINPUT,
     EXIT_USAGE,
@@ -143,7 +144,7 @@ cli.add_typer(source_app, name="source")
 ColorWhen = Literal["auto", "always", "never"]
 
 
-class PruneMode(str, Enum):
+class PruneMode(StrEnum):
     """What ``arciv prune`` deletes (see the command's help)."""
 
     missing = "missing"
@@ -289,8 +290,10 @@ def get(
             urls = register_urls(db, _resolve_url_targets(url))
         elif file_path is not None:
             urls = index_file(db, file_path)
-        else:
+        elif dir_path is not None:
             urls = index_directory(db, dir_path)
+        else:  # unreachable: the guard above requires exactly one target
+            _fail("Provide exactly one of: URL, --file, or --dir.", code=EXIT_USAGE)
 
         fetched = fetch_urls(db, urls, refetch=refetch)
         # A refetch resets parsed_at, so refetched pages re-parse here too

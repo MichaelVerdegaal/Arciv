@@ -26,7 +26,6 @@ from scrapling.fetchers import Fetcher as StaticFetcher
 
 from arciv.core.clock import utc_now_iso
 from arciv.core.db import Page, PageDatabase
-
 from arciv.core.urls import (
     Rule,
     is_pdf_url,
@@ -430,7 +429,12 @@ class Fetcher:
                     )
 
             if html is not None:
-                break
+                await self._save_html(slug, html)
+                page = self._store_success(
+                    processed_url, original_url, domain, slug, "html"
+                )
+                logger.info(f"Fetched {processed_url}")
+                return page
 
             if not self._is_transient(last_reason) or attempt == self.max_retries:
                 self._store_failure(
@@ -447,7 +451,6 @@ class Fetcher:
             # of transient failures temporarily lowers effective concurrency.
             await asyncio.sleep(2 * (attempt + 1))
 
-        await self._save_html(slug, html)
-        page = self._store_success(processed_url, original_url, domain, slug, "html")
-        logger.info(f"Fetched {processed_url}")
-        return page
+        # Unreachable: range(max_retries + 1) always runs at least once and
+        # every branch inside returns. Present so the return type holds.
+        return None

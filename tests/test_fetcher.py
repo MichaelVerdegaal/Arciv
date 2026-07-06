@@ -11,8 +11,8 @@ import asyncio
 import pytest
 
 from arciv.core.db import Page, PageDatabase
-from arciv.core.urls import Action, Rule, slug_for_url
 from arciv.core.fetch.fetcher import Fetcher
+from arciv.core.urls import Action, Rule, slug_for_url
 
 
 @pytest.fixture

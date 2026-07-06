@@ -1,5 +1,8 @@
 """Tests for markdown cleaning (formatting-artifact removal)."""
 
+from hypothesis import given
+from hypothesis import strategies as st
+
 from arciv.core.parse.clean_markdown import (
     clean_markdown,
     clean_orphan_brackets,
@@ -108,3 +111,12 @@ class TestCleanMarkdownPipeline:
     def test_idempotent_on_clean_text(self):
         text = "Plain text with nothing to clean."
         assert clean_markdown(text) == text
+
+    @given(st.text())
+    def test_never_raises_and_is_idempotent(self, value):
+        """Cleaning runs blind over every archived document, so for ANY input
+        it must not raise, and a second pass must be a no-op. A non-idempotent
+        pass would mean the substitutions are still changing real content on
+        text that was already cleaned."""
+        once = clean_markdown(value)
+        assert clean_markdown(once) == once

@@ -67,7 +67,8 @@ Three stages, no writeback into the notes. Each stage has a dedicated CLI comman
 ## Tech Stack
 
 **Python:** 3.12+ (CI runs the test suite on 3.12, 3.13, and 3.14; `.python-version` pins
-the development default) **Tools:** UV (packages), Ruff (lint/format), pytest (tests)
+the development default) **Tools:** UV (packages), Ruff (lint/format), mypy (type check),
+pytest (tests)
 
 ## Commands
 
@@ -76,7 +77,8 @@ uv add <package>                 # Add dependency
 uv add --group dev <package>     # Add dev dependency
 uv run ruff check                # Lint
 uv run ruff format               # Format code
-uv run pytest                    # Run tests (with coverage)
+uv run mypy                      # Type check (arciv package)
+uv run pytest                    # Run tests (no coverage; CI adds --cov)
 uv run arciv --help             # Run the CLI from the repo
 uv tool install .                # Install the CLI as a global tool
 ```
