@@ -1,6 +1,7 @@
-from .clean_markdown import MarkdownCleaner, clean_markdown
+from .clean_markdown import clean_markdown
 from .parser import (
     ConversionResult,
+    code_inclusive_word_count,
     count_words,
     extract_metadata,
     html_to_markdown,
@@ -11,9 +12,9 @@ from .validate import check_html
 
 __all__ = [
     "ConversionResult",
-    "MarkdownCleaner",
     "check_html",
     "clean_markdown",
+    "code_inclusive_word_count",
     "count_words",
     "extract_metadata",
     "html_to_markdown",

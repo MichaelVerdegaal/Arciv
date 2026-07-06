@@ -5,7 +5,7 @@ from loguru import logger
 
 from arciv.core.db import Page, PageDatabase
 from arciv.core.pipeline import report
-from arciv.core.fetch import slug_for_url
+from arciv.core.urls import slug_for_url
 
 
 @pytest.fixture

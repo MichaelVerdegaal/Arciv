@@ -1,7 +1,7 @@
 """url_helpers.py - Pure URL utilities: decomposition, classification, slugs.
 
 These are stateless helpers with no opinion about the skip/rewrite pipeline
-(that lives in :mod:`arciv.core.fetch.url_processing`). They cover splitting a
+(that lives in :mod:`arciv.core.urls.url_processing`). They cover splitting a
 URL into domain and path, recognising PDF/raw-text URLs, generating the
 on-disk slug, and collapsing equivalent URL forms to one canonical string.
 """
@@ -119,21 +119,29 @@ def slug_for_url(url: str, domain: str | None = None) -> str:
             slug. When None it is resolved here.
 
     Returns:
-        Slug in format "{domain}-{hash}", e.g. "github.com-a1b2c3d4".
+        Slug in format "{domain}-{hash}", e.g. "github.com-a1b2c3d4e5f60718".
     """
     if domain is None:
         domain, _ = split_url(url)
     safe_domain = _UNSAFE_SLUG_CHARS_RE.sub("-", domain) or "unknown"
-    url_hash = hashlib.md5(url.encode("utf-8", errors="surrogatepass")).hexdigest()[:8]
+    # 16 hex chars = 64 bits: collisions within one domain are negligible at
+    # any personal-archive scale (8 chars/32 bits reached ~1% at 10k pages).
+    # Slugs already stored in the DB keep their old 8-char form; only new
+    # pages get the wider hash, and the two never collide structurally.
+    url_hash = hashlib.md5(url.encode("utf-8", errors="surrogatepass")).hexdigest()[:16]
     return f"{safe_domain}-{url_hash}"
 
 
 # Query parameters that only carry tracking/analytics state, never identity.
-# Matched case-insensitively against the parameter name.
+# Matched case-insensitively against the parameter name. Only unambiguous
+# tracker names belong here: generic words some sites use for real routing
+# (ref, source, campaign) are deliberately absent, because stripping an
+# identity-bearing param silently collapses two different pages into one
+# archive entry. Strip those per-site via rules.toml if a site needs it.
 _TRACKING_PARAM_RE = re.compile(
     r"^(?:utm_|fbclid$|gclid$|gclsrc$|dclid$|msclkid$|mc_eid$|mc_cid$"
-    r"|igshid$|ref$|ref_src$|ref_url$|source$|spm$|_hsenc$|_hsmi$"
-    r"|vero_id$|yclid$|wt_mc$|cmpid$|campaign$)",
+    r"|igshid$|ref_src$|ref_url$|spm$|_hsenc$|_hsmi$"
+    r"|vero_id$|yclid$|wt_mc$|cmpid$)",
     re.IGNORECASE,
 )
 

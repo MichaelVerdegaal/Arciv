@@ -21,10 +21,11 @@ arciv = "arciv.cli.cli:cli"
 
 [dependency-groups]
 dev = [
-    "ruff>=0.15.15",       # Linting / formatting
-    "pytest>=8.3.0",       # Test runner
-    "pytest-cov>=6.0.0",   # Coverage reporting
-    "hypothesis>=6.120.0", # Property-based testing
+    "ruff>=0.15.15", # Linting / formatting
+    "pytest>=8.3.0", # Test runner
+    "pytest-cov>=6.0.0", # Coverage reporting
+    "hypothesis>=6.120.0", # Property-based testing (URL/slug/markdown invariants)
+    "mypy>=2.1.0",
 ]
 
 [build-system]
@@ -34,9 +35,32 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["arciv"]
 
+[tool.mypy]
+python_version = "3.12"
+files = ["arciv"]
+# Check inside functions that lack annotations too (e.g. the Click override),
+# and flag ignore comments that no longer suppress anything.
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+# Fetch/parse/URL libraries ship no type information; treat their imports as
+# Any rather than erroring on the missing stubs.
+[[tool.mypy.overrides]]
+module = ["aiofiles.*", "scrapling.*", "trafilatura.*", "liteparse.*", "tldextract.*"]
+ignore_missing_imports = true
+
+[tool.ruff.lint]
+# Defaults (E4/E7/E9, F) plus import sorting (I), bugbear (B), and pyupgrade
+# (UP). Line length is left to the formatter, so E501 stays off and long
+# string literals in tests don't need noqa. These make the conventions
+# AGENTS.md leans on (sorted imports, modern syntax) machine-enforced.
+extend-select = ["I", "B", "UP"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=arciv --cov-report=term-missing"
+# No coverage flags here: a plain `pytest` (single-test debugging, IDE
+# breakpoints) shouldn't pay for instrumentation. CI adds --cov itself.
 
 [tool.coverage.run]
 branch = true

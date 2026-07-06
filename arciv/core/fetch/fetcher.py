@@ -11,33 +11,34 @@ One fetch layer, two engines from Scrapling, one ``Response`` type:
 Each page goes: fetch HTML → write ``page.html`` to the slug folder → record
 in DB. PDF URLs are downloaded directly and stored as ``page.pdf``. Validation
 and markdown conversion happen later, in the parse stage (see
-``arciv.core.pipeline.parse``).
+``arciv.core.pipeline.parse_pipeline``).
 """
 
 import asyncio
-from collections.abc import Sequence
-from datetime import datetime, timezone
+from collections.abc import Coroutine, Sequence
 from pathlib import Path
+from typing import Any
 
 import aiofiles
 from loguru import logger
 from scrapling.fetchers import AsyncStealthySession
 from scrapling.fetchers import Fetcher as StaticFetcher
 
+from arciv.core.clock import utc_now_iso
 from arciv.core.db import Page, PageDatabase
-
-from .rules import Rule, load_rules
-from .url_helpers import (
+from arciv.core.urls import (
+    Rule,
     is_pdf_url,
+    process_url,
     registered_domain,
     slug_for_url,
     split_url,
 )
-from .url_processing import process_url
 
 # Neutral mechanism defaults so a Fetcher is usable without settings (e.g.
 # in tests). The env-tunable values the CLI actually runs with live in
-# arciv.settings and are injected by the pipeline layer (pipeline/fetch.py).
+# arciv.settings and are injected by the pipeline layer
+# (pipeline/fetch_pipeline.py).
 TIMEOUT_MS = 30_000
 DEFAULT_CONCURRENCY = 8
 DEFAULT_MAX_RETRIES = 2
@@ -63,9 +64,13 @@ class Fetcher:
         saved_dir: Root directory for archived page folders.
         page_timeout: Browser page load timeout in milliseconds.
         max_concurrency: Maximum concurrent page fetches for batch operations.
-        max_retries: Maximum retry attempts for transient failures.
-        rules: URL-processing rules to re-apply before fetching. Defaults to the
-            packaged defaults only; the pipeline injects the user-merged list.
+        max_retries: Retries after the first attempt for transient failures
+            (timeouts, connection resets); total attempts = max_retries + 1.
+        rules: URL-processing rules to re-apply before fetching. Defaults to
+            NO rules (the in-code plumbing guards still apply): the pipeline
+            layer injects ``load_rules(USER_RULES_PATH)``, and defaulting to a
+            different rule set here would silently ignore the user's
+            rules.toml for anyone constructing a Fetcher directly.
     """
 
     def __init__(
@@ -75,14 +80,14 @@ class Fetcher:
         page_timeout: int = TIMEOUT_MS,
         max_concurrency: int = DEFAULT_CONCURRENCY,
         max_retries: int = DEFAULT_MAX_RETRIES,
-        rules: Sequence[Rule] | None = None,
+        rules: Sequence[Rule] = (),
     ):
         self.db = db
         self.saved_dir = saved_dir
         self.page_timeout = page_timeout
         self.max_concurrency = max_concurrency
         self.max_retries = max_retries
-        self.rules = list(rules) if rules is not None else load_rules()
+        self.rules = list(rules)
 
     # -- internal helpers --
 
@@ -131,7 +136,7 @@ class Fetcher:
             domain=domain,
             slug=slug,
             content_type=content_type,
-            fetched_at=datetime.now(timezone.utc).isoformat(),
+            fetched_at=utc_now_iso(),
         )
         self.db.upsert(page)
         return page
@@ -239,6 +244,49 @@ class Fetcher:
         archive their raw content. Returns the successfully fetched Pages."""
         return asyncio.run(self._fetch_batch_async(urls, refetch))
 
+    def _mark_diverted(self, diverted: dict[str, str]) -> None:
+        """Record a fail_reason on stored rows the current rules no longer
+        target.
+
+        A stored URL that today's rules skip — or rewrite to a different key —
+        would otherwise stay pending forever: nothing will ever fetch that
+        exact key again, ``status`` counts it as pending on every run, and no
+        ``prune`` mode selects rows without a fail_reason. Writing the
+        divergence as the fail_reason makes it visible and prunable. Only
+        pending rows are touched; already-fetched content is never demoted.
+        """
+        for url, page in self.db.get_many(list(diverted)).items():
+            if not page.fetched and page.fail_reason is None:
+                page.fail_reason = diverted[url]
+                self.db.upsert(page)
+                logger.warning(f"Marked {url}: {diverted[url]}")
+
+    async def _isolated(
+        self,
+        entry: tuple[str, str, str, str],
+        task: Coroutine[Any, Any, Page | None],
+    ) -> Page | None:
+        """Await one per-URL fetch task without letting an unexpected
+        exception escape into ``asyncio.gather``, where it would cancel every
+        other in-flight fetch in the batch. The expected failure modes are
+        handled inside the task; whatever still escapes (disk full, a DB
+        integrity error) is recorded as that one page's failure.
+        """
+        try:
+            return await task
+        except Exception as e:
+            processed_url, original_url, domain, slug = entry
+            logger.error(f"Unexpected error fetching {processed_url}: {e}")
+            try:
+                self._store_failure(
+                    processed_url, original_url, domain, slug, f"unexpected: {e}"
+                )
+            except Exception as store_error:
+                logger.error(
+                    f"Could not record the failure for {processed_url}: {store_error}"
+                )
+            return None
+
     async def _fetch_batch_async(
         self,
         urls: list[str],
@@ -252,6 +300,7 @@ class Fetcher:
         to_fetch_html: list[tuple[str, str, str, str]] = []
         to_fetch_pdf: list[tuple[str, str, str, str]] = []
         candidates: dict[str, str] = {}  # processed URL -> first input URL
+        diverted: dict[str, str] = {}  # stored URL the rules now skip/rewrite
 
         # Re-process with the current rules so a rule edited after indexing still
         # applies (and re-canonicalises) before anything is downloaded.
@@ -259,11 +308,19 @@ class Fetcher:
             processed_url, skip_reason = process_url(url, self.rules)
             if processed_url is None:
                 logger.warning(f"Skipped {url}: {skip_reason}")
+                diverted[url] = f"skipped by rule change since indexing: {skip_reason}"
                 continue
+            if processed_url != url:
+                diverted[url] = (
+                    f"rewritten by rule change since indexing -> {processed_url}"
+                )
             candidates.setdefault(processed_url, url)
 
-        # One batched lookup instead of two db.get() round-trips per URL:
-        # the same row answers both "needs fetch?" and "which original_url?".
+        if diverted:
+            self._mark_diverted(diverted)
+
+        # One batched lookup: the same row answers both "needs fetch?" and
+        # "which original_url?".
         existing_pages = self.db.get_many(list(candidates))
         for processed_url, input_url in candidates.items():
             existing = existing_pages.get(processed_url)
@@ -289,6 +346,9 @@ class Fetcher:
             # PDFs are downloaded directly over HTTP; no browser needed. Each
             # download blocks in a worker thread (see _fetch_pdf), so run them
             # concurrently, capped at max_concurrency to bound open connections.
+            # They run before (not alongside) the browser batch on purpose:
+            # interleaving the two pools isn't worth the complexity for the
+            # small PDF share of a typical batch.
             if to_fetch_pdf:
                 pdf_sem = asyncio.Semaphore(self.max_concurrency)
 
@@ -299,31 +359,36 @@ class Fetcher:
                         return await self._fetch_pdf(*entry)
 
                 pdf_pages = await asyncio.gather(
-                    *(_bounded_pdf(entry) for entry in to_fetch_pdf)
+                    *(
+                        self._isolated(entry, _bounded_pdf(entry))
+                        for entry in to_fetch_pdf
+                    )
                 )
                 results.extend(page for page in pdf_pages if page is not None)
 
-            if not to_fetch_html:
-                return results
+            if to_fetch_html:
+                # HTML URLs share one stealthy browser session.
+                # ``disable_resources`` drops images/stylesheets/fonts (and
+                # more) for speed; ``network_idle`` lets JS-rendered pages
+                # settle so content() isn't an empty shell. The session's page
+                # pool caps concurrency at ``max_pages``; retries are left to
+                # our own transient-only loop (``retries=1``).
+                async with AsyncStealthySession(
+                    max_pages=self.max_concurrency,
+                    headless=True,
+                    disable_resources=True,
+                    network_idle=True,
+                    timeout=self.page_timeout,
+                    retries=1,
+                ) as session:
+                    fetched = await asyncio.gather(
+                        *(
+                            self._isolated(entry, self._fetch_one(session, *entry))
+                            for entry in to_fetch_html
+                        )
+                    )
+                results.extend(page for page in fetched if page is not None)
 
-            # HTML URLs share one stealthy browser session. ``disable_resources``
-            # drops images/stylesheets/fonts (and more) for speed; ``network_idle``
-            # lets JS-rendered pages settle so content() isn't an empty shell. The
-            # session's page pool caps concurrency at ``max_pages``; retries are
-            # left to our own transient-only loop below (``retries=1``).
-            async with AsyncStealthySession(
-                max_pages=self.max_concurrency,
-                headless=True,
-                disable_resources=True,
-                network_idle=True,
-                timeout=self.page_timeout,
-                retries=1,
-            ) as session:
-                fetched = await asyncio.gather(
-                    *(self._fetch_one(session, *item) for item in to_fetch_html)
-                )
-
-        results.extend(page for page in fetched if page is not None)
         return results
 
     async def _fetch_one(
@@ -335,16 +400,21 @@ class Fetcher:
         slug: str,
     ) -> Page | None:
         """Fetch a single URL (async) through the stealth session and archive
-        its raw HTML. Retries transient errors (timeouts, connection resets) up
-        to max_retries times before recording a failure. Returns the Page, or
-        None on failure."""
+        its raw HTML. Transient errors (timeouts, connection resets) are
+        retried up to max_retries times after the first attempt before
+        recording a failure. Returns the Page, or None on failure."""
         html: str | None = None
         last_reason = ""
 
-        for attempt in range(1, self.max_retries + 1):
+        # attempt counts retries: 0 is the first try, max_retries the last.
+        for attempt in range(self.max_retries + 1):
             try:
                 response = await session.fetch(processed_url)
                 html = response.html_content
+                if html is None:
+                    # A clean response with no content is still a failure, and
+                    # must not be stored with an empty reason.
+                    last_reason = "browser returned no content"
             except Exception as e:
                 last_reason = self._format_fetch_error(e)
 
@@ -359,7 +429,12 @@ class Fetcher:
                     )
 
             if html is not None:
-                break
+                await self._save_html(slug, html)
+                page = self._store_success(
+                    processed_url, original_url, domain, slug, "html"
+                )
+                logger.info(f"Fetched {processed_url}")
+                return page
 
             if not self._is_transient(last_reason) or attempt == self.max_retries:
                 self._store_failure(
@@ -369,11 +444,13 @@ class Fetcher:
                 return None
 
             logger.debug(
-                f"Retry {attempt}/{self.max_retries} for {processed_url}: {last_reason}"
+                f"Retry {attempt + 1}/{self.max_retries} for {processed_url}: "
+                f"{last_reason}"
             )
-            await asyncio.sleep(2 * attempt)
+            # The sleep holds one of the session's max_pages slots, so a burst
+            # of transient failures temporarily lowers effective concurrency.
+            await asyncio.sleep(2 * (attempt + 1))
 
-        await self._save_html(slug, html)
-        page = self._store_success(processed_url, original_url, domain, slug, "html")
-        logger.info(f"Fetched {processed_url}")
-        return page
+        # Unreachable: range(max_retries + 1) always runs at least once and
+        # every branch inside returns. Present so the return type holds.
+        return None

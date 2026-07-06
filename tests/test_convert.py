@@ -4,6 +4,7 @@ import itertools
 
 from arciv.core.parse.parser import (
     ConversionResult,
+    code_inclusive_word_count,
     count_words,
     extract_metadata,
     html_to_markdown,
@@ -139,10 +140,10 @@ class TestParseHtml:
         assert result.word_count > 0
         assert result.title == "Unique Title"
 
-    def test_full_word_count_includes_code(self):
+    def test_code_inclusive_count_exceeds_stripped_count(self):
         # Code-heavy page: most words live in the code block. The stored
-        # word_count strips them, but full_word_count keeps them so the
-        # length gate doesn't wrongly reject the page as "too short".
+        # word_count strips them, but the code-inclusive count keeps them so
+        # the length gate doesn't wrongly reject the page as "too short".
         html = (
             "<html><head><title>Code Heavy</title></head><body><article>"
             "<p>Short intro paragraph here.</p>"
@@ -151,7 +152,7 @@ class TestParseHtml:
         )
         result = parse_html(html)
         assert result is not None
-        assert result.full_word_count > result.word_count
+        assert code_inclusive_word_count(html) > result.word_count
 
     def test_returns_none_on_failure(self):
         assert parse_html("") is None

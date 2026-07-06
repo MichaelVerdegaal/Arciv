@@ -5,7 +5,7 @@ import re
 from hypothesis import given
 from hypothesis import strategies as st
 
-from arciv.core.fetch import (
+from arciv.core.urls import (
     Action,
     Rule,
     canonicalize,
@@ -22,7 +22,7 @@ from arciv.core.fetch import (
 # the policy skips. Behaviour tests that exercise a default rule pass these.
 DEFAULTS = load_rules()
 
-_SLUG_RE = re.compile(r"^.+-[0-9a-f]{8}$")
+_SLUG_RE = re.compile(r"^.+-[0-9a-f]{16}$")
 
 # Characters that are path separators or illegal in Windows directory names
 _UNSAFE_FS_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f\s]')
@@ -427,6 +427,15 @@ class TestCanonicalize:
     def test_unparseable_returned_unchanged(self):
         assert canonicalize("https://[") == "https://["
 
+    @given(st.text())
+    def test_idempotent(self, value):
+        """canonicalize is a fixed point: its output re-canonicalizes to
+        itself. The fetch stage re-canonicalizes stored keys, so a
+        non-idempotent normaliser would give a page two different identities
+        (index-time vs fetch-time) and orphan one of them."""
+        once = canonicalize(f"https://{value}")
+        assert canonicalize(once) == once
+
 
 class TestProcessUrlCanonicalization:
     """process_url applies canonicalize to its result."""
@@ -505,7 +514,7 @@ class TestSlug:
     )
     def test_slug_is_always_a_safe_directory_name(self, host, path):
         """Slugs become directory names under saved/, so for ANY url they
-        must be non-empty, end in the 8-hex hash, and contain no characters
+        must be non-empty, end in the 16-hex hash, and contain no characters
         that are unsafe on Linux or Windows filesystems."""
         slug = slug_for_url(f"https://{host}/{path}")
         assert _SLUG_RE.match(slug)

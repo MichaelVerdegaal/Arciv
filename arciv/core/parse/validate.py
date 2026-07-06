@@ -58,7 +58,9 @@ def check_html(html: str, size: int | None = None) -> str | None:
     if size < MIN_HTML_BYTES:
         return f"html suspiciously small ({size} bytes)"
 
-    # Check title for known block-page patterns
+    # The marker scans only need the document head: 3000/5000 chars is
+    # comfortably past any real <title> and the inline challenge scripts,
+    # without scanning megabytes of body.
     if _BLOCK_TITLE_RE.search(html[:3000]):
         title_match = re.search(
             r"<title[^>]*>(.*?)</title>", html[:3000], re.IGNORECASE | re.DOTALL

@@ -3,10 +3,9 @@
 The data root defaults to the OS user data directory (Linux:
 ``~/.local/share/arciv``, Windows: ``%LOCALAPPDATA%\\arciv``), so the
 archive has one fixed home regardless of where the command runs, and
-lives outside any repo checkout, so the future backend container can
-mount it directly. Set ``ARCIV_DATA_DIR`` (in the environment or a
-``.env`` file) to relocate it, e.g. to ``./data`` when developing from
-a clone.
+lives outside any repo checkout, surviving reinstalls. Set
+``ARCIV_DATA_DIR`` (in the environment or a ``.env`` file) to relocate
+it, e.g. to ``./data`` when developing from a clone.
 """
 
 import os
@@ -36,12 +35,18 @@ DB_PATH = DATA_DIR / "arciv.db"
 USER_RULES_PATH = DATA_DIR / "rules.toml"
 
 
-def _env_int(name: str, default: int) -> int:
-    """Read a positive integer from the environment, falling back to default.
+# Warnings produced before logging is configured (see _env_int). They are
+# emitted by configure_logger once handlers exist, so they show up in the
+# format the user chose instead of loguru's import-time default.
+_startup_warnings: list[str] = []
 
-    A missing, non-integer, or below-1 value uses ``default`` (with a
-    warning for malformed input), so a typo in an ``ARCIV_*`` var degrades
-    to the shipped behavior instead of crashing the CLI on startup.
+
+def _env_int(name: str, default: int, minimum: int = 1) -> int:
+    """Read an integer from the environment, falling back to default.
+
+    A missing, non-integer, or below-``minimum`` value uses ``default``
+    (with a warning for malformed input), so a typo in an ``ARCIV_*`` var
+    degrades to the shipped behavior instead of crashing the CLI on startup.
     """
     raw = os.getenv(name)
     if raw is None:
@@ -49,10 +54,12 @@ def _env_int(name: str, default: int) -> int:
     try:
         value = int(raw)
     except ValueError:
-        logger.warning(f"Ignoring invalid {name}={raw!r}; using {default}")
+        _startup_warnings.append(f"Ignoring invalid {name}={raw!r}; using {default}")
         return default
-    if value < 1:
-        logger.warning(f"Ignoring out-of-range {name}={raw!r}; using {default}")
+    if value < minimum:
+        _startup_warnings.append(
+            f"Ignoring out-of-range {name}={raw!r}; using {default}"
+        )
         return default
     return value
 
@@ -62,7 +69,9 @@ def _env_int(name: str, default: int) -> int:
 # them into the core mechanisms, which keep their own neutral defaults so they
 # stay usable without settings (e.g. in tests).
 DEFAULT_CONCURRENCY = _env_int("ARCIV_CONCURRENCY", 8)
-DEFAULT_MAX_RETRIES = _env_int("ARCIV_MAX_RETRIES", 2)
+# Retries after the first attempt for transient fetch failures; 0 disables
+# retrying entirely (one attempt per URL).
+DEFAULT_MAX_RETRIES = _env_int("ARCIV_MAX_RETRIES", 2, minimum=0)
 TIMEOUT_MS = _env_int("ARCIV_TIMEOUT_MS", 30_000)
 # Minimum extracted word count to accept a page; below this it's rejected as
 # too short. This gate decides what gets archived versus dropped.
@@ -116,7 +125,8 @@ def configure_logger(
         enqueue=True,
     )
 
-    # File - rotates daily, always at DEBUG for a full diagnostic trail
+    # File - rotates daily, always at DEBUG for a full diagnostic trail;
+    # retention keeps the logs dir from growing forever
     if log_file:
         logger.add(
             LOGS_DIR / "arciv.log",
@@ -125,5 +135,11 @@ def configure_logger(
             backtrace=True,
             diagnose=True,
             rotation="1 day",
+            retention="30 days",
             enqueue=True,
         )
+
+    # Settings problems found before logging existed (e.g. a malformed
+    # ARCIV_* value read at import) surface now, in the configured format.
+    while _startup_warnings:
+        logger.warning(_startup_warnings.pop(0))

@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from arciv.core.db import Page, PageDatabase
 from arciv.core.index import index_source
 
-from .fetch import fetch_urls
-from .parse import parse_pending
+from .fetch_pipeline import fetch_urls
+from .parse_pipeline import parse_pending
 
 
 @dataclass
