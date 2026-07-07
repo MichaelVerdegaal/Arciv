@@ -73,9 +73,6 @@ DEFAULT_CONCURRENCY = _env_int("ARCIV_CONCURRENCY", 8)
 # retrying entirely (one attempt per URL).
 DEFAULT_MAX_RETRIES = _env_int("ARCIV_MAX_RETRIES", 2, minimum=0)
 TIMEOUT_MS = _env_int("ARCIV_TIMEOUT_MS", 30_000)
-# Minimum extracted word count to accept a page; below this it's rejected as
-# too short. This gate decides what gets archived versus dropped.
-DEFAULT_MIN_WORDS = _env_int("ARCIV_MIN_WORDS", 150)
 
 
 # Maps the CLI's --color choice to loguru's colorize argument. "auto"

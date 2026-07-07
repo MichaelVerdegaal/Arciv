@@ -22,13 +22,16 @@ from typer.core import TyperGroup
 
 from arciv.core.clock import utc_now_iso
 from arciv.core.db import PageDatabase, Source
+from arciv.core.fetch import LinkFetchError, fetch_links
 from arciv.core.index import (
+    extract_urls,
     index_all,
     index_directory,
     index_file,
     index_source,
     register_urls,
 )
+from arciv.core.notes import read_note
 from arciv.core.pipeline import (
     ArchiveResult,
     archive_source,
@@ -37,11 +40,12 @@ from arciv.core.pipeline import (
     parse_pending,
     report,
 )
-from arciv.core.urls import evaluate_url, load_rules, process_url
+from arciv.core.urls import evaluate_url, is_pdf_url, load_rules, process_url
 from arciv.settings import (
     DATA_DIR,
     DB_PATH,
     SAVED_DIR,
+    TIMEOUT_MS,
     USER_RULES_PATH,
     configure_logger,
 )
@@ -274,16 +278,41 @@ def get(
         bool,
         typer.Option("--refetch", help="Re-download pages even if already fetched."),
     ] = False,
+    no_save: Annotated[
+        bool,
+        typer.Option(
+            "--no-save",
+            help="Fetch the URL, print its links to stdout, and archive nothing.",
+        ),
+    ] = False,
 ) -> None:
     """Archive a URL, the links in a file, or a whole directory.
 
     Runs the full pipeline (index → fetch → parse) on exactly one of:
     a single URL, a single file (--file), or a directory (--dir). Pass
     ``-`` as the URL to read newline-separated URLs from stdin.
+
+    With --no-save, the URL is fetched but nothing is archived: the page's
+    links (absolute, deduplicated) are printed to stdout instead, one per
+    line, so a link-hub page (a web book's ToC, a link roundup) chains into
+    a second get:
+
+        arciv get https://book.example/toc --no-save | arciv get -
     """
     targets = [t for t in (url, file_path, dir_path) if t is not None]
     if len(targets) != 1:
         _fail("Provide exactly one of: URL, --file, or --dir.", code=EXIT_USAGE)
+
+    if no_save:
+        if url is None:
+            _fail("--no-save works on a single URL, not --file/--dir.", code=EXIT_USAGE)
+        if url == "-":
+            _fail("--no-save works on a single URL, not stdin.", code=EXIT_USAGE)
+        if refetch:
+            # Nothing is cached or stored, so there is nothing to re-fetch.
+            _fail("--refetch has no effect with --no-save.", code=EXIT_USAGE)
+        _print_page_links(url)
+        return
 
     with PageDatabase(DB_PATH) as db:
         if url is not None:
@@ -309,6 +338,31 @@ def get(
             report(db, len(fetched), urls)
 
 
+def _print_page_links(url: str) -> None:
+    """Fetch ``url`` and print its DOM links to stdout, storing nothing.
+
+    The URL goes through the same rule processing the archive pipeline uses
+    (a skipped or rewritten target here would silently diverge from what a
+    plain ``get`` fetches). The printed links are raw — only deduplicated by
+    the extractor — since a downstream ``get -`` re-applies the rules anyway.
+    """
+    processed, skip_reason = process_url(url, load_rules(USER_RULES_PATH))
+    if processed is None:
+        _fail(f"Skipped {url}: {skip_reason}", code=EXIT_NOINPUT)
+    if is_pdf_url(processed):
+        _fail(f"{processed} is a PDF: no DOM to extract links from.")
+    try:
+        links = fetch_links(processed, page_timeout=TIMEOUT_MS)
+    except LinkFetchError as e:
+        _fail(f"Fetch failed for {processed}: {e}")
+    logger.info(f"Found {len(links)} links on {processed} (nothing archived)")
+    for link in links:
+        if json_output():
+            emit_json({"url": link})
+        else:
+            emit(link)
+
+
 def _resolve_url_targets(url: str) -> list[str]:
     """Resolve the ``get`` URL argument to a list of URLs to archive.
 
@@ -324,6 +378,49 @@ def _resolve_url_targets(url: str) -> list[str]:
             code=EXIT_USAGE,
         )
     return [line.strip() for line in sys.stdin if line.strip()]
+
+
+@cli.command()
+def extract(
+    target: Annotated[
+        str,
+        typer.Argument(
+            help="Note file to extract links from, or '-' to read text from stdin."
+        ),
+    ],
+) -> None:
+    """Print the URLs found in a note file, one per line, archiving nothing.
+
+    Offline link extraction: the same URL scan the index stage runs, but with
+    no database writes and no fetching, so the output composes with pipes.
+    URLs are printed raw (only deduplicated, first occurrence wins); the
+    downstream command applies the rules, e.g.:
+
+        arciv extract note.md | grep example.com | arciv get -
+
+    Pass ``-`` to read note text from stdin. With --json, emits JSONL (one
+    ``{"url"}`` object per line).
+    """
+    if target == "-":
+        if sys.stdin.isatty():
+            _fail(
+                "Reading text from stdin ('extract -') but stdin is a terminal. "
+                "Pipe text in, e.g.: cat note.md | arciv extract -",
+                code=EXIT_USAGE,
+            )
+        text = sys.stdin.read()
+    else:
+        try:
+            text = read_note(Path(target))
+        except (OSError, UnicodeDecodeError) as e:
+            _fail(f"Cannot read {target}: {e}", code=EXIT_NOINPUT)
+
+    # Dedupe preserving first-occurrence order, like the index stage does.
+    for url in dict.fromkeys(extract_urls(text)):
+        if json_output():
+            emit_json({"url": url})
+        else:
+            emit(url)
 
 
 def _report_archive(name: str, result: ArchiveResult) -> None:

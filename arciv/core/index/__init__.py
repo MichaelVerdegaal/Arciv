@@ -13,8 +13,11 @@ from .index import (
     index_source,
     register_urls,
 )
+from .links import extract_links, extract_urls
 
 __all__ = [
+    "extract_links",
+    "extract_urls",
     "index_all",
     "index_directory",
     "index_file",

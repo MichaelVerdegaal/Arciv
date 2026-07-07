@@ -17,6 +17,7 @@ from urllib.parse import (
 )
 
 import tldextract
+from w3lib.url import canonicalize_url as _w3lib_canonicalize_url
 
 # Extensions served as plain text (skip trafilatura, store bytes directly)
 RAW_TEXT_EXTENSIONS = frozenset({".md", ".txt", ".rst", ".csv", ".tsv"})
@@ -149,14 +150,17 @@ _TRACKING_PARAM_RE = re.compile(
 def canonicalize(url: str) -> str:
     """Collapse equivalent URL forms to one canonical string.
 
-    Applies the always-safe normalisations (lowercase host, drop default
-    ports) plus the widely-safe heuristics (strip ``www.``, drop a trailing
-    slash, remove tracking parameters, sort the query) so that forms which
-    serve the same page resolve to a single identity, primary key, and slug.
+    Two layers. The opinionated one lives here: strip ``www.``, drop a
+    trailing slash and default ports, remove tracking parameters, sort the
+    query. The mechanical one (consistent percent-encoding of path and
+    query, IDNA hosts) is delegated to w3lib's ``canonicalize_url`` as the
+    final step, so encoding variants of the same URL collapse without this
+    module owning the escaping rules.
 
-    The path is treated as opaque (other than the trailing-slash trim):
-    site-specific path rewrites are the rewriter's job, not this function's,
-    which keeps unsafe per-site path transforms out of the always-on layer.
+    The path is treated as opaque (other than the trailing-slash trim and
+    w3lib's encoding normalisation): site-specific path rewrites are the
+    rewriter's job, not this function's, which keeps unsafe per-site path
+    transforms out of the always-on layer.
 
     Args:
         url: A processed https URL (post skip/rewrite).
@@ -187,4 +191,10 @@ def canonicalize(url: str) -> str:
     ]
     query = urlencode(sorted(kept))
 
-    return urlunsplit((parts.scheme, netloc, path, query, ""))
+    stripped = urlunsplit((parts.scheme, netloc, path, query, ""))
+    try:
+        return _w3lib_canonicalize_url(stripped)
+    except (ValueError, UnicodeError):
+        # w3lib refuses some pathological inputs (bad IDNA, invalid escapes);
+        # the un-normalised form is still a usable, stable identity.
+        return stripped
