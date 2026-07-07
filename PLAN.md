@@ -47,6 +47,9 @@ Decisions made along the way:
   delegates the mechanical normalization (percent-encoding, query sorting) to w3lib's
   `canonicalize_url` (already in the tree via Scrapling). No migration: the archive is pre-1.0 and
   gets recreated.
+- Both extractors live together in `arciv.core.index.links` — same job (URLs out of an input
+  string), different method (regex over note text vs. `LinkExtractor` over a DOM). Discovery is the
+  index stage's identity; `notes` keeps only file reading, `fetch` keeps only the browser I/O.
 - The min-words knob (`ARCIV_MIN_WORDS`) is gone: nobody can dial it meaningfully. A fixed low
   floor stays as the only guard against consent walls and empty JS shells posing as parsed pages,
   and the rejection reason now names the threshold so the gate is transparent.

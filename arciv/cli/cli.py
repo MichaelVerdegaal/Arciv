@@ -24,13 +24,14 @@ from arciv.core.clock import utc_now_iso
 from arciv.core.db import PageDatabase, Source
 from arciv.core.fetch import LinkFetchError, fetch_links
 from arciv.core.index import (
+    extract_urls,
     index_all,
     index_directory,
     index_file,
     index_source,
     register_urls,
 )
-from arciv.core.notes import extract_urls, read_note
+from arciv.core.notes import read_note
 from arciv.core.pipeline import (
     ArchiveResult,
     archive_source,

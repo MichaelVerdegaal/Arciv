@@ -13,7 +13,7 @@ from loguru import logger
 
 from arciv.core.clock import utc_now_iso
 from arciv.core.db import PageDatabase
-from arciv.core.notes import extract_urls, find_notes, read_note
+from arciv.core.notes import find_notes, read_note
 from arciv.core.urls import (
     load_rules,
     process_url,
@@ -22,6 +22,8 @@ from arciv.core.urls import (
     split_url,
 )
 from arciv.settings import USER_RULES_PATH
+
+from .links import extract_urls
 
 
 def _page_entry(processed_url: str, original_url: str) -> tuple[str, str, str, str]:

@@ -1,39 +1,21 @@
 """Link discovery on a live page: fetch one URL, return its links, store nothing.
 
-The engine of ``arciv get --no-save``. Extraction runs on the response DOM
-via Scrapling's LinkExtractor rather than through trafilatura, whose
-boilerplate pruning is trained to strip exactly the link-list pages (a web
-book's ToC, a link roundup) this path exists for. Relative links resolve
-against the response's final URL, so redirects don't skew the base.
+The engine of ``arciv get --no-save``: this module only does the browser
+I/O; the DOM extraction itself lives with the other link extractor in
+``arciv.core.index.links``.
 """
 
 import asyncio
-from typing import Any
 
 from scrapling.fetchers import AsyncStealthySession
-from scrapling.spiders import LinkExtractor
+
+from arciv.core.index import extract_links
 
 from .fetcher import TIMEOUT_MS, Fetcher
 
 
 class LinkFetchError(Exception):
     """The page could not be fetched, so no links could be extracted."""
-
-
-# LinkExtractor's default deny_extensions drops .pdf (and office formats):
-# papers are exactly what arciv archives, so extension filtering is disabled.
-# canonicalize is off because the downstream get/index pipeline applies the
-# rules and canonicalization itself; this stage only discovers.
-_EXTRACTOR = LinkExtractor(deny_extensions=(), canonicalize=False)
-
-
-def extract_links(page: Any) -> list[str]:
-    """Absolute, deduped URLs from a fetched page's DOM.
-
-    ``page`` is any Scrapling Selector-family object carrying a base URL
-    (a live Response, or a ``Selector(html, url=...)`` in tests).
-    """
-    return _EXTRACTOR.extract(page)
 
 
 def fetch_links(url: str, page_timeout: int = TIMEOUT_MS) -> list[str]:
