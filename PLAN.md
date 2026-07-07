@@ -24,6 +24,38 @@ with `ARCIV_DATA_DIR`. It sits outside any checkout so it survives reinstalls.
 
 (medium paywalls and github/huggingface path surgery are already handled by the shipped rules.)
 
+## Link mining (in progress)
+Notes are often just carriers for the URLs in them, and some webpages (a web book's ToC, a link
+roundup) are pure link hubs. The archive pipeline shouldn't be the only way to get at those links,
+so two composable pieces:
+
+- `arciv extract <file|->`: offline link extraction from note text (the same `extract_urls` the
+  index stage uses), one URL per line on stdout, no database writes. The "my note is boring but its
+  links aren't" case: `arciv extract note.md | arciv get -`.
+- `arciv get <url> --no-save`: fetch the page, print its links (absolute, deduped) to stdout, store
+  nothing — no page row, no `saved/` folder. Link extraction runs on the live response DOM via
+  Scrapling's `LinkExtractor`, so relative links resolve against the real base URL; trafilatura is
+  deliberately not in this path (its boilerplate pruning is trained to kill link-list pages). The
+  ToC case: `arciv get <toc-url> --no-save | arciv get -`.
+
+Decisions made along the way:
+- `LinkExtractor` must be configured with `deny_extensions=()`: its default drops `.pdf`, which
+  would silently discard exactly the paper links Arciv exists to archive.
+- The printed links are raw (only deduped): the downstream `arciv get -` re-applies the rules and
+  plumbing guards anyway, and filtering belongs to grep in the middle of the pipe.
+- `canonicalize()` keeps its opinionated layer (strip `www.`, trailing slash, tracking params) and
+  delegates the mechanical normalization (percent-encoding, query sorting) to w3lib's
+  `canonicalize_url` (already in the tree via Scrapling). No migration: the archive is pre-1.0 and
+  gets recreated.
+- The min-words knob (`ARCIV_MIN_WORDS`) is gone: nobody can dial it meaningfully. A fixed low
+  floor stays as the only guard against consent walls and empty JS shells posing as parsed pages,
+  and the rejection reason now names the threshold so the gate is transparent.
+
+This is the foundation for the parked crawl/depth item, not the item itself: when that unparks,
+Scrapling's `CrawlSpider`/`SitemapSpider` (same `LinkExtractor` underneath, plus scheduling, dedup,
+politeness, checkpointing) becomes the engine, with Arciv supplying URL rules and the archive sink.
+The pipe stays the manual, human-in-the-middle version — grep-able between stages.
+
 ## Parking lot
 - Image archiving: a branch saves images and inlines markdown links to them, parked because it added
   an obscene amount of code for reading material where the text is the point. If revisited, do it as
@@ -31,7 +63,7 @@ with `ARCIV_DATA_DIR`. It sits outside any checkout so it survives reinstalls.
 - FTS5 / semantic search: only once the search gap is actually felt.
 - Wayback Machine fallback for paywalled content.
 - Automatic re-scraping of updated pages.
-- Crawl / depth.
+- Crawl / depth (see "Link mining" above for the shipped foundation and the intended engine).
 - `arciv show`: a read-only viewer that renders a page's markdown to a pager or browser, if a viewer
   is ever wanted again (the removed web app's only feature worth missing). No server.
 
