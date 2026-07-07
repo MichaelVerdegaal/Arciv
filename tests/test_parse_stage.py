@@ -91,7 +91,9 @@ class TestParsePending:
         # Raw content is still on disk: the page stays fetched, not parsed
         assert page.fetched is True
         assert page.parsed is False
+        # The reason names the threshold so the gate is transparent
         assert "too short" in page.fail_reason
+        assert "< 100000," in page.fail_reason
 
     def test_rejects_missing_raw_content(self, db, tmp_path):
         saved = tmp_path / "saved"

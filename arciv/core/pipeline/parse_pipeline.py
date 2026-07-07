@@ -23,22 +23,29 @@ from arciv.core.parse import (
     pdf_to_text,
 )
 from arciv.core.urls import is_raw_text_url
-from arciv.settings import DEFAULT_MIN_WORDS, SAVED_DIR
+from arciv.settings import SAVED_DIR
+
+# Minimum extracted word count to accept a page. Deliberately a fixed floor,
+# not a knob: it exists only to catch consent walls and empty JS shells that
+# would otherwise pose as successfully parsed pages, and is set low enough
+# that no real article ever trips it. Tests pass their own ``min_words``.
+MIN_WORDS = 50
 
 
-def _too_short_reason(words: int, raw_bytes: int, kind: str) -> str:
+def _too_short_reason(words: int, min_words: int, raw_bytes: int, kind: str) -> str:
     """Build the rejection reason for below-threshold content.
 
-    Pairs the extracted word count with the raw source size so a skip can be
-    judged at a glance: a large raw size yielding few words points to a
-    fetch/parse miss (paywall, JS-only page), while a small raw size is just
-    genuinely short. ``kind`` labels the source (e.g. "html", "pdf").
+    Pairs the extracted word count with the threshold it missed and the raw
+    source size, so a skip can be judged at a glance: a large raw size
+    yielding few words points to a fetch/parse miss (paywall, JS-only page),
+    while a small raw size is just genuinely short. ``kind`` labels the
+    source (e.g. "html", "pdf").
     """
     if raw_bytes < 1024:
         size = f"{raw_bytes} B"
     else:
         size = f"{raw_bytes // 1024} KB"
-    return f"too short ({words} words from {size} {kind})"
+    return f"too short ({words} words < {min_words}, from {size} {kind})"
 
 
 def _accept(
@@ -74,7 +81,7 @@ def parse_page(
     db: PageDatabase,
     page: Page,
     saved_dir: Path = SAVED_DIR,
-    min_words: int = DEFAULT_MIN_WORDS,
+    min_words: int = MIN_WORDS,
 ) -> Page | None:
     """Parse one fetched page (``fetched_at`` set, raw content on disk)
     from its raw file. Returns the updated Page on success, or None if the
@@ -109,7 +116,11 @@ def _parse_pdf(
 
     word_count = count_words(text)
     if word_count < min_words:
-        _reject(db, page, _too_short_reason(word_count, pdf_path.stat().st_size, "pdf"))
+        _reject(
+            db,
+            page,
+            _too_short_reason(word_count, min_words, pdf_path.stat().st_size, "pdf"),
+        )
         return None
 
     result = _accept(db, page, md_path, text, None, None, word_count)
@@ -136,7 +147,9 @@ def _parse_html(
     if is_raw_text_url(page.url):
         word_count = count_words(html)
         if word_count < min_words:
-            _reject(db, page, _too_short_reason(word_count, raw_bytes, "text"))
+            _reject(
+                db, page, _too_short_reason(word_count, min_words, raw_bytes, "text")
+            )
             return None
         result = _accept(db, page, md_path, html, None, None, word_count)
         logger.info(f"Parsed {page.url} (raw text, {word_count} words)")
@@ -159,7 +172,7 @@ def _parse_html(
     if gate_count < min_words:
         gate_count = max(gate_count, code_inclusive_word_count(html))
     if gate_count < min_words:
-        _reject(db, page, _too_short_reason(gate_count, raw_bytes, "html"))
+        _reject(db, page, _too_short_reason(gate_count, min_words, raw_bytes, "html"))
         return None
 
     result = _accept(
@@ -179,7 +192,7 @@ def parse_pending(
     db: PageDatabase,
     saved_dir: Path = SAVED_DIR,
     reparse: bool = False,
-    min_words: int = DEFAULT_MIN_WORDS,
+    min_words: int = MIN_WORDS,
 ) -> int:
     """Parse every fetched page that doesn't have markdown yet and return
     how many parsed successfully.
