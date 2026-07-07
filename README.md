@@ -40,6 +40,18 @@ arciv extract note.md | arciv get -  # archive a note's links, not the note
 cat note.md | arciv extract -        # read note text from stdin
 ```
 
+The same idea works for webpages that are pure link hubs (a web book's ToC, a link roundup):
+`get --no-save` fetches the page, prints its links (absolute, deduplicated) to stdout, and archives
+nothing — no database row, no saved files:
+
+```bash
+arciv get https://book.example/toc --no-save               # print the page's links
+arciv get https://book.example/toc --no-save | arciv get -  # archive them all
+```
+
+The printed links are raw: filtering belongs to grep in the middle of the pipe, and the downstream
+`get -` applies the URL rules anyway.
+
 Register directories you index repeatedly as named sources:
 
 ```bash

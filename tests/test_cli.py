@@ -958,6 +958,85 @@ class TestExtract:
         ]
 
 
+class TestGetNoSave:
+    def test_prints_links_and_touches_nothing(self, runner, data_dir, monkeypatch):
+        captured = {}
+
+        def fake_fetch_links(url, page_timeout):
+            captured["url"] = url
+            return ["https://book.example.com/ch1", "https://book.example.com/ch2"]
+
+        monkeypatch.setattr(cli_module, "fetch_links", fake_fetch_links)
+        result = runner.invoke(
+            cli_module.cli, ["get", "https://book.example.com/toc", "--no-save"]
+        )
+        assert result.exit_code == 0
+        assert captured["url"] == "https://book.example.com/toc"
+        # The link count is logged to stderr; stdout carries only the links
+        assert result.stdout.splitlines() == [
+            "https://book.example.com/ch1",
+            "https://book.example.com/ch2",
+        ]
+        assert not (data_dir / "arciv.db").exists()
+        assert not (data_dir / "saved").exists()
+
+    def test_json_emits_jsonl(self, runner, data_dir, monkeypatch):
+        monkeypatch.setattr(
+            cli_module, "fetch_links", lambda url, page_timeout: ["https://a.com/x"]
+        )
+        result = runner.invoke(
+            cli_module.cli, ["--json", "get", "https://b.com/toc", "--no-save"]
+        )
+        assert result.exit_code == 0
+        assert json.loads(result.stdout) == {"url": "https://a.com/x"}
+
+    def test_url_rules_still_apply(self, runner, data_dir):
+        # Non-HTTPS is skipped by the same processing a plain get uses
+        result = runner.invoke(
+            cli_module.cli, ["get", "http://example.com/toc", "--no-save"]
+        )
+        assert result.exit_code == output.EXIT_NOINPUT
+        assert "Skipped" in result.stderr
+
+    def test_pdf_url_is_an_error(self, runner, data_dir):
+        result = runner.invoke(
+            cli_module.cli, ["get", "https://arxiv.org/pdf/2305.14406", "--no-save"]
+        )
+        assert result.exit_code == 1
+        assert "PDF" in result.stderr
+
+    def test_fetch_failure_is_reported(self, runner, data_dir, monkeypatch):
+        def failing(url, page_timeout):
+            raise cli_module.LinkFetchError("DNS resolution failed")
+
+        monkeypatch.setattr(cli_module, "fetch_links", failing)
+        result = runner.invoke(
+            cli_module.cli, ["get", "https://gone.example.com/", "--no-save"]
+        )
+        assert result.exit_code == 1
+        assert "DNS resolution failed" in result.stderr
+
+    def test_requires_a_url_target(self, runner, data_dir, tmp_path):
+        note = tmp_path / "note.md"
+        note.write_text("x", encoding="utf-8")
+        result = runner.invoke(
+            cli_module.cli, ["get", "--file", str(note), "--no-save"]
+        )
+        assert result.exit_code == output.EXIT_USAGE
+
+    def test_stdin_target_is_usage_error(self, runner, data_dir):
+        result = runner.invoke(
+            cli_module.cli, ["get", "-", "--no-save"], input="https://a.com\n"
+        )
+        assert result.exit_code == output.EXIT_USAGE
+
+    def test_refetch_is_usage_error(self, runner, data_dir):
+        result = runner.invoke(
+            cli_module.cli, ["get", "https://a.com/x", "--no-save", "--refetch"]
+        )
+        assert result.exit_code == output.EXIT_USAGE
+
+
 class TestExitCodes:
     def test_unknown_url_is_noinput(self, runner, data_dir):
         result = runner.invoke(cli_module.cli, ["path", "https://example.com/nope"])
