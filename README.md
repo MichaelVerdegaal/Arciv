@@ -2,24 +2,23 @@
 
 [![CI](https://github.com/MichaelVerdegaal/Arciv/actions/workflows/ci.yml/badge.svg)](https://github.com/MichaelVerdegaal/Arciv/actions/workflows/ci.yml)
 
-Arciv is your personal archive for reading material. The blog posts, research papers, and
-documentation you collect (linked in your notes or fed in directly) are fetched and stored
-as clean, searchable markdown you can trust years from now. Reading material only: not books,
-not videos.
+Arciv is a CLI tool that allows you to build your personal archive of reading material as clean
+markdown.
+
+Fetch research papers, blog posts and other web content, and store them in a local SQLite database.
 
 ## What It Does
 
 Three stages, no writeback into your notes:
 
-1. **Indexing**: extract links from your files; every link is recorded with the file it came
-   from and when it was indexed
-2. **Fetching**: download raw pages (browser for HTML, direct HTTP for PDFs)
-3. **Parsing**: validate and convert to markdown, archived on disk with SQLite tracking state
+1. Indexing: extract links from your files; every link is recorded with the file it came from and
+   when it was indexed
+2. Fetching: download raw pages (browser for HTML, direct HTTP for PDFs)
+3. Parsing: validate and convert to markdown, archived on disk with SQLite tracking state
 
-The stored markdown is deliberately plain prose: bold/italic/inline-code markers are
-stripped (the text is kept) so the archive reads uniformly. The raw HTML stays on disk
-next to the markdown, so nothing is lost if you ever want the original formatting back
-(`arciv parse --reparse` re-converts from disk).
+The stored markdown is plain prose: bold/italic/inline-code markers are stripped (the text is kept)
+so the archive reads uniformly. The raw HTML stays on disk next to the markdown, so the original
+formatting is never lost (`arciv parse --reparse` re-converts from disk).
 
 ## Usage
 
@@ -43,11 +42,10 @@ arciv source remove notes            # unregister it (asks first)
 arciv source remove notes --remove-files  # also delete files only it links
 ```
 
-`source add` and `source update` run the whole pipeline (index, then a single
-batched fetch, then parse) so a source goes from registered to archived in one
-command. The individual `index`, `fetch`, and `parse` stages stay available for
-development. The difference from `get`: `get` is a one-shot archive that tracks
-nothing, while a source is registered and re-syncable with `source update`.
+`source add` and `source update` run the whole pipeline (index, then a single batched fetch, then
+parse) so a source goes from registered to archived in one command. The individual `index`, `fetch`,
+and `parse` stages stay available for development. The difference from `get`: `get` is a one-shot
+archive that tracks nothing, while a source is registered and re-syncable with `source update`.
 
 Run individual pipeline stages:
 
@@ -71,22 +69,21 @@ arciv db dir                         # where the archive lives on disk
 arciv db remove                      # delete the database (asks first)
 ```
 
-URL rules skip or rewrite URLs before they are fetched. They are data, not
-commands: the packaged defaults handle medium, github, huggingface, and a set of
-policy skips (youtube, sharepoint, and so on). To add your own, create a
-`rules.toml` in the data dir (see `arciv db dir`); user rules load ahead of the
-defaults, so they win on first match.
+URL rules skip or rewrite URLs before they are fetched. They are data, not commands: the packaged
+defaults handle medium, github, huggingface, and a set of policy skips (youtube, sharepoint, and so
+on). To add your own, create a `rules.toml` in the data dir (see `arciv db dir`); user rules load
+ahead of the defaults, so they win on first match.
 
 ```bash
 arciv rules list                              # active rules, in the order they apply
 arciv rules test https://medium.com/@me/post  # show how the rules treat a URL
 ```
 
-A rule is a match (`domain`, `host`, `starts_with`, or `regex`) plus an ordered
-list of actions (`skip`, `prepend`, `replace`, `regex_replace`). Rewrite rules
-should be idempotent — processing runs again at fetch time, so an action whose
-output its own match would rewrite differently (e.g. a `prepend` the match still
-fires on) would stack. The shipped defaults are; keep yours that way too:
+A rule is a match (`domain`, `host`, `starts_with`, or `regex`) plus an ordered list of actions
+(`skip`, `prepend`, `replace`, `regex_replace`). Rewrite rules should be idempotent. Processing runs
+again at fetch time, so an action whose output its own match would rewrite differently (e.g. a
+`prepend` the match still fires on) would stack. The shipped defaults are idempotent; keep yours
+that way too:
 
 ```toml
 [[rule]]
@@ -99,16 +96,15 @@ match = '^https://arxiv\.org/abs/'
   replacement = "https://arxiv.org/pdf/$1"
 ```
 
-`rules test` runs a URL through the same processing the index and fetch stages
-use (the in-code plumbing guards, then the rules, then canonicalization) and
-prints the verdict: `skipped` (with the reason), `rewritten` (with the target),
-or `passthrough`, naming the rule that fired so you can tune a rule and check it
-without a full index run.
+`rules test` runs a URL through the same processing the index and fetch stages use (the in-code
+plumbing guards, then the rules, then canonicalization) and prints the verdict: `skipped` (with the
+reason), `rewritten` (with the target), or `passthrough`, naming the rule that fired so you can tune
+a rule and check it without a full index run.
 
 ### Global options and pipes
 
-Data goes to stdout; all logs and diagnostics go to stderr, so `arciv list | cat`
-shows only data. Global flags work before or after the command:
+Data goes to stdout; all logs and diagnostics go to stderr, so `arciv list | cat` shows only data.
+Global flags work before or after the command:
 
 ```bash
 arciv -v fetch         # more detail (-v debug, -vv trace)
@@ -119,13 +115,11 @@ arciv --json status    # machine-readable output on stdout
 arciv --version        # print the installed version and exit
 ```
 
-With `--json`, `status` and `path` emit one JSON object, while `list`,
-`source`, and `rules list` emit JSONL (one object per line) so they stream
-into `head`/`grep`/`jq`. The mutating commands (`source update`, `get`,
-`fetch`, `parse`) emit a single `{indexed, fetched, parsed, failed}` summary,
-letting a
-script assert an outcome inline without a follow-up `status --json`.
-The commands compose with standard Unix tools:
+With `--json`, `status` and `path` emit one JSON object, while `list`, `source`, and `rules list`
+emit JSONL (one object per line) so they stream into `head`/`grep`/`jq`. The mutating commands
+(`source update`, `get`, `fetch`, `parse`) emit a single `{indexed, fetched, parsed, failed}`
+summary, so a script can assert the outcome without a follow-up `status --json`. The commands
+compose with standard Unix tools:
 
 ```bash
 # Re-archive every page from a given domain found in the archive
@@ -141,4 +135,4 @@ See [SETUP.md](SETUP.md) for installation and configuration.
 
 ## The Name
 
-"Arciv" is a compact respelling of *archivum*, the Latin root of "archive". Arciv helps you accumulate historical records, just like a physical archive does.
+"Arciv" is a compact respelling of *archivum*, the Latin root of "archive".

@@ -4,10 +4,10 @@ How to set up Arciv.
 
 ## Requirements
 
-- Python 3.12 or newer (`.python-version` pins the development default).
-- [UV](https://docs.astral.sh/uv/) installed for package management
+- Python 3.12 or newer (`.python-version` pins the development default)
+- [UV](https://docs.astral.sh/uv/) for package management
 
-## Install as a uv tool (recommended for usage)
+## Install as a uv tool (recommended)
 
 Arciv is a plain CLI tool, no container needed:
 
@@ -24,8 +24,8 @@ Configuration below), so no further setup is needed.
 1. `uv venv` to set up the virtual environment
 2. `source .venv/bin/activate` (Bash)
 3. `uv sync`
-4. `scrapling install` to install Scrapling's fetcher dependencies (the patchright Chromium
-   browser used for HTML fetching).
+4. `scrapling install` to install Scrapling's fetcher dependencies (the patchright Chromium browser
+   used for HTML fetching)
 
 ## Configuration
 
@@ -35,8 +35,8 @@ Everything works out of the box. Point Arciv at your notes by registering them a
 arciv source add "/path/to/your/vault/Daily notes" notes
 ```
 
-`source add` registers the directory and archives it in one go. Re-sync it any
-time with `arciv source update notes`.
+`source add` registers the directory and archives it in one go. Re-sync it any time with
+`arciv source update notes`.
 
 Optional override, via environment variable or a `.env` file (see [.env.example](.env.example)):
 
