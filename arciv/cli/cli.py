@@ -29,6 +29,7 @@ from arciv.core.index import (
     index_source,
     register_urls,
 )
+from arciv.core.notes import extract_urls, read_note
 from arciv.core.pipeline import (
     ArchiveResult,
     archive_source,
@@ -324,6 +325,49 @@ def _resolve_url_targets(url: str) -> list[str]:
             code=EXIT_USAGE,
         )
     return [line.strip() for line in sys.stdin if line.strip()]
+
+
+@cli.command()
+def extract(
+    target: Annotated[
+        str,
+        typer.Argument(
+            help="Note file to extract links from, or '-' to read text from stdin."
+        ),
+    ],
+) -> None:
+    """Print the URLs found in a note file, one per line, archiving nothing.
+
+    Offline link extraction: the same URL scan the index stage runs, but with
+    no database writes and no fetching, so the output composes with pipes.
+    URLs are printed raw (only deduplicated, first occurrence wins); the
+    downstream command applies the rules, e.g.:
+
+        arciv extract note.md | grep example.com | arciv get -
+
+    Pass ``-`` to read note text from stdin. With --json, emits JSONL (one
+    ``{"url"}`` object per line).
+    """
+    if target == "-":
+        if sys.stdin.isatty():
+            _fail(
+                "Reading text from stdin ('extract -') but stdin is a terminal. "
+                "Pipe text in, e.g.: cat note.md | arciv extract -",
+                code=EXIT_USAGE,
+            )
+        text = sys.stdin.read()
+    else:
+        try:
+            text = read_note(Path(target))
+        except (OSError, UnicodeDecodeError) as e:
+            _fail(f"Cannot read {target}: {e}", code=EXIT_NOINPUT)
+
+    # Dedupe preserving first-occurrence order, like the index stage does.
+    for url in dict.fromkeys(extract_urls(text)):
+        if json_output():
+            emit_json({"url": url})
+        else:
+            emit(url)
 
 
 def _report_archive(name: str, result: ArchiveResult) -> None:

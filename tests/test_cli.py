@@ -904,6 +904,60 @@ class TestStdin:
         assert captured["urls"] == ["https://a.com", "https://b.com"]
 
 
+class TestExtract:
+    NOTE = (
+        "---\ntags: [reading]\n---\n"
+        "A [post](https://example.com/post) worth keeping.\n"
+        "Bare link: https://example.com/other\n"
+        "Repeated: https://example.com/post\n"
+    )
+
+    def test_prints_deduped_urls_in_order(self, runner, data_dir, tmp_path):
+        note = tmp_path / "note.md"
+        note.write_text(self.NOTE, encoding="utf-8")
+        result = runner.invoke(cli_module.cli, ["extract", str(note)])
+        assert result.exit_code == 0
+        assert result.output.splitlines() == [
+            "https://example.com/post",
+            "https://example.com/other",
+        ]
+
+    def test_touches_no_database(self, runner, data_dir, tmp_path):
+        note = tmp_path / "note.md"
+        note.write_text(self.NOTE, encoding="utf-8")
+        result = runner.invoke(cli_module.cli, ["extract", str(note)])
+        assert result.exit_code == 0
+        assert not (data_dir / "arciv.db").exists()
+
+    def test_dash_reads_text_from_stdin(self, runner, data_dir):
+        result = runner.invoke(
+            cli_module.cli,
+            ["extract", "-"],
+            input="see https://example.com/a and https://example.com/b\n",
+        )
+        assert result.exit_code == 0
+        assert result.output.splitlines() == [
+            "https://example.com/a",
+            "https://example.com/b",
+        ]
+
+    def test_missing_file_is_noinput(self, runner, data_dir, tmp_path):
+        result = runner.invoke(cli_module.cli, ["extract", str(tmp_path / "nope.md")])
+        assert result.exit_code == output.EXIT_NOINPUT
+        assert "Cannot read" in result.stderr
+
+    def test_json_emits_jsonl(self, runner, data_dir, tmp_path):
+        note = tmp_path / "note.md"
+        note.write_text(self.NOTE, encoding="utf-8")
+        result = runner.invoke(cli_module.cli, ["--json", "extract", str(note)])
+        assert result.exit_code == 0
+        records = [json.loads(line) for line in result.output.splitlines()]
+        assert records == [
+            {"url": "https://example.com/post"},
+            {"url": "https://example.com/other"},
+        ]
+
+
 class TestExitCodes:
     def test_unknown_url_is_noinput(self, runner, data_dir):
         result = runner.invoke(cli_module.cli, ["path", "https://example.com/nope"])

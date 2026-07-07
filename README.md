@@ -30,6 +30,16 @@ arciv get --file note.md             # archive all links in one file
 arciv get --dir path/to/notes        # archive all links in a directory
 ```
 
+Sometimes the note is boring but its links aren't. `extract` prints the URLs found in a note
+(one per line, deduplicated) without archiving anything — no database writes, no fetching — so
+links can be inspected, filtered, and piped onward:
+
+```bash
+arciv extract note.md                # print the URLs in a note
+arciv extract note.md | arciv get -  # archive a note's links, not the note
+cat note.md | arciv extract -        # read note text from stdin
+```
+
 Register directories you index repeatedly as named sources:
 
 ```bash
