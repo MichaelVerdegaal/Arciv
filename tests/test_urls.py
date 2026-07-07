@@ -427,6 +427,13 @@ class TestCanonicalize:
     def test_unparseable_returned_unchanged(self):
         assert canonicalize("https://[") == "https://["
 
+    def test_encoding_variants_collapse(self):
+        # w3lib normalises percent-encoding, so a literal-unicode path and
+        # its escaped form resolve to one identity
+        assert canonicalize("https://example.com/café") == canonicalize(
+            "https://example.com/caf%C3%A9"
+        )
+
     @given(st.text())
     def test_idempotent(self, value):
         """canonicalize is a fixed point: its output re-canonicalizes to

@@ -11,6 +11,7 @@ dependencies = [
     "tldextract>=5.3.1",          # Extracting domain information from URLs
     "trafilatura>=2.0.0",         # HTML to markdown conversion
     "scrapling[fetchers]>=0.4.9", # Unified fetch layer (patchright + curl_cffi)
+    "w3lib>=2.4.1",               # URL canonicalization (also a scrapling dep)
     "liteparse>=2.0.3",           # PDF parsing
     "platformdirs>=4.10.0",       # OS-appropriate user data directory
     "typer>=0.26.7",              # CLI framework
