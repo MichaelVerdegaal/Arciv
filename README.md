@@ -6,10 +6,10 @@ download. CPU-only.
 ## Quick start
 
 ```bash
-pip install -e .
-python -m microrag download
-python -m microrag index "C:\Users\Michael.Verdegaal\AppData\Local\arciv\saved"
-python -m microrag query "ONNX runtime throughput" -k 5
+uv sync
+uv run microrag download
+uv run microrag index "C:\Users\Michael.Verdegaal\AppData\Local\arciv\saved"
+uv run microrag query "ONNX runtime throughput" -k 5
 ```
 
 See [SETUP.md](SETUP.md) for detailed setup instructions.

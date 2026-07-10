@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from huggingface_hub import hf_hub_download
+from huggingface_hub.errors import EntryNotFoundError
 
 from .constants import (
     DEFAULT_DB_DIR,
@@ -26,14 +27,24 @@ def _download_command(_args: argparse.Namespace) -> int:
     """Download the embedding model files from Hugging Face."""
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-    files = [TOKENIZER_FILENAME, ONNX_FILENAME, ONNX_DATA_FILENAME]
-    for filename in files:
+    for filename in (TOKENIZER_FILENAME, ONNX_FILENAME):
         local_path = hf_hub_download(
             repo_id=MODEL_ID,
             filename=filename,
             local_dir=MODEL_DIR,
         )
         logger.info("Downloaded %s -> %s", filename, local_path)
+
+    # Only large ONNX exports ship weights in a separate external data file.
+    try:
+        hf_hub_download(
+            repo_id=MODEL_ID,
+            filename=ONNX_DATA_FILENAME,
+            local_dir=MODEL_DIR,
+        )
+        logger.info("Downloaded %s", ONNX_DATA_FILENAME)
+    except EntryNotFoundError:
+        logger.info("%s not present in repo; skipping", ONNX_DATA_FILENAME)
 
     print(f"Model files saved to {MODEL_DIR.resolve()}")
     return 0

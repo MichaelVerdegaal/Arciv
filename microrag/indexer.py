@@ -27,7 +27,7 @@ def index_directory(path: Path, embedder: OnnxEmbedder, store: Store) -> None:
     for file_path in files:
         try:
             _index_file(file_path, path, embedder, store)
-        except Exception:
+        except (OSError, UnicodeDecodeError):
             logger.exception("Failed to index %s", file_path)
 
 

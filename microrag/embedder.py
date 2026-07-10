@@ -47,6 +47,7 @@ class OnnxEmbedder:
             str(model_path),
             providers=["CPUExecutionProvider"],
         )
+        self._input_names = {inp.name for inp in self._session.get_inputs()}
         output_names = {out.name for out in self._session.get_outputs()}
         self._output_name = self._resolve_output_name(output_names)
 
@@ -85,30 +86,26 @@ class OnnxEmbedder:
         return self._embed([QUERY_PREFIX + text], is_query=True)
 
     def _embed(self, texts: list[str], *, is_query: bool) -> np.ndarray:
-        """Embed texts in batches sorted by token length."""
+        """Embed texts in batches sorted by token length to limit padding waste."""
         if not texts:
             return np.zeros((0, EMBEDDING_DIM), dtype=np.float32)
 
-        indexed = list(enumerate(texts))
-        token_counts = [
-            (i, len(self._tokenizer.encode(text).ids)) for i, text in indexed
+        order = sorted(
+            range(len(texts)),
+            key=lambda i: len(self._tokenizer.encode(texts[i]).ids),
+        )
+        batches = [
+            self._encode_batch(
+                [texts[i] for i in order[start : start + BATCH_SIZE]],
+                is_query=is_query,
+            )
+            for start in range(0, len(order), BATCH_SIZE)
         ]
-        sorted_by_length = sorted(token_counts, key=lambda pair: pair[1])
 
-        embeddings: list[np.ndarray] = [np.zeros((0, EMBEDDING_DIM), dtype=np.float32)]
-        for batch_start in range(0, len(sorted_by_length), BATCH_SIZE):
-            batch_items = sorted_by_length[batch_start : batch_start + BATCH_SIZE]
-            batch_texts = [texts[i] for i, _ in batch_items]
-            batch_embeddings = self._encode_batch(batch_texts, is_query=is_query)
-            embeddings.append(batch_embeddings)
-
-        concatenated = np.concatenate(embeddings, axis=0)
-        unsorted = np.empty_like(concatenated)
-        for new_index, (original_index, _) in enumerate(sorted_by_length):
-            unsorted[original_index] = concatenated[new_index]
-
-        self._validate(unsorted)
-        return unsorted
+        embeddings = np.empty((len(texts), EMBEDDING_DIM), dtype=np.float32)
+        embeddings[order] = np.concatenate(batches, axis=0)
+        self._validate(embeddings)
+        return embeddings
 
     def _encode_batch(self, texts: list[str], *, is_query: bool) -> np.ndarray:
         """Encode a single batch and return normalized embeddings."""
@@ -132,18 +129,13 @@ class OnnxEmbedder:
             "attention_mask": attention_mask,
             "token_type_ids": token_type_ids,
         }
-        outputs = self._session.run(None, input_feed)
-        output_map = {
-            out.name: outputs[i] for i, out in enumerate(self._session.get_outputs())
-        }
-        vectors = output_map[self._output_name]
+        input_feed = {k: v for k, v in input_feed.items() if k in self._input_names}
+        vectors = self._session.run([self._output_name], input_feed)[0]
 
-        if self._output_name == _SENTENCE_EMBEDDING:
-            embeddings = vectors
-        else:
-            embeddings = self._mean_pool(vectors, attention_mask)
+        if self._output_name != _SENTENCE_EMBEDDING:
+            vectors = self._mean_pool(vectors, attention_mask)
 
-        return self._normalize(embeddings)
+        return self._normalize(vectors)
 
     def _mean_pool(
         self,
@@ -158,7 +150,7 @@ class OnnxEmbedder:
         return summed / counts
 
     def _normalize(self, vectors: np.ndarray) -> np.ndarray:
-        """L2-normalize vectors in place."""
+        """Return L2-normalized copies of the row vectors."""
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)
         return vectors / np.clip(norms, a_min=1e-12, a_max=None)
 
