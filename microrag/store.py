@@ -48,6 +48,10 @@ class Store:
             metadatas=metadatas,
         )
 
+    def count(self) -> int:
+        """Return the number of chunks in the collection."""
+        return self._collection.count()
+
     def query(
         self,
         query_embeddings: np.ndarray,

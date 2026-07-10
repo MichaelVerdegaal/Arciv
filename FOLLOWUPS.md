@@ -14,3 +14,16 @@ Known limitations noted during review, deliberately not fixed in v1 (see PLAN.md
   commands must run from the same working directory.
 - AGENTS.md still contains unfilled template placeholders (Architecture summary, Key Libraries)
   and rules copied from another project (SQLite schema, scraping pipeline).
+
+## Parking lot (deliberately not built yet)
+
+- Shell tab completion: would require `argcomplete`, which is not on the dependency whitelist.
+- Reading query text from stdin (`microrag query -`): no real piping use case yet; add when one
+  shows up.
+
+## Rejected
+
+- `--color auto|always|never`: the CLI emits no colored output (PLAN.md forbids a colors
+  library), so the flag would be a knob that does nothing.
+- Filtering/paging built into `query`: stdout is clean data; `grep`, `head`, and `jq` (with
+  `--json`) already compose.

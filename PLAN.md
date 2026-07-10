@@ -98,17 +98,34 @@ in this file exceeds ~15 lines, it's doing too much.
 
 ### indexer.py
 
-Walk a directory for `*.md` files, chunk, embed, upsert. Print a per-file summary (chunks written).
-Deletion handling (files removed from Arciv) is out of scope for v1; note it, skip it.
+Walk a directory for `*.md` files, chunk, embed, upsert. Log a per-file summary (chunks written)
+to stderr and return the (files, chunks) counts. Deletion handling (files removed from Arciv) is
+out of scope for v1; note it, skip it.
 
 ### cli.py
 
-Three subcommands:
+Four subcommands:
 
-- `microrag download` — fetch model files to a local cache dir via `huggingface_hub`.
+- `microrag download` — fetch model files to a local cache dir via `huggingface_hub`. Warns with
+  a hint when no `HF_TOKEN` is configured (unauthenticated downloads are rate-limited and slower).
 - `microrag index <path>` — index a directory.
 - `microrag query "<text>" [-k N]` — print top-k results as: distance, source path, heading
   breadcrumb, and the chunk text. Plain text output, no TUI, no colors library.
+- `microrag status` — read-only introspection: model dir and presence, DB dir, chunk count.
+
+CLI conventions (locked):
+
+- stdout is data, stderr is everything else. All stdout writes go through `emit()`/`emit_json()`
+  in cli.py; logs, progress, warnings, and hints go to stderr via logging. Default log level is
+  INFO for microrag's own logger and WARNING for third-party loggers.
+- Global flags `-v/-vv`, `-q` (wins over verbose), `--json`, `--version`; accepted before and
+  after the subcommand.
+- `--json`: `query` emits JSONL (one object per result); `status` and mutating-command summaries
+  emit a single object.
+- Exit codes: 0 success, 66 missing input (path/model/index), 2 argparse usage errors. Expected
+  failures are one-line stderr errors that name the next command to run — never tracebacks.
+- No-args invocation prints help and exits 0.
+- These invariants are covered by `tests/test_cli.py`; keep it green when touching the CLI.
 
 ## Phases
 
