@@ -20,10 +20,8 @@ def chunk_markdown(text: str, source: Path, mtime: float) -> list[dict]:
         List of chunk dicts with keys "text" and "metadata".
     """
     matches = list(HEADING_RE.finditer(text))
-    if not matches:
-        return _chunk_section(text, source, mtime, "")
-
-    chunks: list[dict] = []
+    preamble = text[: matches[0].start()] if matches else text
+    chunks = _chunk_section(preamble, source, mtime, "")
     heading_stack: list[tuple[int, str]] = []
 
     for i, match in enumerate(matches):
@@ -33,9 +31,12 @@ def chunk_markdown(text: str, source: Path, mtime: float) -> list[dict]:
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         section_text = text[start:end]
 
-        heading_stack = _update_heading_stack(heading_stack, level, heading_text)
+        _update_heading_stack(heading_stack, level, heading_text)
         breadcrumb = " > ".join(text for _, text in heading_stack)
         chunks.extend(_chunk_section(section_text, source, mtime, breadcrumb))
+
+    for index, chunk in enumerate(chunks):
+        chunk["metadata"]["index"] = index
 
     return chunks
 
@@ -44,12 +45,11 @@ def _update_heading_stack(
     stack: list[tuple[int, str]],
     level: int,
     heading_text: str,
-) -> list[tuple[int, str]]:
+) -> None:
     """Replace headings at the same or deeper level, then append the new one."""
     while stack and stack[-1][0] >= level:
         stack.pop()
     stack.append((level, heading_text))
-    return stack
 
 
 def _chunk_section(
@@ -66,14 +66,12 @@ def _chunk_section(
     chunks: list[dict] = []
     current_paras: list[str] = []
     current_len = 0
-    index = 0
 
     for paragraph in paragraphs:
         para_len = len(paragraph)
         if current_paras and current_len + 2 + para_len > CHUNK_TARGET_CHARS:
             body = "\n\n".join(current_paras)
-            chunks.append(_make_chunk(body, source, mtime, breadcrumb, index))
-            index += 1
+            chunks.append(_make_chunk(body, source, mtime, breadcrumb))
 
             overlap = _overlap_text(body)
             current_paras = [overlap] if overlap else []
@@ -84,7 +82,7 @@ def _chunk_section(
 
     if current_paras:
         body = "\n\n".join(current_paras)
-        chunks.append(_make_chunk(body, source, mtime, breadcrumb, index))
+        chunks.append(_make_chunk(body, source, mtime, breadcrumb))
 
     return chunks
 
@@ -105,16 +103,15 @@ def _make_chunk(
     source: Path,
     mtime: float,
     breadcrumb: str,
-    index: int,
 ) -> dict:
-    """Build a chunk dict from a body string."""
+    """Build a chunk dict; the file-wide "index" is filled in by chunk_markdown."""
     text = f"{breadcrumb}\n\n{body}" if breadcrumb else body
     return {
         "text": text,
         "metadata": {
             "source": str(source),
             "heading": breadcrumb,
-            "index": index,
+            "index": -1,
             "mtime": mtime,
         },
     }
