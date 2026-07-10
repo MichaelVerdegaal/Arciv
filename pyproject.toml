@@ -1,11 +1,22 @@
 [project]
 name = "microrag"
 version = "0.1.0"
-description = "Add your description here"
+description = "Local semantic search over markdown files"
 readme = "README.md"
-requires-python = ">=3.14"
-dependencies = []
+requires-python = ">=3.12"
+dependencies = [
+    "chromadb==1.5.9",
+    "onnxruntime==1.27.0",
+    "tokenizers==0.23.1",
+    "huggingface-hub==1.23.0",
+    "numpy==2.5.1",
+]
 
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "ruff>=0.5.0"]
+
+[project.scripts]
+microrag = "microrag.cli:main"
 
 [tool.ruff.lint]
 extend-select = ["I", "B", "UP"]

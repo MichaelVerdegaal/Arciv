@@ -1,3 +1,5 @@
+"""Allow running microrag as a module: python -m microrag."""
+
 import sys
 
 from microrag.cli import main
