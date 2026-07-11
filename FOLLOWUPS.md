@@ -1,25 +1,20 @@
 # Follow-ups
 
-Known limitations noted during review, deliberately not fixed in v1 (see PLAN.md scope rules):
+Known limitations, deliberately not fixed yet (see PLAN.md scope rules):
 
-- Editing a file leaves the previous version's chunks in the store: chunk IDs hash the chunk
-  text, so changed chunks get new IDs and the old ones are never deleted. Same root cause as
-  deleted-file handling, which PLAN.md already defers.
-- `HEADING_RE` matches `#`-lines inside fenced code blocks, so code samples containing
-  `# comments` can be misread as headings. Changing the chunking algorithm requires owner
-  approval per PLAN.md.
-- A single paragraph longer than the chunk target is never split; oversized chunks are truncated
-  at 512 tokens by the embedder (with a logged warning).
-- The model cache (`.microrag/`) and Chroma DB (`.microrag-db/`) are relative paths, so all
-  commands must run from the same working directory.
-- AGENTS.md still contains unfilled template placeholders (Architecture summary, Key Libraries)
-  and rules copied from another project (SQLite schema, scraping pipeline).
+- Markdown image syntax is dropped during chunking (chonkie's MarkdownChef extracts images
+  separately); alt text is not indexed.
+- Indexing two different root directories into the same store can collide: sources are stored as
+  root-relative paths, so `a.md` under one root overwrites `a.md` under another. One store per
+  notes collection is the assumption.
+- `index --prune` only compares against the root being indexed; it cannot distinguish "file
+  deleted" from "file lives under a different root" (same root cause as the collision above).
 
 ## Parking lot (deliberately not built yet)
 
-- Shell tab completion: would require `argcomplete`, which is not on the dependency whitelist.
-- Reading query text from stdin (`microrag query -`): no real piping use case yet; add when one
-  shows up.
+- Chonkie's `CodeChunker`/`TableChunker` extras for structure-aware splitting of extracted code
+  blocks and tables: the base install's character-based splitting is good enough until retrieval
+  quality says otherwise.
 
 ## Rejected
 
@@ -27,3 +22,18 @@ Known limitations noted during review, deliberately not fixed in v1 (see PLAN.md
   library), so the flag would be a knob that does nothing.
 - Filtering/paging built into `query`: stdout is clean data; `grep`, `head`, and `jq` (with
   `--json`) already compose.
+- Chonkie recipes (`from_recipe`): fetches chunking rules from Hugging Face Hub at runtime,
+  which violates the no-network-at-runtime constraint. Rules are constructed locally instead.
+
+## Resolved
+
+- Stale chunks from edited files: re-indexing now deletes a source's chunks whose IDs are not in
+  the new set; deleted files are handled by `index --prune`.
+- `#` comments in fenced code blocks misread as headings: fixed by switching chunking to chonkie
+  (MarkdownChef separates code from prose).
+- Oversized single paragraphs never split: chonkie's RecursiveChunker splits them to size.
+- cwd-relative data directories: everything now lives under `MICRORAG_HOME` (default
+  `~/.microrag`).
+- AGENTS.md placeholders and rules copied from another project: filled in / replaced.
+- Shell tab completion: added via argcomplete.
+- `microrag query -` (stdin): added.

@@ -1,6 +1,6 @@
 [project]
 name = "microrag"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local semantic search over markdown files"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -10,6 +10,8 @@ dependencies = [
     "tokenizers>=0.23.1",
     "huggingface-hub>=1.23.0",
     "numpy>=2.5.1",
+    "chonkie>=1.7.0",
+    "argcomplete>=3.7.0",
 ]
 
 [dependency-groups]

@@ -19,10 +19,15 @@ See [SETUP.md](SETUP.md) for detailed setup instructions, including how to get a
 
 ## Conventions
 
+- All data lives under `MICRORAG_HOME` (default `~/.microrag`), so commands work from any
+  directory.
 - Results go to stdout; logs, progress, and hints go to stderr — query output pipes cleanly.
+  `microrag query -` reads the query text from stdin.
+- Re-indexing is incremental: unchanged files are a no-op, edited files replace their old chunks,
+  and `index --prune` removes chunks for deleted files.
 - `--json` emits machine-readable output: JSONL for `query`, a single object for `status` and
   the `index` summary.
 - `-v`/`-vv` for more log detail, `-q` for errors only, `--version` for the version. Global flags
-  work before and after the subcommand.
-- Exit codes: 0 on success, 66 when an input is missing (path, model, or index), 2 for usage
-  errors.
+  work before and after the subcommand. Tab completion via argcomplete (see SETUP.md).
+- Exit codes: 0 on success, 64 for usage errors we detect, 66 when an input is missing (path,
+  model, or index), 69 when the model download fails, 2 for argparse errors.

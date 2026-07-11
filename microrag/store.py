@@ -52,6 +52,20 @@ class Store:
         """Return the number of chunks in the collection."""
         return self._collection.count()
 
+    def ids_for_source(self, source: str) -> list[str]:
+        """Return the IDs of all chunks whose metadata source equals source."""
+        return self._collection.get(where={"source": source}, include=[])["ids"]
+
+    def sources(self) -> set[str]:
+        """Return the distinct source paths present in the collection."""
+        result = self._collection.get(include=["metadatas"])
+        return {meta["source"] for meta in result["metadatas"]}
+
+    def delete(self, ids: list[str]) -> None:
+        """Delete chunks by ID; a no-op for an empty list."""
+        if ids:
+            self._collection.delete(ids=ids)
+
     def query(
         self,
         query_embeddings: np.ndarray,

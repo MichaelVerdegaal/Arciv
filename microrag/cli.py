@@ -1,3 +1,4 @@
+# PYTHON_ARGCOMPLETE_OK
 """Command-line entrypoints for MicroRAG."""
 
 import argparse
@@ -6,6 +7,8 @@ import logging
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+
+import argcomplete
 
 # httpx is huggingface_hub's own HTTP transport, imported only for its error type.
 import httpx
@@ -27,6 +30,7 @@ from .store import Store
 logger = logging.getLogger(__name__)
 
 EX_OK: int = 0
+EX_USAGE: int = 64  # sysexits.h: command line usage error
 EX_NOINPUT: int = 66  # sysexits.h: an input file did not exist
 EX_UNAVAILABLE: int = 69  # sysexits.h: a required service is unavailable
 
@@ -102,17 +106,31 @@ def _index_command(args: argparse.Namespace) -> int:
         return EX_NOINPUT
 
     store = Store(DEFAULT_DB_DIR)
-    files, chunks = index_directory(path, embedder, store)
+    files, chunks, pruned = index_directory(path, embedder, store, prune=args.prune)
 
     if args.json:
-        emit_json({"files": files, "chunks": chunks})
+        emit_json({"files": files, "chunks": chunks, "pruned": pruned})
     else:
-        logger.info("Indexed %d file(s), %d chunk(s)", files, chunks)
+        logger.info("Indexed %d file(s), %d chunk(s), pruned %d", files, chunks, pruned)
     return EX_OK
 
 
 def _query_command(args: argparse.Namespace) -> int:
     """Run a query against the indexed store."""
+    if args.text == "-":
+        if sys.stdin.isatty():
+            logger.error(
+                'Query text "-" reads from stdin, but stdin is a terminal. '
+                "Example: grep -h TODO notes.md | microrag query -"
+            )
+            return EX_USAGE
+        text = sys.stdin.read().strip()
+        if not text:
+            logger.error("Empty query text on stdin.")
+            return EX_USAGE
+    else:
+        text = args.text
+
     if not DEFAULT_DB_DIR.exists():
         logger.error(
             "No index found at %s. Run: microrag index <path>",
@@ -129,7 +147,7 @@ def _query_command(args: argparse.Namespace) -> int:
         logger.error("The index is empty. Run: microrag index <path>")
         return EX_NOINPUT
 
-    query_embedding = embedder.embed_query(args.text)
+    query_embedding = embedder.embed_query(text)
     documents, metadatas, distances = store.query(query_embedding, args.limit)
 
     for doc, meta, dist in zip(documents[0], metadatas[0], distances[0], strict=True):
@@ -276,6 +294,12 @@ def main(argv: list[str] | None = None) -> int:
         "vector store. Re-indexing unchanged files is a no-op.",
     )
     index_parser.add_argument("path", help="Directory to index")
+    index_parser.add_argument(
+        "--prune",
+        action="store_true",
+        help="Also delete chunks whose source file no longer exists under PATH "
+        "(skipped when PATH contains no markdown files)",
+    )
     index_parser.set_defaults(func=_index_command)
 
     query_parser = subparsers.add_parser(
@@ -284,7 +308,7 @@ def main(argv: list[str] | None = None) -> int:
         description="Print the top matching chunks for TEXT, best match first. "
         "With --json, one JSON object per result (JSONL).",
     )
-    query_parser.add_argument("text", help="Query text")
+    query_parser.add_argument("text", help='Query text ("-" reads it from stdin)')
     query_parser.add_argument(
         "-k",
         "--limit",
@@ -306,6 +330,7 @@ def main(argv: list[str] | None = None) -> int:
     for sub in (download_parser, index_parser, query_parser, status_parser):
         _add_common_options(sub, suppress=True)
 
+    argcomplete.autocomplete(parser)
     args = parser.parse_args(argv)
     _configure_logging(args.verbose, args.quiet)
 

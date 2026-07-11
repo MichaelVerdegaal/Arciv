@@ -41,8 +41,11 @@ These are decided. Do not revisit, "improve", or abstract over them.
 
 ## Dependency whitelist
 
-Runtime: `chromadb`, `onnxruntime`, `tokenizers`, `huggingface_hub`, `numpy`. Dev: `pytest`, `ruff`.
-CLI uses stdlib `argparse`. Markdown parsing uses stdlib `re`; no markdown library.
+Runtime: `chromadb`, `onnxruntime`, `tokenizers`, `huggingface_hub`, `numpy`, `chonkie` (base
+install only, no extras), `argcomplete`. Dev: `pytest`, `ruff`. CLI uses stdlib `argparse`.
+Markdown parsing and chunking use `chonkie`; its recipe system (`from_recipe`,
+`recipe=`/`lang=` parameters) fetches from Hugging Face Hub at runtime and is therefore
+forbidden — rules must be constructed locally.
 
 ## Architecture
 
@@ -80,11 +83,16 @@ both paths passed in via `pathlib.Path` (never hardcoded).
 
 ### chunker.py
 
-Heading-aware markdown chunking, kept deliberately simple:
+Heading-aware markdown chunking built on chonkie (all components run offline):
 
-- Split on headings (`#` through `####`), then greedily pack paragraphs into chunks with a target of
-  ~1200 characters and ~200 characters of overlap between adjacent chunks in the same section. These
-  numbers live in `constants.py` and are tunable; the algorithm is not.
+- `MarkdownChef` separates fenced code blocks and tables from prose, so `#` comments inside code
+  are never mistaken for headings. Code blocks and tables become their own chunks under the
+  heading in effect at their position; markdown image syntax is dropped.
+- Prose is split into sections on headings (`#` through `####`) with a breadcrumb stack, then
+  each section is packed by `RecursiveChunker` (character tokenizer) to a target of ~1200
+  characters; oversized paragraphs are split further. `OverlapRefinery` (prefix, merged) adds
+  ~200 characters of overlap between adjacent chunks in the same section. The numbers live in
+  `constants.py` and are tunable; the approach is not.
 - Prepend the heading breadcrumb to each chunk text (e.g. `"Arciv Notes > Setup > Docker"`) so
   chunks carry their own context.
 - Return chunks with metadata: source relative path, heading path, chunk index, file mtime.
@@ -99,8 +107,11 @@ in this file exceeds ~15 lines, it's doing too much.
 ### indexer.py
 
 Walk a directory for `*.md` files, chunk, embed, upsert. Log a per-file summary (chunks written)
-to stderr and return the (files, chunks) counts. Deletion handling (files removed from Arciv) is
-out of scope for v1; note it, skip it.
+to stderr and return the (files, chunks, pruned) counts. After upserting a file, chunks for that
+source whose IDs are not in the new set are deleted, so edited files never leave stale chunks.
+Deleted-file handling is opt-in via `index --prune` (removes chunks whose source no longer exists
+under the indexed root; skipped entirely when the walk finds no files, so a mistyped path cannot
+wipe the index).
 
 ### cli.py
 
@@ -108,9 +119,11 @@ Four subcommands:
 
 - `microrag download` — fetch model files to a local cache dir via `huggingface_hub`. Warns with
   a hint when no `HF_TOKEN` is configured (unauthenticated downloads are rate-limited and slower).
-- `microrag index <path>` — index a directory.
+- `microrag index <path> [--prune]` — index a directory; `--prune` also removes chunks for
+  deleted files.
 - `microrag query "<text>" [-k N]` — print top-k results as: distance, source path, heading
-  breadcrumb, and the chunk text. Plain text output, no TUI, no colors library.
+  breadcrumb, and the chunk text. `"-"` reads the query text from stdin. Plain text output, no
+  TUI, no colors library.
 - `microrag status` — read-only introspection: model dir and presence, DB dir, chunk count.
 
 CLI conventions (locked):
@@ -166,7 +179,8 @@ Design discipline:
 
 - No abstract base classes, no factories, no dependency injection, no `VectorStoreInterface` "in
   case we swap stores later". One store, one model, concrete code.
-- No config system; `constants.py` is the whole configuration story.
+- No config system; `constants.py` is the whole configuration story, plus the single
+  `MICRORAG_HOME` env var that relocates the data directory (default `~/.microrag`).
 - A module growing past ~300 lines is a signal to stop and check with the owner, not to split it
   into a package.
 - Stay within the phase's scope. Ideas outside it go in a `FOLLOWUPS.md` list, not in code.
