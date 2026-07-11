@@ -4,11 +4,15 @@ import hashlib
 import logging
 from pathlib import Path
 
+from chonkie import FileFetcher
+
 from .chunker import chunk_markdown
 from .embedder import OnnxEmbedder
 from .store import Store
 
 logger = logging.getLogger(__name__)
+
+_FETCHER = FileFetcher()
 
 
 def index_directory(
@@ -29,7 +33,8 @@ def index_directory(
     Returns:
         Tuple of (files indexed, chunks written, chunks pruned).
     """
-    files = sorted(path.rglob("*.md"))
+    # FileFetcher only accepts directories; a plain-file path means no walk.
+    files = sorted(_FETCHER.fetch(dir=path, ext=[".md"])) if path.is_dir() else []
     if not files:
         # Never prune on an empty walk: a mistyped path must not wipe the index.
         logger.warning("No markdown (*.md) files found under %s", path)

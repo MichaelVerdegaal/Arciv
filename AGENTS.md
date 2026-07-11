@@ -24,8 +24,9 @@ unchanged files is a no-op via Chroma upsert.
 ### Key Libraries
 - `chromadb`: persistent vector store, one cosine collection, telemetry disabled.
 - `onnxruntime` + `tokenizers`: CPU inference for the `MongoDB/mdbr-leaf-ir` embedding model.
-- `chonkie`: markdown parsing (code fences/tables separated from prose), size-based chunking, and
-  the `BaseEmbeddings` interface that `OnnxEmbedder` implements.
+- `chonkie`: markdown parsing (code fences/tables separated from prose), size-based chunking via
+  a `Pipeline` (recursive chunker + overlap refinery), `FileFetcher` for the markdown file walk,
+  and the `BaseEmbeddings` interface that `OnnxEmbedder` implements.
 - `huggingface_hub`: one-time model download (the only networked code path).
 - `numpy`: embedding arrays.
 - `argcomplete`: shell tab completion for the CLI.

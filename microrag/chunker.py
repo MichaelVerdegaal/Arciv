@@ -3,8 +3,7 @@
 import re
 from pathlib import Path
 
-from chonkie import MarkdownChef, RecursiveChunker
-from chonkie.refinery import OverlapRefinery
+from chonkie import MarkdownChef, Pipeline
 
 from .constants import CHUNK_OVERLAP_CHARS, CHUNK_TARGET_CHARS
 
@@ -12,16 +11,22 @@ HEADING_RE = re.compile(r"^(#{1,4})\s+(.+)$", re.MULTILINE)
 
 # All chonkie components run offline: MarkdownChef separates fenced code and
 # tables from prose (so `# comments` in code are never mistaken for headings),
-# RecursiveChunker packs text to size and splits oversized paragraphs, and
-# OverlapRefinery reproduces the prefix overlap between adjacent chunks.
+# then a chonkie Pipeline packs each section: RecursiveChunker splits to size
+# and OverlapRefinery reproduces the prefix overlap between adjacent chunks.
+# The chef stays outside the pipeline because the heading-breadcrumb logic
+# below runs between parsing and chunking.
 _CHEF = MarkdownChef()
-_CHUNKER = RecursiveChunker(tokenizer="character", chunk_size=CHUNK_TARGET_CHARS)
-_OVERLAP = OverlapRefinery(
-    tokenizer="character",
-    context_size=CHUNK_OVERLAP_CHARS,
-    method="prefix",
-    mode="recursive",  # align the overlap to logical boundaries, not mid-word
-    merge=True,
+_PIPELINE = (
+    Pipeline()
+    .chunk_with("recursive", tokenizer="character", chunk_size=CHUNK_TARGET_CHARS)
+    .refine_with(
+        "overlap",
+        tokenizer="character",
+        context_size=CHUNK_OVERLAP_CHARS,
+        method="prefix",
+        mode="recursive",  # align the overlap to logical boundaries, not mid-word
+        merge=True,
+    )
 )
 
 
@@ -103,9 +108,7 @@ def _pack_section(
     mtime: float,
 ) -> list[dict]:
     """Chunk a section body to size, with prefix overlap between adjacent chunks."""
-    packed = _CHUNKER(body.strip())
-    if len(packed) > 1:
-        packed = _OVERLAP(packed)
+    packed = _PIPELINE.run(texts=body.strip()).chunks
 
     section_chunks = []
     for piece in packed:
