@@ -1,10 +1,11 @@
-"""ONNX embedder for the local leaf-ir model."""
+"""ONNX embedder for the local leaf-ir model, as a chonkie embeddings handler."""
 
 import logging
 from pathlib import Path
 
 import numpy as np
 import onnxruntime as ort
+from chonkie.embeddings import BaseEmbeddings
 from tokenizers import Tokenizer
 
 from .constants import (
@@ -20,11 +21,17 @@ _SENTENCE_EMBEDDING: str = "sentence_embedding"
 _TOKEN_LEVEL_OUTPUTS: set[str] = {"last_hidden_state", "token_embeddings"}
 
 
-class OnnxEmbedder:
+class OnnxEmbedder(BaseEmbeddings):
     """Compute embeddings using a local ONNX encoder model.
 
     Loads the tokenizer and ONNX session from explicit paths. Uses CPU only.
     Handles both sentence-level and token-level model outputs.
+
+    Subclasses chonkie's BaseEmbeddings, so instances also work anywhere
+    chonkie accepts an embedding model (SemanticChunker, EmbeddingsRefinery)
+    and inherit __call__, similarity, and the async variants. The chonkie
+    interface (embed/embed_batch) embeds text as documents; use embed_query
+    for search queries, which need the instruction prefix.
     """
 
     def __init__(self, model_path: Path, tokenizer_path: Path) -> None:
@@ -34,10 +41,12 @@ class OnnxEmbedder:
             model_path: Path to the ONNX model file.
             tokenizer_path: Path to the tokenizer.json file.
         """
+        super().__init__()
         if not model_path.exists():
             raise FileNotFoundError(f"ONNX model not found: {model_path}")
         if not tokenizer_path.exists():
             raise FileNotFoundError(f"Tokenizer not found: {tokenizer_path}")
+        self._model_path = model_path
 
         self._tokenizer = Tokenizer.from_file(str(tokenizer_path))
         self._tokenizer.enable_truncation(MAX_TOKENS)
@@ -62,6 +71,39 @@ class OnnxEmbedder:
             f"Unsupported model outputs: {output_names}. "
             f"Expected {_SENTENCE_EMBEDDING!r} or one of {_TOKEN_LEVEL_OUTPUTS}."
         )
+
+    @property
+    def dimension(self) -> int:
+        """Return the embedding dimension."""
+        return EMBEDDING_DIM
+
+    def get_tokenizer(self) -> Tokenizer:
+        """Return the underlying tokenizer."""
+        return self._tokenizer
+
+    def embed(self, text: str) -> np.ndarray:
+        """Embed a single document string.
+
+        Args:
+            text: Document string to embed.
+
+        Returns:
+            Array of shape (EMBEDDING_DIM,) with a unit-norm vector.
+        """
+        return self._embed([text], is_query=False)[0]
+
+    def embed_batch(self, texts: list[str]) -> list[np.ndarray]:
+        """Embed a list of document strings.
+
+        Overrides the base one-at-a-time loop with real batched inference.
+
+        Args:
+            texts: Document strings to embed.
+
+        Returns:
+            List of arrays of shape (EMBEDDING_DIM,) with unit-norm vectors.
+        """
+        return list(self._embed(texts, is_query=False))
 
     def embed_documents(self, texts: list[str]) -> np.ndarray:
         """Embed a list of documents without a query prefix.
@@ -166,3 +208,7 @@ class OnnxEmbedder:
             raise ValueError(
                 f"Embeddings are not unit norm at indices {bad.tolist()}: norms={norms[bad].tolist()}"
             )
+
+    def __repr__(self) -> str:
+        """Representation of the OnnxEmbedder instance."""
+        return f"OnnxEmbedder(model_path={self._model_path})"

@@ -68,7 +68,10 @@ together. If an import crosses these boundaries, it's wrong.
 ### embedder.py
 
 `OnnxEmbedder` loads the ONNX session and the `tokenizer.json` from the downloaded model directory,
-both paths passed in via `pathlib.Path` (never hardcoded).
+both paths passed in via `pathlib.Path` (never hardcoded). It subclasses chonkie's `BaseEmbeddings`
+(implementing `embed`, `embed_batch`, `dimension`, `get_tokenizer`), so it plugs into chonkie
+components such as `SemanticChunker` and `EmbeddingsRefinery` and inherits `__call__`,
+`similarity`, and the async variants.
 
 - At load time, inspect the session's output names. If the graph outputs `sentence_embedding`, use
   it directly. If it outputs token-level states (`last_hidden_state` or similar), apply mean pooling
@@ -89,10 +92,11 @@ Heading-aware markdown chunking built on chonkie (all components run offline):
   are never mistaken for headings. Code blocks and tables become their own chunks under the
   heading in effect at their position; markdown image syntax is dropped.
 - Prose is split into sections on headings (`#` through `####`) with a breadcrumb stack, then
-  each section is packed by `RecursiveChunker` (character tokenizer) to a target of ~1200
-  characters; oversized paragraphs are split further. `OverlapRefinery` (prefix, merged) adds
-  ~200 characters of overlap between adjacent chunks in the same section. The numbers live in
-  `constants.py` and are tunable; the approach is not.
+  each section is packed by a chonkie `Pipeline`: `RecursiveChunker` (character tokenizer) to a
+  target of ~1200 characters (oversized paragraphs are split further), then `OverlapRefinery`
+  (prefix, merged) adds ~200 characters of overlap between adjacent chunks in the same section.
+  The chef stays outside the pipeline because the breadcrumb logic runs between parsing and
+  chunking. The numbers live in `constants.py` and are tunable; the approach is not.
 - Prepend the heading breadcrumb to each chunk text (e.g. `"Arciv Notes > Setup > Docker"`) so
   chunks carry their own context.
 - Return chunks with metadata: source relative path, heading path, chunk index, file mtime.
@@ -106,7 +110,8 @@ in this file exceeds ~15 lines, it's doing too much.
 
 ### indexer.py
 
-Walk a directory for `*.md` files, chunk, embed, upsert. Log a per-file summary (chunks written)
+Walk a directory for `*.md` files (chonkie's `FileFetcher`, recursive and symlink-safe), chunk,
+embed, upsert. Log a per-file summary (chunks written)
 to stderr and return the (files, chunks, pruned) counts. After upserting a file, chunks for that
 source whose IDs are not in the new set are deleted, so edited files never leave stale chunks.
 Deleted-file handling is opt-in via `index --prune` (removes chunks whose source no longer exists
