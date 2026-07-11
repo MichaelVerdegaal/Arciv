@@ -34,6 +34,18 @@ EX_USAGE: int = 64  # sysexits.h: command line usage error
 EX_NOINPUT: int = 66  # sysexits.h: an input file did not exist
 EX_UNAVAILABLE: int = 69  # sysexits.h: a required service is unavailable
 
+# Marker file inside the DB dir recording the root the index was built from,
+# so it disappears together with the index when the DB dir is deleted.
+_ROOT_MARKER: str = "root"
+
+
+def _read_root() -> str | None:
+    """Return the root the index was built from, or None if not recorded."""
+    marker = DEFAULT_DB_DIR / _ROOT_MARKER
+    if not marker.exists():
+        return None
+    return marker.read_text(encoding="utf-8").strip() or None
+
 
 def emit(line: str) -> None:
     """Write one line of payload data to stdout.
@@ -101,12 +113,29 @@ def _index_command(args: argparse.Namespace) -> int:
         logger.error("Path does not exist: %s", path)
         return EX_NOINPUT
 
+    # Sources are stored root-relative, so mixing roots in one store can
+    # silently collide (and confuses --prune). Pin the store to its first root.
+    root = str(path.resolve())
+    recorded = _read_root()
+    if recorded is not None and recorded != root:
+        logger.error(
+            "This index was built from %s; indexing %s would mix roots and can "
+            "collide on relative paths. Use a separate MICRORAG_HOME for a "
+            "second collection, or delete %s to rebuild from the new root.",
+            recorded,
+            root,
+            DEFAULT_DB_DIR.resolve(),
+        )
+        return EX_USAGE
+
     embedder = _load_embedder()
     if embedder is None:
         return EX_NOINPUT
 
     store = Store(DEFAULT_DB_DIR)
     files, chunks, pruned = index_directory(path, embedder, store, prune=args.prune)
+    if files and recorded is None:
+        (DEFAULT_DB_DIR / _ROOT_MARKER).write_text(f"{root}\n", encoding="utf-8")
 
     if args.json:
         emit_json({"files": files, "chunks": chunks, "pruned": pruned})
@@ -131,6 +160,10 @@ def _query_command(args: argparse.Namespace) -> int:
     else:
         text = args.text
 
+    if args.context < 0:
+        logger.error("--context must be zero or positive, got %d.", args.context)
+        return EX_USAGE
+
     if not DEFAULT_DB_DIR.exists():
         logger.error(
             "No index found at %s. Run: microrag index <path>",
@@ -151,20 +184,36 @@ def _query_command(args: argparse.Namespace) -> int:
     documents, metadatas, distances = store.query(query_embedding, args.limit)
 
     for doc, meta, dist in zip(documents[0], metadatas[0], distances[0], strict=True):
+        neighbors = (
+            store.neighbors(meta["source"], meta["index"], args.context)
+            if args.context
+            else []
+        )
         if args.json:
-            emit_json(
-                {
-                    "distance": dist,
-                    "source": meta["source"],
-                    "heading": meta["heading"],
-                    "text": doc,
-                }
-            )
+            result = {
+                "distance": dist,
+                "source": meta["source"],
+                "heading": meta["heading"],
+                "text": doc,
+            }
+            if args.context:
+                result["context"] = [
+                    {
+                        "offset": n_meta["index"] - meta["index"],
+                        "heading": n_meta["heading"],
+                        "text": n_doc,
+                    }
+                    for n_doc, n_meta in neighbors
+                ]
+            emit_json(result)
         else:
             emit(f"distance={dist:.4f}")
             emit(f"source={meta['source']}")
             emit(f"heading={meta['heading']}")
             emit(doc)
+            for n_doc, n_meta in neighbors:
+                emit(f"context={n_meta['index'] - meta['index']:+d}")
+                emit(n_doc)
             emit("---")
 
     return EX_OK
@@ -181,13 +230,17 @@ def _status_command(args: argparse.Namespace) -> int:
         "model_dir": str(MODEL_DIR.resolve()),
         "model_present": model_present,
         "db_dir": str(DEFAULT_DB_DIR.resolve()),
+        "root": _read_root(),
         "chunks": chunks,
     }
     if args.json:
         emit_json(info)
     else:
         for key, value in info.items():
-            rendered = str(value).lower() if isinstance(value, bool) else str(value)
+            if isinstance(value, bool):
+                rendered = str(value).lower()
+            else:
+                rendered = "-" if value is None else str(value)
             emit(f"{key}\t{rendered}")
 
     if not model_present:
@@ -316,6 +369,15 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=5,
         help="Number of results (default: 5)",
+    )
+    query_parser.add_argument(
+        "-c",
+        "--context",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Also print up to N neighboring chunks from the same file on "
+        "each side of every result (default: 0)",
     )
     query_parser.set_defaults(func=_query_command)
 

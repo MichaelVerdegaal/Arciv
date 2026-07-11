@@ -25,6 +25,9 @@ See [SETUP.md](SETUP.md) for detailed setup instructions, including how to get a
   `microrag query -` reads the query text from stdin.
 - Re-indexing is incremental: unchanged files are a no-op, edited files replace their old chunks,
   and `index --prune` removes chunks for deleted files.
+- An index is pinned to the first root directory it was built from; indexing a different root is
+  refused (use a separate `MICRORAG_HOME` per notes collection, or delete the DB dir to rebuild).
+- `query -c N` also shows the N neighboring chunks around each result for more context.
 - `--json` emits machine-readable output: JSONL for `query`, a single object for `status` and
   the `index` summary.
 - `-v`/`-vv` for more log detail, `-q` for errors only, `--version` for the version. Global flags

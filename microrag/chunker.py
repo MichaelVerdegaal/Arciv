@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 from chonkie import MarkdownChef, Pipeline
+from chonkie.types import MarkdownImage
 
 from .constants import CHUNK_OVERLAP_CHARS, CHUNK_TARGET_CHARS
 
@@ -33,8 +34,10 @@ _PIPELINE = (
 def chunk_markdown(text: str, source: Path, mtime: float) -> list[dict]:
     """Split markdown text into heading-aware chunks.
 
-    Fenced code blocks and tables are chunked as their own sections under the
-    heading in effect at their position; markdown image syntax is dropped.
+    Fenced code blocks, tables, and image alt texts are chunked as their own
+    sections under the heading in effect at their position; image content
+    itself is dropped. Every breadcrumb starts with the filename stem, so
+    chunks carry document-level context even before the first heading.
 
     Args:
         text: Raw markdown content.
@@ -45,10 +48,12 @@ def chunk_markdown(text: str, source: Path, mtime: float) -> list[dict]:
         List of chunk dicts with keys "text" and "metadata".
     """
     doc = _CHEF.parse(text)
+    title = source.stem
     segments = sorted(
         [("prose", c.start_index, c.text) for c in doc.chunks]
         + [("verbatim", c.start_index, c.content) for c in doc.code]
-        + [("verbatim", t.start_index, t.content) for t in doc.tables],
+        + [("verbatim", t.start_index, t.content) for t in doc.tables]
+        + [("verbatim", i.start_index, i.alias) for i in doc.images if _has_alt(i)],
         key=lambda segment: segment[1],
     )
 
@@ -56,9 +61,9 @@ def chunk_markdown(text: str, source: Path, mtime: float) -> list[dict]:
     heading_stack: list[tuple[int, str]] = []
     for kind, _, segment_text in segments:
         if kind == "prose":
-            sections = _split_on_headings(segment_text, heading_stack)
+            sections = _split_on_headings(segment_text, heading_stack, title)
         else:
-            sections = [(" > ".join(t for _, t in heading_stack), segment_text)]
+            sections = [(_breadcrumb(title, heading_stack), segment_text)]
         for breadcrumb, body in sections:
             chunks.extend(_pack_section(body, breadcrumb, source, mtime))
 
@@ -67,9 +72,33 @@ def chunk_markdown(text: str, source: Path, mtime: float) -> list[dict]:
     return chunks
 
 
+def _breadcrumb(title: str, heading_stack: list[tuple[int, str]]) -> str:
+    """Join the document title and heading stack into a breadcrumb string.
+
+    The title (filename stem) leads so chunks carry document-level context
+    even before the first heading; it is skipped when the top-level heading
+    already matches it, to avoid "Setup > Setup".
+    """
+    parts = [t for _, t in heading_stack]
+    if not parts or parts[0].casefold() != title.casefold():
+        parts.insert(0, title)
+    return " > ".join(parts)
+
+
+def _has_alt(image: MarkdownImage) -> bool:
+    """Return True when the image carries real alt text worth indexing.
+
+    MarkdownChef falls back to the filename (or "base64_image") when the alt
+    text is empty; those aliases are noise, not content.
+    """
+    alias = image.alias.strip()
+    return bool(alias) and alias != "base64_image" and alias != Path(image.content).name
+
+
 def _split_on_headings(
     segment_text: str,
     heading_stack: list[tuple[int, str]],
+    title: str,
 ) -> list[tuple[str, str]]:
     """Split a prose segment into (breadcrumb, body) sections, updating the stack."""
     matches = list(HEADING_RE.finditer(segment_text))
@@ -77,7 +106,7 @@ def _split_on_headings(
 
     lead = segment_text[: matches[0].start()] if matches else segment_text
     if lead.strip():
-        sections.append((" > ".join(t for _, t in heading_stack), lead))
+        sections.append((_breadcrumb(title, heading_stack), lead))
 
     for i, match in enumerate(matches):
         _update_heading_stack(
@@ -86,7 +115,7 @@ def _split_on_headings(
         end = matches[i + 1].start() if i + 1 < len(matches) else len(segment_text)
         body = segment_text[match.end() : end]
         if body.strip():
-            sections.append((" > ".join(t for _, t in heading_stack), body))
+            sections.append((_breadcrumb(title, heading_stack), body))
     return sections
 
 

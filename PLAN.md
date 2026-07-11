@@ -88,9 +88,10 @@ components such as `SemanticChunker` and `EmbeddingsRefinery` and inherits `__ca
 
 Heading-aware markdown chunking built on chonkie (all components run offline):
 
-- `MarkdownChef` separates fenced code blocks and tables from prose, so `#` comments inside code
-  are never mistaken for headings. Code blocks and tables become their own chunks under the
-  heading in effect at their position; markdown image syntax is dropped.
+- `MarkdownChef` separates fenced code blocks, tables, and images from prose, so `#` comments
+  inside code are never mistaken for headings. Code blocks, tables, and image alt texts become
+  their own chunks under the heading in effect at their position; image content itself is
+  dropped, as are filename-fallback aliases for images without alt text.
 - Prose is split into sections on headings (`#` through `####`) with a breadcrumb stack, then
   each section is packed by a chonkie `Pipeline`: `RecursiveChunker` (character tokenizer) to a
   target of ~1200 characters (oversized paragraphs are split further), then `OverlapRefinery`
@@ -98,7 +99,9 @@ Heading-aware markdown chunking built on chonkie (all components run offline):
   The chef stays outside the pipeline because the breadcrumb logic runs between parsing and
   chunking. The numbers live in `constants.py` and are tunable; the approach is not.
 - Prepend the heading breadcrumb to each chunk text (e.g. `"Arciv Notes > Setup > Docker"`) so
-  chunks carry their own context.
+  chunks carry their own context. The breadcrumb starts with the filename stem (skipped when the
+  top-level heading already matches it), so even chunks before the first heading carry
+  document-level context.
 - Return chunks with metadata: source relative path, heading path, chunk index, file mtime.
 
 ### store.py
@@ -125,11 +128,15 @@ Four subcommands:
 - `microrag download` — fetch model files to a local cache dir via `huggingface_hub`. Warns with
   a hint when no `HF_TOKEN` is configured (unauthenticated downloads are rate-limited and slower).
 - `microrag index <path> [--prune]` — index a directory; `--prune` also removes chunks for
-  deleted files.
-- `microrag query "<text>" [-k N]` — print top-k results as: distance, source path, heading
-  breadcrumb, and the chunk text. `"-"` reads the query text from stdin. Plain text output, no
-  TUI, no colors library.
-- `microrag status` — read-only introspection: model dir and presence, DB dir, chunk count.
+  deleted files. The index is pinned to the first root it was built from (a `root` marker file
+  inside the DB dir); indexing a different root is refused with exit 64, since root-relative
+  sources would collide and confuse `--prune`.
+- `microrag query "<text>" [-k N] [-c N]` — print top-k results as: distance, source path,
+  heading breadcrumb, and the chunk text; `-c/--context N` also prints up to N neighboring
+  chunks from the same file on each side of every result. `"-"` reads the query text from
+  stdin. Plain text output, no TUI, no colors library.
+- `microrag status` — read-only introspection: model dir and presence, DB dir, indexed root,
+  chunk count.
 
 CLI conventions (locked):
 

@@ -66,6 +66,33 @@ class Store:
         if ids:
             self._collection.delete(ids=ids)
 
+    def neighbors(
+        self,
+        source: str,
+        index: int,
+        n: int,
+    ) -> list[tuple[str, dict]]:
+        """Return (document, metadata) pairs adjacent to a chunk in its file.
+
+        Args:
+            source: Source path of the anchor chunk.
+            index: File-wide index of the anchor chunk.
+            n: Number of neighboring chunks to fetch on each side.
+
+        Returns:
+            Pairs for chunks with index in [index - n, index + n], excluding
+            the anchor itself, sorted by index.
+        """
+        wanted = [i for i in range(index - n, index + n + 1) if i != index and i >= 0]
+        if not wanted:
+            return []
+        result = self._collection.get(
+            where={"$and": [{"source": source}, {"index": {"$in": wanted}}]},
+            include=["documents", "metadatas"],
+        )
+        pairs = zip(result["documents"], result["metadatas"], strict=True)
+        return sorted(pairs, key=lambda pair: pair[1]["index"])
+
     def query(
         self,
         query_embeddings: np.ndarray,
