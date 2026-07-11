@@ -2,13 +2,7 @@
 
 Known limitations, deliberately not fixed yet (see PLAN.md scope rules):
 
-- Markdown image syntax is dropped during chunking (chonkie's MarkdownChef extracts images
-  separately); alt text is not indexed.
-- Indexing two different root directories into the same store can collide: sources are stored as
-  root-relative paths, so `a.md` under one root overwrites `a.md` under another. One store per
-  notes collection is the assumption.
-- `index --prune` only compares against the root being indexed; it cannot distinguish "file
-  deleted" from "file lives under a different root" (same root cause as the collision above).
+- None currently.
 
 ## Parking lot (deliberately not built yet)
 
@@ -17,14 +11,9 @@ Known limitations, deliberately not fixed yet (see PLAN.md scope rules):
   quality says otherwise.
 
 LLM-free retrieval ideas (from a survey of RAG techniques; anything needing an LLM or a hosted
-API is banned for this project and listed under Rejected):
+API is banned for this project and listed under Rejected). These two still need an explicit
+owner go-ahead per PLAN.md, which is why a blanket "handle the followups" did not cover them:
 
-- Document title in the breadcrumb: chunks before the first heading get an empty breadcrumb, and
-  the file name is never part of it. Prepending the filename stem (or first H1) is the LLM-free
-  version of "contextual chunk headers" and costs nothing at query time.
-- Neighbor-chunk expansion at query time: fetch a hit's `(source, index ± 1)` chunks from Chroma
-  and show them as surrounding context — the LLM-free version of the "context enrichment window".
-  Needs only a metadata `get`, no schema change.
 - BM25 + vector fusion retrieval: fully LLM-free, but needs either a new dependency
   (`rank-bm25`, whitelist approval required) or Chroma `$contains` (explicitly out of scope for
   v1). Revisit if exact-keyword queries measurably underperform.
@@ -59,6 +48,17 @@ API is banned for this project and listed under Rejected):
 
 ## Resolved
 
+- Image alt text not indexed: alt texts are now chunked as their own sections under the heading
+  in effect at their position (filename-fallback aliases are skipped as noise).
+- Root collision and `--prune` ambiguity: the index is now pinned to the first root it was built
+  from (recorded in a `root` marker inside the DB dir); `index` refuses a different root with a
+  hint to use a separate `MICRORAG_HOME` or delete the DB dir to rebuild.
+- Chunks before the first heading carried no document context: every breadcrumb now starts with
+  the filename stem (skipped when the top-level heading already matches it) — the LLM-free
+  version of "contextual chunk headers".
+- No way to see a hit's surroundings: `query -c/--context N` prints up to N neighboring chunks
+  from the same file on each side of every result — the LLM-free version of the "context
+  enrichment window".
 - Stale chunks from edited files: re-indexing now deletes a source's chunks whose IDs are not in
   the new set; deleted files are handled by `index --prune`.
 - `#` comments in fenced code blocks misread as headings: fixed by switching chunking to chonkie

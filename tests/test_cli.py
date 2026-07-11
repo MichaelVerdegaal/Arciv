@@ -13,7 +13,12 @@ from microrag.indexer import index_directory
 
 class _FakeEmbedder:
     def embed_documents(self, texts: list[str]) -> np.ndarray:
-        return np.zeros((len(texts), 4), dtype=np.float32)
+        vectors = np.zeros((len(texts), 4), dtype=np.float32)
+        vectors[:, 0] = 1.0  # unit norm keeps cosine distances well-defined
+        return vectors
+
+    def embed_query(self, text: str) -> np.ndarray:
+        return self.embed_documents([text])
 
 
 class _FakeStore:
@@ -162,6 +167,99 @@ def test_microrag_home_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     finally:
         monkeypatch.delenv("MICRORAG_HOME")
         importlib.reload(constants)
+
+
+@pytest.fixture
+def fake_embedder(monkeypatch: pytest.MonkeyPatch) -> _FakeEmbedder:
+    """Bypass the model download by loading a fake embedder in the CLI."""
+    embedder = _FakeEmbedder()
+    monkeypatch.setattr("microrag.cli._load_embedder", lambda: embedder)
+    return embedder
+
+
+def test_index_refuses_a_second_root(
+    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+) -> None:
+    first = empty_cwd / "first"
+    first.mkdir()
+    (first / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
+    second = empty_cwd / "second"
+    second.mkdir()
+    (second / "a.md").write_text("# A\n\ncollides\n", encoding="utf-8")
+
+    assert main(["index", str(first)]) == EX_OK
+    capsys.readouterr()
+
+    code = main(["index", str(second)])
+    captured = capsys.readouterr()
+    assert code == EX_USAGE
+    assert captured.out == ""
+    assert str(first.resolve()) in captured.err
+    assert "MICRORAG_HOME" in captured.err
+
+    # Re-indexing the recorded root still works.
+    assert main(["index", str(first)]) == EX_OK
+
+
+def test_index_does_not_pin_root_on_empty_walk(
+    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+) -> None:
+    empty = empty_cwd / "empty"
+    empty.mkdir()
+    notes = empty_cwd / "notes"
+    notes.mkdir()
+    (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
+
+    assert main(["index", str(empty)]) == EX_OK  # a mistyped path must not pin
+    assert main(["index", str(notes)]) == EX_OK
+    capsys.readouterr()
+
+
+def test_status_reports_the_indexed_root(
+    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+) -> None:
+    assert main(["status", "--json"]) == EX_OK
+    assert json.loads(capsys.readouterr().out)["root"] is None
+
+    notes = empty_cwd / "notes"
+    notes.mkdir()
+    (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
+    assert main(["index", str(notes)]) == EX_OK
+    capsys.readouterr()
+
+    assert main(["status", "--json"]) == EX_OK
+    assert json.loads(capsys.readouterr().out)["root"] == str(notes.resolve())
+
+
+def test_query_context_prints_neighboring_chunks(
+    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+) -> None:
+    notes = empty_cwd / "notes"
+    notes.mkdir()
+    (notes / "a.md").write_text(
+        "# One\n\nfirst chunk body\n\n# Two\n\nsecond chunk body\n", encoding="utf-8"
+    )
+    assert main(["index", str(notes)]) == EX_OK
+    capsys.readouterr()
+
+    assert main(["query", "anything", "-k", "1", "-c", "1"]) == EX_OK
+    out = capsys.readouterr().out
+    assert "context=" in out
+    assert "first chunk body" in out and "second chunk body" in out
+
+    assert main(["query", "anything", "-k", "1", "-c", "1", "--json"]) == EX_OK
+    result = json.loads(capsys.readouterr().out)
+    assert len(result["context"]) == 1
+    assert result["context"][0]["offset"] in (-1, 1)
+
+
+def test_query_rejects_negative_context(
+    empty_cwd: Path, capsys: pytest.CaptureFixture
+) -> None:
+    code = main(["query", "anything", "-c", "-2"])
+    captured = capsys.readouterr()
+    assert code == EX_USAGE
+    assert captured.out == ""
 
 
 def test_index_directory_keeps_stdout_clean(
