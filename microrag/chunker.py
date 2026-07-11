@@ -1,15 +1,35 @@
-"""Markdown-aware chunking for notes."""
+"""Markdown-aware chunking built on chonkie."""
 
 import re
 from pathlib import Path
+
+from chonkie import MarkdownChef, RecursiveChunker
+from chonkie.refinery import OverlapRefinery
 
 from .constants import CHUNK_OVERLAP_CHARS, CHUNK_TARGET_CHARS
 
 HEADING_RE = re.compile(r"^(#{1,4})\s+(.+)$", re.MULTILINE)
 
+# All chonkie components run offline: MarkdownChef separates fenced code and
+# tables from prose (so `# comments` in code are never mistaken for headings),
+# RecursiveChunker packs text to size and splits oversized paragraphs, and
+# OverlapRefinery reproduces the prefix overlap between adjacent chunks.
+_CHEF = MarkdownChef()
+_CHUNKER = RecursiveChunker(tokenizer="character", chunk_size=CHUNK_TARGET_CHARS)
+_OVERLAP = OverlapRefinery(
+    tokenizer="character",
+    context_size=CHUNK_OVERLAP_CHARS,
+    method="prefix",
+    mode="recursive",  # align the overlap to logical boundaries, not mid-word
+    merge=True,
+)
+
 
 def chunk_markdown(text: str, source: Path, mtime: float) -> list[dict]:
     """Split markdown text into heading-aware chunks.
+
+    Fenced code blocks and tables are chunked as their own sections under the
+    heading in effect at their position; markdown image syntax is dropped.
 
     Args:
         text: Raw markdown content.
@@ -19,26 +39,50 @@ def chunk_markdown(text: str, source: Path, mtime: float) -> list[dict]:
     Returns:
         List of chunk dicts with keys "text" and "metadata".
     """
-    matches = list(HEADING_RE.finditer(text))
-    preamble = text[: matches[0].start()] if matches else text
-    chunks = _chunk_section(preamble, source, mtime, "")
+    doc = _CHEF.parse(text)
+    segments = sorted(
+        [("prose", c.start_index, c.text) for c in doc.chunks]
+        + [("verbatim", c.start_index, c.content) for c in doc.code]
+        + [("verbatim", t.start_index, t.content) for t in doc.tables],
+        key=lambda segment: segment[1],
+    )
+
+    chunks: list[dict] = []
     heading_stack: list[tuple[int, str]] = []
-
-    for i, match in enumerate(matches):
-        level = len(match.group(1))
-        heading_text = match.group(2).strip()
-        start = match.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        section_text = text[start:end]
-
-        _update_heading_stack(heading_stack, level, heading_text)
-        breadcrumb = " > ".join(text for _, text in heading_stack)
-        chunks.extend(_chunk_section(section_text, source, mtime, breadcrumb))
+    for kind, _, segment_text in segments:
+        if kind == "prose":
+            sections = _split_on_headings(segment_text, heading_stack)
+        else:
+            sections = [(" > ".join(t for _, t in heading_stack), segment_text)]
+        for breadcrumb, body in sections:
+            chunks.extend(_pack_section(body, breadcrumb, source, mtime))
 
     for index, chunk in enumerate(chunks):
         chunk["metadata"]["index"] = index
-
     return chunks
+
+
+def _split_on_headings(
+    segment_text: str,
+    heading_stack: list[tuple[int, str]],
+) -> list[tuple[str, str]]:
+    """Split a prose segment into (breadcrumb, body) sections, updating the stack."""
+    matches = list(HEADING_RE.finditer(segment_text))
+    sections: list[tuple[str, str]] = []
+
+    lead = segment_text[: matches[0].start()] if matches else segment_text
+    if lead.strip():
+        sections.append((" > ".join(t for _, t in heading_stack), lead))
+
+    for i, match in enumerate(matches):
+        _update_heading_stack(
+            heading_stack, len(match.group(1)), match.group(2).strip()
+        )
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(segment_text)
+        body = segment_text[match.end() : end]
+        if body.strip():
+            sections.append((" > ".join(t for _, t in heading_stack), body))
+    return sections
 
 
 def _update_heading_stack(
@@ -52,66 +96,32 @@ def _update_heading_stack(
     stack.append((level, heading_text))
 
 
-def _chunk_section(
-    section_text: str,
-    source: Path,
-    mtime: float,
-    breadcrumb: str,
-) -> list[dict]:
-    """Pack paragraphs within a section into overlapping chunks."""
-    paragraphs = [p.strip() for p in section_text.split("\n\n") if p.strip()]
-    if not paragraphs:
-        return []
-
-    chunks: list[dict] = []
-    current_paras: list[str] = []
-    current_len = 0
-
-    for paragraph in paragraphs:
-        para_len = len(paragraph)
-        if current_paras and current_len + 2 + para_len > CHUNK_TARGET_CHARS:
-            body = "\n\n".join(current_paras)
-            chunks.append(_make_chunk(body, source, mtime, breadcrumb))
-
-            overlap = _overlap_text(body)
-            current_paras = [overlap] if overlap else []
-            current_len = len(overlap)
-
-        current_paras.append(paragraph)
-        current_len += (2 if len(current_paras) > 1 else 0) + para_len
-
-    if current_paras:
-        body = "\n\n".join(current_paras)
-        chunks.append(_make_chunk(body, source, mtime, breadcrumb))
-
-    return chunks
-
-
-def _overlap_text(body: str) -> str:
-    """Return the last CHUNK_OVERLAP_CHARS of body, aligned to paragraph start."""
-    if len(body) <= CHUNK_OVERLAP_CHARS:
-        return body
-    tail = body[-CHUNK_OVERLAP_CHARS:]
-    para_break = tail.find("\n\n")
-    if para_break != -1:
-        return tail[para_break + 2 :]
-    return tail
-
-
-def _make_chunk(
+def _pack_section(
     body: str,
+    breadcrumb: str,
     source: Path,
     mtime: float,
-    breadcrumb: str,
-) -> dict:
-    """Build a chunk dict; the file-wide "index" is filled in by chunk_markdown."""
-    text = f"{breadcrumb}\n\n{body}" if breadcrumb else body
-    return {
-        "text": text,
-        "metadata": {
-            "source": str(source),
-            "heading": breadcrumb,
-            "index": -1,
-            "mtime": mtime,
-        },
-    }
+) -> list[dict]:
+    """Chunk a section body to size, with prefix overlap between adjacent chunks."""
+    packed = _CHUNKER(body.strip())
+    if len(packed) > 1:
+        packed = _OVERLAP(packed)
+
+    section_chunks = []
+    for piece in packed:
+        piece_text = piece.text.strip()
+        if not piece_text:
+            continue
+        chunk_text = f"{breadcrumb}\n\n{piece_text}" if breadcrumb else piece_text
+        section_chunks.append(
+            {
+                "text": chunk_text,
+                "metadata": {
+                    "source": str(source),
+                    "heading": breadcrumb,
+                    "index": -1,
+                    "mtime": mtime,
+                },
+            }
+        )
+    return section_chunks

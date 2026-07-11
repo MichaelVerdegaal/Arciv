@@ -6,14 +6,28 @@ See [README.md](README.md) for an overview of the project.
 See [SETUP.md](SETUP.md) for setup instructions.
 
 ## Long term
-See [PLAN.md](PLAN.md) for issues and long-term plans, and
+See [PLAN.md](PLAN.md) for scope rules and long-term plans, and [FOLLOWUPS.md](FOLLOWUPS.md)
+for known limitations.
 
 ### Architecture
-Short summmary, no longer than 2 paragraphs.
+Local semantic search over markdown notes: `index` walks a directory of `*.md` files, chunks
+them (chonkie-based, heading-aware), embeds each chunk with a local ONNX model (CPU only), and
+upserts into a persistent ChromaDB collection; `query` embeds the query text (with a model-specific
+prefix) and returns the nearest chunks. Everything lives under `MICRORAG_HOME` (default
+`~/.microrag`): the downloaded model in `model/`, the Chroma DB in `db/`.
+
+Module boundaries (see PLAN.md): `embedder` knows nothing about Chroma, `store` knows nothing
+about ONNX or tokenizers, `chunker` is pure functions over strings, `cli` is the only place they
+are wired together. Chunk IDs are `sha256(relative_path:index:chunk_text)`, so re-indexing
+unchanged files is a no-op via Chroma upsert.
 
 ### Key Libraries
-- `...`: description
-- `...`: description
+- `chromadb`: persistent vector store, one cosine collection, telemetry disabled.
+- `onnxruntime` + `tokenizers`: CPU inference for the `MongoDB/mdbr-leaf-ir` embedding model.
+- `chonkie`: markdown parsing (code fences/tables separated from prose) and size-based chunking.
+- `huggingface_hub`: one-time model download (the only networked code path).
+- `numpy`: embedding arrays.
+- `argcomplete`: shell tab completion for the CLI.
 
 ## Context
 This is a solo project; no other developers read or maintain this code. That means:
@@ -35,10 +49,10 @@ ALWAYS:
 - Use `pathlib` over `os` for file paths.
 
 ASK FIRST:
-- Adding dependencies beyond core stack
-- Changing the SQLite schema
-- Modifying URL processing rules or rewriters
-- Changing scraping/conversion pipeline flow
+- Adding dependencies beyond the whitelist in PLAN.md
+- Changing anything in PLAN.md's "Locked technical decisions" section
+- Changing the chunking approach (tuning the constants is fine)
+- Touching the chunk ID scheme
 
 NEVER:
 - Skip type hints on functions

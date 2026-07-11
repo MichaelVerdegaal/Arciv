@@ -56,6 +56,27 @@ def test_chunks_respect_target_size() -> None:
         assert len(chunk["text"]) <= CHUNK_TARGET_CHARS + 300
 
 
+def test_heading_inside_code_fence_is_not_a_heading() -> None:
+    text = (
+        "# Real\n\nprose before code\n\n"
+        "```python\n# just a comment\nx = 1\n```\n\n"
+        "after the code"
+    )
+    chunks = chunk_markdown(text, SOURCE, MTIME)
+    breadcrumbs = {chunk["metadata"]["heading"] for chunk in chunks}
+    assert breadcrumbs == {"Real"}
+    assert any("# just a comment" in chunk["text"] for chunk in chunks)
+    assert any("after the code" in chunk["text"] for chunk in chunks)
+
+
+def test_oversized_single_paragraph_is_split() -> None:
+    text = "# Big\n\n" + "word " * 800  # one 4000-char paragraph, no breaks
+    chunks = chunk_markdown(text, SOURCE, MTIME)
+    assert len(chunks) > 1
+    for chunk in chunks:
+        assert len(chunk["text"]) <= CHUNK_TARGET_CHARS + 300
+
+
 def test_metadata_fields() -> None:
     chunks = chunk_markdown("# H\n\nbody", SOURCE, MTIME)
     metadata = chunks[0]["metadata"]
