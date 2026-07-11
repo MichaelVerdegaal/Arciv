@@ -68,7 +68,10 @@ together. If an import crosses these boundaries, it's wrong.
 ### embedder.py
 
 `OnnxEmbedder` loads the ONNX session and the `tokenizer.json` from the downloaded model directory,
-both paths passed in via `pathlib.Path` (never hardcoded).
+both paths passed in via `pathlib.Path` (never hardcoded). It subclasses chonkie's `BaseEmbeddings`
+(implementing `embed`, `embed_batch`, `dimension`, `get_tokenizer`), so it plugs into chonkie
+components such as `SemanticChunker` and `EmbeddingsRefinery` and inherits `__call__`,
+`similarity`, and the async variants.
 
 - At load time, inspect the session's output names. If the graph outputs `sentence_embedding`, use
   it directly. If it outputs token-level states (`last_hidden_state` or similar), apply mean pooling

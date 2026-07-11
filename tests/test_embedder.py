@@ -4,6 +4,7 @@ import logging
 
 import numpy as np
 import pytest
+from chonkie.embeddings import BaseEmbeddings
 
 from microrag.constants import (
     EMBEDDING_DIM,
@@ -67,6 +68,33 @@ def test_semantic_similarity(embedder: OnnxEmbedder) -> None:
 def test_empty_documents(embedder: OnnxEmbedder) -> None:
     vectors = embedder.embed_documents([])
     assert vectors.shape == (0, EMBEDDING_DIM)
+
+
+def test_chonkie_embed_interface(embedder: OnnxEmbedder) -> None:
+    assert isinstance(embedder, BaseEmbeddings)
+    assert embedder.dimension == EMBEDDING_DIM
+
+    vector = embedder.embed("a short sentence")
+    assert vector.shape == (EMBEDDING_DIM,)
+    assert np.allclose(np.linalg.norm(vector), 1.0, atol=1e-5)
+
+    vectors = embedder.embed_batch(["a short sentence", "another one"])
+    assert len(vectors) == 2
+    assert all(v.shape == (EMBEDDING_DIM,) for v in vectors)
+    assert np.allclose(vectors[0], vector, atol=1e-5)
+
+
+def test_chonkie_call_dispatch(embedder: OnnxEmbedder) -> None:
+    single = embedder("a short sentence")
+    assert single.shape == (EMBEDDING_DIM,)
+    batch = embedder(["a short sentence", "another one"])
+    assert len(batch) == 2
+
+
+def test_chonkie_interface_matches_embed_documents(embedder: OnnxEmbedder) -> None:
+    texts = ["vector search", "another sentence"]
+    rows = embedder.embed_documents(texts)
+    assert np.allclose(np.stack(embedder.embed_batch(texts)), rows, atol=1e-5)
 
 
 def test_truncation_warning_logged(
