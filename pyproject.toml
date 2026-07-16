@@ -12,6 +12,7 @@ dependencies = [
     "numpy==2.5.1",
     "loguru>=0.7.3",
     "chonkie>=1.7.0",
+    "argcomplete>=3.5.0",
 ]
 
 [project.optional-dependencies]

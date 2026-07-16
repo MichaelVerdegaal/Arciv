@@ -1,22 +1,28 @@
-# Setup
+# Setup (developer)
 
-MicroRAG runs fully offline after a one-time model download.
+MicroRAG runs fully offline after a one-time model download. This file covers setting up a
+development environment. End-users see [README.md](README.md).
 
-## Install
+## Prerequisites
 
-Requires [uv](https://docs.astral.sh/uv/). From the repo root:
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/)
+
+## Clone and install
 
 ```bash
+git clone https://github.com/dfg/microrag
+cd microrag
 uv sync
 ```
 
-This creates `.venv/` with Python 3.12, the runtime dependencies from `uv.lock`, and the dev
-tools (`pytest`, `ruff`).
+This creates `.venv/` with all runtime dependencies from `uv.lock`, plus the dev tools (`pytest`,
+`ruff`).
 
 ## Set a Hugging Face token (recommended)
 
-Unauthenticated Hugging Face downloads are rate-limited and slower. Create a token with read
-scope at <https://huggingface.co/settings/tokens> and export it before downloading:
+Unauthenticated Hugging Face downloads are rate-limited and slower. Create a token with read scope
+at <https://huggingface.co/settings/tokens> and export it:
 
 ```bash
 export HF_TOKEN=hf_...
@@ -34,6 +40,15 @@ This fetches `MongoDB/mdbr-leaf-ir` (fp32 ONNX) into `$MICRORAG_HOME/model/`. Th
 command that touches the network. If no token is configured, the command warns and continues
 unauthenticated.
 
+## Install as a tool (optional, for testing outside the project venv)
+
+```bash
+uv tool install -e .
+```
+
+Now `microrag` is on PATH, using the editable install so source changes are picked up. Uninstall
+with `uv tool uninstall microrag` when done.
+
 ## Where data lives
 
 All data sits under one home directory, so commands work from anywhere:
@@ -42,25 +57,15 @@ All data sits under one home directory, so commands work from anywhere:
 - model files: `$MICRORAG_HOME/model/`
 - Chroma database: `$MICRORAG_HOME/db/`
 
-`microrag status` prints the resolved locations and the current chunk count. Migrating from a
-version that stored data relative to the working directory: either re-run `download` and `index`,
-or move the old directories into place:
-
-```bash
-mkdir -p ~/.microrag
-mv .microrag ~/.microrag/model
-mv .microrag-db ~/.microrag/db
-```
+`microrag status` prints the resolved locations and the current chunk count.
 
 ## Shell completion (optional)
-
-Completion for commands and flags via [argcomplete](https://kislyuk.github.io/argcomplete/).
-With the venv's `microrag` on your PATH (e.g. after `source .venv/bin/activate`), add to your
-shell profile:
 
 ```bash
 eval "$(register-python-argcomplete microrag)"
 ```
+
+Add to your shell profile to make it permanent.
 
 ## Verify
 
@@ -70,10 +75,27 @@ uv run pytest
 
 The embedder tests are skipped if the model has not been downloaded yet.
 
+## Project structure
+
+```
+microrag/
+    constants.py    # QUERY_PREFIX, model id, paths, chunk sizes, collection name
+    embedder.py     # OnnxEmbedder (loads ONNX model, produces embeddings)
+    chunker.py      # heading-aware markdown chunking via chonkie
+    store.py        # thin ChromaDB wrapper (upsert, query, neighbors)
+    indexer.py      # walk files -> chunk -> embed -> upsert
+    cli.py          # argparse entrypoints: download, index, query, status
+tests/
+```
+
+Module boundaries: `embedder` knows nothing about Chroma. `store` knows nothing about ONNX or
+tokenizers. `chunker` is pure functions over strings. `cli` is the only place these are wired
+together.
+
 ## Index your notes
 
 ```bash
-uv run microrag index "$(arciv db dir)/saved"   # or any directory containing *.md files
+uv run microrag index ~/notes
 ```
 
 Re-running `index` is incremental: unchanged files are a no-op, edited files replace their old
@@ -86,5 +108,5 @@ directory.
 uv run microrag query "ONNX runtime throughput" -k 5
 ```
 
-Results (and only results) go to stdout; add `--json` for one JSON object per result (JSONL).
-Use `-` to read the query text from a pipe: `echo "docker layers" | microrag query -`.
+Results (and only results) go to stdout; add `--json` for one JSON object per result (JSONL). Use
+`-` to read the query text from a pipe: `echo "docker layers" | microrag query -`.

@@ -27,6 +27,13 @@ from .embedder import OnnxEmbedder
 from .indexer import index_directory
 from .store import Store
 
+EX_OK = 0
+EX_USAGE = 64
+EX_NOINPUT = 66
+EX_UNAVAILABLE = 69
+
+_ROOT_MARKER = "root.txt"
+
 
 def _read_root() -> str | None:
     """Return the root the index was built from, or None if not recorded."""
