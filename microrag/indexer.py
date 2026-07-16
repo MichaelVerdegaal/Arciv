@@ -1,16 +1,14 @@
 """Walk markdown files, chunk, embed, and upsert into the store."""
 
 import hashlib
-import logging
 from pathlib import Path
 
 from chonkie import FileFetcher
+from loguru import logger
 
 from .chunker import chunk_markdown
 from .embedder import OnnxEmbedder
 from .store import Store
-
-logger = logging.getLogger(__name__)
 
 _FETCHER = FileFetcher()
 

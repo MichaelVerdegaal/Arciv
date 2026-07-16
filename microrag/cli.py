@@ -3,12 +3,12 @@
 
 import argparse
 import json
-import logging
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import argcomplete
+from loguru import logger
 
 # httpx is huggingface_hub's own HTTP transport, imported only for its error type.
 import httpx
@@ -26,17 +26,6 @@ from .constants import (
 from .embedder import OnnxEmbedder
 from .indexer import index_directory
 from .store import Store
-
-logger = logging.getLogger(__name__)
-
-EX_OK: int = 0
-EX_USAGE: int = 64  # sysexits.h: command line usage error
-EX_NOINPUT: int = 66  # sysexits.h: an input file did not exist
-EX_UNAVAILABLE: int = 69  # sysexits.h: a required service is unavailable
-
-# Marker file inside the DB dir recording the root the index was built from,
-# so it disappears together with the index when the DB dir is deleted.
-_ROOT_MARKER: str = "root"
 
 
 def _read_root() -> str | None:
@@ -79,7 +68,7 @@ def _download_command(args: argparse.Namespace) -> int:
                 filename=filename,
                 local_dir=MODEL_DIR,
             )
-            logger.info("Downloaded %s -> %s", filename, local_path)
+            logger.info(f"Downloaded {filename} -> {local_path}")
 
         # Only large ONNX exports ship weights in a separate external data file.
         try:
@@ -88,21 +77,20 @@ def _download_command(args: argparse.Namespace) -> int:
                 filename=ONNX_DATA_FILENAME,
                 local_dir=MODEL_DIR,
             )
-            logger.info("Downloaded %s", ONNX_DATA_FILENAME)
+            logger.info(f"Downloaded {ONNX_DATA_FILENAME}")
         except EntryNotFoundError:
-            logger.info("%s not present in repo; skipping", ONNX_DATA_FILENAME)
+            logger.info(f"{ONNX_DATA_FILENAME} not present in repo; skipping")
     except (HfHubHTTPError, httpx.HTTPError) as exc:
         logger.error(
-            "Download from Hugging Face failed: %s. "
-            "Check your network connection and retry: microrag download",
-            exc,
+            f"Download from Hugging Face failed: {exc}. "
+            "Check your network connection and retry: microrag download"
         )
         return EX_UNAVAILABLE
 
     if args.json:
         emit_json({"model_dir": str(MODEL_DIR.resolve())})
     else:
-        logger.info("Model files saved to %s", MODEL_DIR.resolve())
+        logger.info(f"Model files saved to {MODEL_DIR.resolve()}")
     return EX_OK
 
 
@@ -110,7 +98,7 @@ def _index_command(args: argparse.Namespace) -> int:
     """Index a directory of markdown files."""
     path = Path(args.path)
     if not path.exists():
-        logger.error("Path does not exist: %s", path)
+        logger.error(f"Path does not exist: {path}")
         return EX_NOINPUT
 
     # Sources are stored root-relative, so mixing roots in one store can
@@ -119,12 +107,9 @@ def _index_command(args: argparse.Namespace) -> int:
     recorded = _read_root()
     if recorded is not None and recorded != root:
         logger.error(
-            "This index was built from %s; indexing %s would mix roots and can "
+            f"This index was built from {recorded}; indexing {root} would mix roots and can "
             "collide on relative paths. Use a separate MICRORAG_HOME for a "
-            "second collection, or delete %s to rebuild from the new root.",
-            recorded,
-            root,
-            DEFAULT_DB_DIR.resolve(),
+            f"second collection, or delete {DEFAULT_DB_DIR.resolve()} to rebuild from the new root.",
         )
         return EX_USAGE
 
@@ -140,7 +125,7 @@ def _index_command(args: argparse.Namespace) -> int:
     if args.json:
         emit_json({"files": files, "chunks": chunks, "pruned": pruned})
     else:
-        logger.info("Indexed %d file(s), %d chunk(s), pruned %d", files, chunks, pruned)
+        logger.info(f"Indexed {files} file(s), {chunks} chunk(s), pruned {pruned}")
     return EX_OK
 
 
@@ -161,13 +146,12 @@ def _query_command(args: argparse.Namespace) -> int:
         text = args.text
 
     if args.context < 0:
-        logger.error("--context must be zero or positive, got %d.", args.context)
+        logger.error(f"--context must be zero or positive, got {args.context}.")
         return EX_USAGE
 
     if not DEFAULT_DB_DIR.exists():
         logger.error(
-            "No index found at %s. Run: microrag index <path>",
-            DEFAULT_DB_DIR.resolve(),
+            f"No index found at {DEFAULT_DB_DIR.resolve()}. Run: microrag index <path>"
         )
         return EX_NOINPUT
 
@@ -254,8 +238,7 @@ def _load_embedder() -> OnnxEmbedder | None:
     tokenizer_path = MODEL_DIR / TOKENIZER_FILENAME
     if not (model_path.exists() and tokenizer_path.exists()):
         logger.error(
-            "Embedding model not found in %s. Run: microrag download",
-            MODEL_DIR.resolve(),
+            f"Embedding model not found in {MODEL_DIR.resolve()}. Run: microrag download"
         )
         return None
     return OnnxEmbedder(model_path=model_path, tokenizer_path=tokenizer_path)
@@ -263,23 +246,16 @@ def _load_embedder() -> OnnxEmbedder | None:
 
 def _configure_logging(verbose: int, quiet: bool) -> None:
     """Send all diagnostics to stderr; --quiet wins over --verbose."""
+    logger.remove()  # remove default stderr handler
     if quiet:
-        root_level = app_level = logging.ERROR
+        level = "ERROR"
     elif verbose >= 2:
-        root_level = app_level = logging.DEBUG
+        level = "DEBUG"
     elif verbose == 1:
-        root_level, app_level = logging.INFO, logging.DEBUG
+        level = "DEBUG"
     else:
-        # Keep third-party INFO chatter (e.g. per-request HTTP logs) out of
-        # the default output while still showing microrag's own progress.
-        root_level, app_level = logging.WARNING, logging.INFO
-    logging.basicConfig(
-        level=root_level,
-        format="%(levelname)s: %(message)s",
-        stream=sys.stderr,
-        force=True,
-    )
-    logging.getLogger("microrag").setLevel(app_level)
+        level = "INFO"
+    logger.add(sys.stderr, level=level, format="{level}: {message}")
 
 
 def _version() -> str:

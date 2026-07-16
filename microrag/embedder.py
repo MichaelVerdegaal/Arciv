@@ -1,11 +1,11 @@
 """ONNX embedder for the local leaf-ir model, as a chonkie embeddings handler."""
 
-import logging
 from pathlib import Path
 
 import numpy as np
 import onnxruntime as ort
 from chonkie.embeddings import BaseEmbeddings
+from loguru import logger
 from tokenizers import Tokenizer
 
 from .constants import (
@@ -14,8 +14,6 @@ from .constants import (
     MAX_TOKENS,
     QUERY_PREFIX,
 )
-
-logger = logging.getLogger(__name__)
 
 _SENTENCE_EMBEDDING: str = "sentence_embedding"
 _TOKEN_LEVEL_OUTPUTS: set[str] = {"last_hidden_state", "token_embeddings"}
@@ -160,10 +158,7 @@ class OnnxEmbedder(BaseEmbeddings):
             if e.overflowing:
                 source = "query" if is_query else "document"
                 logger.warning(
-                    "Input truncated at %d tokens for %s: %r",
-                    MAX_TOKENS,
-                    source,
-                    texts[i][:80],
+                    f"Input truncated at {MAX_TOKENS} tokens for {source}: {texts[i][:80]!r}"
                 )
 
         input_feed = {
