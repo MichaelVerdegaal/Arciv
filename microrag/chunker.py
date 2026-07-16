@@ -1,34 +1,43 @@
-"""Markdown-aware chunking built on chonkie."""
+"""Markdown-aware chunking built on chonkie.
+
+Uses MarkdownChef to separate fenced code, tables, and images from prose, then
+splits prose on markdown headings. Each heading section is independently chunked
+by a RecursiveChunker (heading-aware rules from the markdown recipe, then
+paragraph/line/sentence fallbacks) with overlap refinement.
+
+Every chunk gets a breadcrumb (e.g. "filename > Heading > Subheading") so
+context survives the vector store.
+"""
 
 import re
 from pathlib import Path
 
 from chonkie import MarkdownChef, Pipeline
-from chonkie.types import MarkdownImage
+from chonkie.types import MarkdownImage, RecursiveLevel, RecursiveRules
 
-from .constants import CHUNK_OVERLAP_CHARS, CHUNK_TARGET_CHARS
+from .constants import CHUNK_OVERLAP_TOKENS, MAX_TOKENS
 
-HEADING_RE = re.compile(r"^(#{1,4})\s+(.+)$", re.MULTILINE)
+HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
 
-# All chonkie components run offline: MarkdownChef separates fenced code and
-# tables from prose (so `# comments` in code are never mistaken for headings),
-# then a chonkie Pipeline packs each section: RecursiveChunker splits to size
-# and OverlapRefinery reproduces the prefix overlap between adjacent chunks.
-# The chef stays outside the pipeline because the heading-breadcrumb logic
-# below runs between parsing and chunking.
+# Heading delimiters from the standard markdown recipe, in order of priority.
+# Level 0: split on headings first (include_delim='next' keeps the `#` marker
+#   so the heading text is part of the next chunk for breadcrumb extraction).
+# Level 1: paragraph breaks.
+# Level 2: line breaks.
+# Level 3: sentence endings.
+# Level 4: token-level (no delimiters, pure size).
+_RULES = RecursiveRules(levels=[
+    RecursiveLevel(
+        delimiters=["######", "#####", "####", "###", "##", "#"],
+        include_delim="next",
+    ),
+    RecursiveLevel(delimiters=["\n\n", "\n\r"], include_delim="prev"),
+    RecursiveLevel(delimiters=["\n", "\r"], include_delim="prev"),
+    RecursiveLevel(delimiters=[". ", "! ", "? "], include_delim="prev"),
+    RecursiveLevel(delimiters=None, include_delim="prev"),
+])
+
 _CHEF = MarkdownChef()
-_PIPELINE = (
-    Pipeline()
-    .chunk_with("recursive", tokenizer="character", chunk_size=CHUNK_TARGET_CHARS)
-    .refine_with(
-        "overlap",
-        tokenizer="character",
-        context_size=CHUNK_OVERLAP_CHARS,
-        method="prefix",
-        mode="recursive",  # align the overlap to logical boundaries, not mid-word
-        merge=True,
-    )
-)
 
 
 def chunk_markdown(text: str, source: Path, mtime: float) -> list[dict]:
@@ -130,14 +139,33 @@ def _update_heading_stack(
     stack.append((level, heading_text))
 
 
+def _build_pipeline() -> Pipeline:
+    """Build a pipeline that chunks with heading-aware rules then refines with overlap.
+
+    Constructed per-call since Pipeline holds mutable state.
+    """
+    return (
+        Pipeline()
+        .chunk_with("recursive", rules=_RULES, chunk_size=MAX_TOKENS)
+        .refine_with(
+            "overlap",
+            context_size=CHUNK_OVERLAP_TOKENS,
+            method="prefix",
+            mode="recursive",
+            merge=True,
+        )
+    )
+
+
 def _pack_section(
     body: str,
     breadcrumb: str,
     source: Path,
     mtime: float,
 ) -> list[dict]:
-    """Chunk a section body to size, with prefix overlap between adjacent chunks."""
-    packed = _PIPELINE.run(texts=body.strip()).chunks
+    """Chunk a section body to size using the heading-aware pipeline."""
+    pipeline = _build_pipeline()
+    packed = pipeline.run(texts=body.strip()).chunks
 
     section_chunks = []
     for piece in packed:

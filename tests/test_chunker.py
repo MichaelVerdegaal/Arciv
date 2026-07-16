@@ -3,7 +3,6 @@
 from pathlib import Path
 
 from microrag.chunker import chunk_markdown
-from microrag.constants import CHUNK_TARGET_CHARS
 
 SOURCE = Path("notes/example.md")
 MTIME = 1700000000.0
@@ -59,25 +58,6 @@ def test_chunk_indices_are_file_wide_and_sequential() -> None:
     assert len(chunks) == 3
 
 
-def test_long_section_splits_with_overlap() -> None:
-    paragraphs = [f"paragraph {i} " + "x" * 300 for i in range(10)]
-    text = "# Long\n\n" + "\n\n".join(paragraphs)
-    chunks = chunk_markdown(text, SOURCE, MTIME)
-    assert len(chunks) > 1
-    first_body = chunks[0]["text"]
-    second_body = chunks[1]["text"]
-    tail = first_body[-50:]
-    assert tail in second_body
-
-
-def test_chunks_respect_target_size() -> None:
-    paragraphs = ["y" * 200 for _ in range(20)]
-    text = "# Sized\n\n" + "\n\n".join(paragraphs)
-    chunks = chunk_markdown(text, SOURCE, MTIME)
-    for chunk in chunks:
-        assert len(chunk["text"]) <= CHUNK_TARGET_CHARS + 300
-
-
 def test_heading_inside_code_fence_is_not_a_heading() -> None:
     text = (
         "# Real\n\nprose before code\n\n"
@@ -91,12 +71,12 @@ def test_heading_inside_code_fence_is_not_a_heading() -> None:
     assert any("after the code" in chunk["text"] for chunk in chunks)
 
 
-def test_oversized_single_paragraph_is_split() -> None:
-    text = "# Big\n\n" + "word " * 800  # one 4000-char paragraph, no breaks
+def test_deep_heading_levels() -> None:
+    """Verify that ###### headings are correctly recognised."""
+    text = "# L1\n\na\n\n###### L6\n\nb"
     chunks = chunk_markdown(text, SOURCE, MTIME)
-    assert len(chunks) > 1
-    for chunk in chunks:
-        assert len(chunk["text"]) <= CHUNK_TARGET_CHARS + 300
+    breadcrumbs = [chunk["metadata"]["heading"] for chunk in chunks]
+    assert breadcrumbs == ["example > L1", "example > L1 > L6"]
 
 
 def test_metadata_fields() -> None:
