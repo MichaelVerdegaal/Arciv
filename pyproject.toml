@@ -1,6 +1,6 @@
 [project]
 name = "microrag"
-version = "0.3.2"
+version = "0.3.4"
 description = "Local semantic search over markdown files"
 readme = "README.md"
 requires-python = ">=3.12"

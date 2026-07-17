@@ -172,23 +172,24 @@ def _pack_section(
 ) -> list[dict]:
     """Chunk a section body to size using the heading-aware pipeline."""
     pipeline = _build_pipeline()
-    packed = pipeline.run(texts=[body.strip()])
+    docs = pipeline.run(texts=[body.strip()])
 
     section_chunks = []
-    for piece in packed:
-        piece_text = piece.text.strip()
-        if not piece_text:
-            continue
-        chunk_text = f"{breadcrumb}\n\n{piece_text}" if breadcrumb else piece_text
-        section_chunks.append(
-            {
-                "text": chunk_text,
-                "metadata": {
-                    "source": str(source),
-                    "heading": breadcrumb,
-                    "index": -1,
-                    "mtime": mtime,
-                },
-            }
-        )
+    for doc in docs:
+        for piece in doc.chunks:
+            piece_text = piece.text.strip()
+            if not piece_text:
+                continue
+            chunk_text = f"{breadcrumb}\n\n{piece_text}" if breadcrumb else piece_text
+            section_chunks.append(
+                {
+                    "text": chunk_text,
+                    "metadata": {
+                        "source": str(source),
+                        "heading": breadcrumb,
+                        "index": -1,
+                        "mtime": mtime,
+                    },
+                }
+            )
     return section_chunks
