@@ -8,12 +8,12 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import argcomplete
-from loguru import logger
 
 # httpx is huggingface_hub's own HTTP transport, imported only for its error type.
 import httpx
 from huggingface_hub import get_token, hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError, HfHubHTTPError
+from loguru import logger
 
 from .constants import (
     DEFAULT_DB_DIR,
@@ -136,6 +136,11 @@ def _index_command(args: argparse.Namespace) -> int:
     return EX_OK
 
 
+def _confidence(distance: float) -> float:
+    """Convert a cosine distance into a 0-100 confidence percentage, clamped at 0."""
+    return max(0.0, (1.0 - distance) * 100.0)
+
+
 def _query_command(args: argparse.Namespace) -> int:
     """Run a query against the indexed store."""
     if args.text == "-":
@@ -151,10 +156,6 @@ def _query_command(args: argparse.Namespace) -> int:
             return EX_USAGE
     else:
         text = args.text
-
-    if args.context < 0:
-        logger.error(f"--context must be zero or positive, got {args.context}.")
-        return EX_USAGE
 
     if not DEFAULT_DB_DIR.exists():
         logger.error(
@@ -174,38 +175,35 @@ def _query_command(args: argparse.Namespace) -> int:
     query_embedding = embedder.embed_query(text)
     documents, metadatas, distances = store.query(query_embedding, args.limit)
 
-    for doc, meta, dist in zip(documents[0], metadatas[0], distances[0], strict=True):
-        neighbors = (
-            store.neighbors(meta["source"], meta["index"], args.context)
-            if args.context
-            else []
-        )
-        if args.json:
-            result = {
-                "distance": dist,
-                "source": meta["source"],
-                "heading": meta["heading"],
-                "text": doc,
-            }
-            if args.context:
-                result["context"] = [
-                    {
-                        "offset": n_meta["index"] - meta["index"],
-                        "heading": n_meta["heading"],
-                        "text": n_doc,
-                    }
-                    for n_doc, n_meta in neighbors
-                ]
-            emit_json(result)
-        else:
-            emit(f"distance={dist:.4f}")
-            emit(f"source={meta['source']}")
-            emit(f"heading={meta['heading']}")
-            emit(doc)
-            for n_doc, n_meta in neighbors:
-                emit(f"context={n_meta['index'] - meta['index']:+d}")
-                emit(n_doc)
-            emit("---")
+    results = list(zip(documents[0], metadatas[0], distances[0], strict=True))
+
+    if args.json:
+        for doc, meta, dist in results:
+            emit_json(
+                {
+                    "confidence": round(_confidence(dist), 2),
+                    "source": meta["source"],
+                    "heading": meta["heading"],
+                    "text": doc,
+                }
+            )
+    elif args.verbose:
+        for rank, (doc, meta, dist) in enumerate(results, start=1):
+            if rank > 1:
+                emit("")
+            emit(f"[{rank}] confidence={_confidence(dist):.1f}%")
+            emit(f"    source={meta['source']}")
+            emit(f"    heading={meta['heading']}")
+            emit("")
+            for line in doc.splitlines():
+                emit(f"  | {line}")
+    else:
+        seen: set[str] = set()
+        for _doc, meta, _dist in results:
+            source = meta["source"]
+            if source not in seen:
+                seen.add(source)
+                emit(source)
 
     return EX_OK
 
@@ -352,15 +350,6 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=5,
         help="Number of results (default: 5)",
-    )
-    query_parser.add_argument(
-        "-c",
-        "--context",
-        type=int,
-        default=0,
-        metavar="N",
-        help="Also print up to N neighboring chunks from the same file on "
-        "each side of every result (default: 0)",
     )
     query_parser.set_defaults(func=_query_command)
 

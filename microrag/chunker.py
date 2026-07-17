@@ -26,16 +26,18 @@ HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
 # Level 2: line breaks.
 # Level 3: sentence endings.
 # Level 4: token-level (no delimiters, pure size).
-_RULES = RecursiveRules(levels=[
-    RecursiveLevel(
-        delimiters=["######", "#####", "####", "###", "##", "#"],
-        include_delim="next",
-    ),
-    RecursiveLevel(delimiters=["\n\n", "\n\r"], include_delim="prev"),
-    RecursiveLevel(delimiters=["\n", "\r"], include_delim="prev"),
-    RecursiveLevel(delimiters=[". ", "! ", "? "], include_delim="prev"),
-    RecursiveLevel(delimiters=None, include_delim="prev"),
-])
+_RULES = RecursiveRules(
+    levels=[
+        RecursiveLevel(
+            delimiters=["######", "#####", "####", "###", "##", "#"],
+            include_delim="next",
+        ),
+        RecursiveLevel(delimiters=["\n\n", "\n\r"], include_delim="prev"),
+        RecursiveLevel(delimiters=["\n", "\r"], include_delim="prev"),
+        RecursiveLevel(delimiters=[". ", "! ", "? "], include_delim="prev"),
+        RecursiveLevel(delimiters=None, include_delim="prev"),
+    ]
+)
 
 _CHEF = MarkdownChef()
 
