@@ -35,7 +35,7 @@ def index_directory(
     files = sorted(_FETCHER.fetch(dir=path, ext=[".md"])) if path.is_dir() else []
     if not files:
         # Never prune on an empty walk: a mistyped path must not wipe the index.
-        logger.warning("No markdown (*.md) files found under %s", path)
+        logger.warning(f"No markdown (*.md) files found under {path}")
         return 0, 0, 0
 
     indexed = 0
@@ -45,7 +45,7 @@ def index_directory(
             total_chunks += _index_file(file_path, path, embedder, store)
             indexed += 1
         except (OSError, UnicodeDecodeError):
-            logger.exception("Failed to index %s", file_path)
+            logger.exception(f"Failed to index {file_path}")
 
     pruned = 0
     if prune:
@@ -54,7 +54,7 @@ def index_directory(
             stale_ids = store.ids_for_source(source)
             store.delete(stale_ids)
             pruned += len(stale_ids)
-            logger.info("Pruned %s: %d chunks", source, len(stale_ids))
+            logger.info(f"Pruned {source}: {len(stale_ids)} chunks")
     return indexed, total_chunks, pruned
 
 
@@ -83,10 +83,10 @@ def _index_file(
     store.delete(sorted(stale_ids))
     if stale_ids:
         logger.info(
-            "%s: %d chunks (%d stale removed)", relative, len(chunks), len(stale_ids)
+            f"{relative}: {len(chunks)} chunks ({len(stale_ids)} stale removed)"
         )
     else:
-        logger.info("%s: %d chunks", relative, len(chunks))
+        logger.info(f"{relative}: {len(chunks)} chunks")
     return len(chunks)
 
 
