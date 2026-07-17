@@ -84,13 +84,18 @@ def chunk_markdown(text: str, source: Path, mtime: float) -> list[dict]:
 
 
 def _breadcrumb(title: str, heading_stack: list[tuple[int, str]]) -> str:
-    """Join the document title and heading stack into a breadcrumb string.
+    """Return title plus the top-level (H1) heading only.
 
     The title (filename stem) leads so chunks carry document-level context
     even before the first heading; it is skipped when the top-level heading
     already matches it, to avoid "Setup > Setup".
     """
-    parts = [t for _, t in heading_stack]
+    parts: list[str] = []
+    # Grab only the H1 from the stack (if any).
+    for level, text in heading_stack:
+        if level == 1:
+            parts.append(text)
+            break
     if not parts or parts[0].casefold() != title.casefold():
         parts.insert(0, title)
     return " > ".join(parts)
@@ -167,7 +172,7 @@ def _pack_section(
 ) -> list[dict]:
     """Chunk a section body to size using the heading-aware pipeline."""
     pipeline = _build_pipeline()
-    packed = pipeline.run(texts=body.strip()).chunks
+    packed = pipeline.run(texts=[body.strip()])
 
     section_chunks = []
     for piece in packed:
