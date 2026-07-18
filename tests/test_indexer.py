@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from microrag.indexer import index_directory
 
@@ -10,9 +11,11 @@ from microrag.indexer import index_directory
 class _FakeEmbedder:
     def __init__(self) -> None:
         self.embedded_texts: list[str] = []
+        self.calls = 0
 
     def embed_documents(self, texts: list[str]) -> np.ndarray:
         self.embedded_texts.extend(texts)
+        self.calls += 1
         return np.zeros((len(texts), 4), dtype=np.float32)
 
 
@@ -117,6 +120,26 @@ def test_only_changed_chunks_are_reembedded(tmp_path: Path) -> None:
     # Only the edited chunk of the edited file is embedded again.
     assert chunks == 1
     assert embedder.embedded_texts == ["b > B2\n\nedited body"]
+
+
+def test_flush_window_does_not_change_what_is_stored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tiny flush window must write exactly what one big pass writes."""
+    for i in range(5):
+        (tmp_path / f"n{i}.md").write_text(f"# T{i}\n\nbody {i}\n", encoding="utf-8")
+
+    unbounded = _MemoryStore()
+    one_pass = index_directory(tmp_path, _FakeEmbedder(), unbounded)
+
+    monkeypatch.setattr("microrag.indexer.FLUSH_CHUNKS", 2)
+    windowed_store = _MemoryStore()
+    windowed_embedder = _FakeEmbedder()
+    windowed = index_directory(tmp_path, windowed_embedder, windowed_store)
+
+    assert windowed == one_pass
+    assert windowed_store.data == unbounded.data
+    assert windowed_embedder.calls > 1  # the window actually flushed mid-run
 
 
 def test_prune_is_skipped_when_no_files_found(tmp_path: Path) -> None:

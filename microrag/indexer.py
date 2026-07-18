@@ -3,8 +3,9 @@
 Chunk IDs are content-addressed (sha256 of path, index, and text), so a chunk
 that already exists in the store needs no work at all: re-indexing embeds only
 chunks whose IDs are new and deletes the ones that disappeared. Embedding runs
-once over all new chunks from every file, so small files no longer produce
-under-filled inference batches.
+over windows of FLUSH_CHUNKS new chunks pooled across files, so small files no
+longer produce under-filled inference batches and memory stays bounded no
+matter how large the corpus is.
 """
 
 import hashlib
@@ -20,6 +21,11 @@ from .embedder import OnnxEmbedder
 from .store import Store
 
 _FETCHER = FileFetcher()
+
+# Embed-and-write window, in chunks. Bounds memory to a constant regardless
+# of corpus size while staying far above the inference batch size, so
+# batches remain full. 512 chunks is roughly 2-3 MB of pending work.
+FLUSH_CHUNKS = 512
 
 
 @dataclass
@@ -60,22 +66,27 @@ def index_directory(
         logger.warning(f"No markdown (*.md) files found under {path}")
         return 0, 0, 0
 
-    plans = []
+    # Embedding runs over windows of new chunks pooled across files: batches
+    # stay full regardless of file sizes, unchanged files cost no inference,
+    # and pending work never exceeds the flush window no matter the corpus.
+    indexed = 0
+    written = 0
+    pending: list[_FilePlan] = []
+    pending_chunks = 0
     for file_path in files:
         try:
-            plans.append(_plan_file(file_path, path, store))
+            plan = _plan_file(file_path, path, store)
         except (OSError, UnicodeDecodeError):
             logger.exception(f"Failed to index {file_path}")
-
-    # One embedding pass over every new chunk from every file: batches stay
-    # full regardless of file sizes, and unchanged files cost no inference.
-    new_texts = [text for plan in plans for text in plan.new_texts]
-    embeddings = embedder.embed_documents(new_texts)
-
-    offset = 0
-    for plan in plans:
-        _apply_plan(plan, embeddings[offset : offset + len(plan.new_texts)], store)
-        offset += len(plan.new_texts)
+            continue
+        indexed += 1
+        pending.append(plan)
+        pending_chunks += len(plan.new_texts)
+        if pending_chunks >= FLUSH_CHUNKS:
+            written += _flush(pending, embedder, store)
+            pending = []
+            pending_chunks = 0
+    written += _flush(pending, embedder, store)
 
     pruned = 0
     if prune:
@@ -85,7 +96,19 @@ def index_directory(
             store.delete(stale_ids)
             pruned += len(stale_ids)
             logger.info(f"Pruned {source}: {len(stale_ids)} chunks")
-    return len(plans), len(new_texts), pruned
+    return indexed, written, pruned
+
+
+def _flush(plans: list[_FilePlan], embedder: OnnxEmbedder, store: Store) -> int:
+    """Embed the pending plans' new chunks in one call and write them out."""
+    new_texts = [text for plan in plans for text in plan.new_texts]
+    embeddings = embedder.embed_documents(new_texts)
+
+    offset = 0
+    for plan in plans:
+        _apply_plan(plan, embeddings[offset : offset + len(plan.new_texts)], store)
+        offset += len(plan.new_texts)
+    return len(new_texts)
 
 
 def _plan_file(file_path: Path, root_path: Path, store: Store) -> _FilePlan:
