@@ -12,7 +12,6 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-import numpy as np
 from chonkie import FileFetcher
 from loguru import logger
 
@@ -66,16 +65,19 @@ def index_directory(
         logger.warning(f"No markdown (*.md) files found under {path}")
         return 0, 0, 0
 
-    # Embedding runs over windows of new chunks pooled across files: batches
-    # stay full regardless of file sizes, unchanged files cost no inference,
-    # and pending work never exceeds the flush window no matter the corpus.
+    # One store round trip for the whole diff instead of one get per file.
+    existing_by_source = store.ids_by_source()
+
+    # Embedding and writes run over windows of new chunks pooled across
+    # files: inference batches stay full regardless of file sizes, unchanged
+    # files cost nothing, and pending work never exceeds the flush window.
     indexed = 0
     written = 0
     pending: list[_FilePlan] = []
     pending_chunks = 0
     for file_path in files:
         try:
-            plan = _plan_file(file_path, path, store)
+            plan = _plan_file(file_path, path, existing_by_source)
         except (OSError, UnicodeDecodeError):
             logger.exception(f"Failed to index {file_path}")
             continue
@@ -91,31 +93,52 @@ def index_directory(
     pruned = 0
     if prune:
         present = {str(f.relative_to(path)) for f in files}
-        for source in sorted(store.sources() - present):
-            stale_ids = store.ids_for_source(source)
-            store.delete(stale_ids)
-            pruned += len(stale_ids)
-            logger.info(f"Pruned {source}: {len(stale_ids)} chunks")
+        stale_sources = sorted(set(existing_by_source) - present)
+        for source in stale_sources:
+            pruned += len(existing_by_source[source])
+            logger.info(f"Pruned {source}: {len(existing_by_source[source])} chunks")
+        store.delete(
+            [
+                chunk_id
+                for source in stale_sources
+                for chunk_id in existing_by_source[source]
+            ]
+        )
     return indexed, written, pruned
 
 
 def _flush(plans: list[_FilePlan], embedder: OnnxEmbedder, store: Store) -> int:
-    """Embed the pending plans' new chunks in one call and write them out."""
+    """Embed the pending plans' new chunks and write the window in one upsert.
+
+    Chroma pays a fixed transaction cost per call, so one upsert (and one
+    delete) per window beats one per file by a wide margin.
+    """
     new_texts = [text for plan in plans for text in plan.new_texts]
     embeddings = embedder.embed_documents(new_texts)
 
-    offset = 0
+    if new_texts:
+        store.upsert(
+            ids=[chunk_id for plan in plans for chunk_id in plan.new_ids],
+            embeddings=embeddings,
+            documents=new_texts,
+            metadatas=[meta for plan in plans for meta in plan.new_metadatas],
+        )
+    store.delete([chunk_id for plan in plans for chunk_id in plan.stale_ids])
+
     for plan in plans:
-        _apply_plan(plan, embeddings[offset : offset + len(plan.new_texts)], store)
-        offset += len(plan.new_texts)
+        _log_plan(plan)
     return len(new_texts)
 
 
-def _plan_file(file_path: Path, root_path: Path, store: Store) -> _FilePlan:
-    """Chunk one file and diff its chunk IDs against the store."""
+def _plan_file(
+    file_path: Path,
+    root_path: Path,
+    existing_by_source: dict[str, list[str]],
+) -> _FilePlan:
+    """Chunk one file and diff its chunk IDs against the prefetched store state."""
     text = file_path.read_text(encoding="utf-8")
     relative = file_path.relative_to(root_path)
-    existing_ids = set(store.ids_for_source(str(relative)))
+    existing_ids = set(existing_by_source.get(str(relative), ()))
     chunks = chunk_markdown(text, relative, file_path.stat().st_mtime)
     ids = [_chunk_id(relative, i, chunk["text"]) for i, chunk in enumerate(chunks)]
 
@@ -134,17 +157,8 @@ def _plan_file(file_path: Path, root_path: Path, store: Store) -> _FilePlan:
     )
 
 
-def _apply_plan(plan: _FilePlan, embeddings: np.ndarray, store: Store) -> None:
-    """Write one file's new chunks and drop its stale ones."""
-    if plan.new_ids:
-        store.upsert(
-            ids=plan.new_ids,
-            embeddings=embeddings,
-            documents=plan.new_texts,
-            metadatas=plan.new_metadatas,
-        )
-    store.delete(plan.stale_ids)
-
+def _log_plan(plan: _FilePlan) -> None:
+    """Log what one file contributed to the flushed window."""
     if not plan.new_ids and not plan.stale_ids:
         logger.debug(f"{plan.relative}: unchanged ({plan.total_chunks} chunks)")
     elif plan.stale_ids:

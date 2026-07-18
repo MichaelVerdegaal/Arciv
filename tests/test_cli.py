@@ -25,11 +25,8 @@ class _FakeStore:
     def upsert(self, ids, embeddings, documents, metadatas) -> None:
         pass
 
-    def ids_for_source(self, source: str) -> list[str]:
-        return []
-
-    def sources(self) -> set[str]:
-        return set()
+    def ids_by_source(self) -> dict[str, list[str]]:
+        return {}
 
     def delete(self, ids: list[str]) -> None:
         pass

@@ -29,8 +29,11 @@ class _MemoryStore:
         for chunk_id, meta in zip(ids, metadatas, strict=True):
             self.data[chunk_id] = meta["source"]
 
-    def ids_for_source(self, source: str) -> list[str]:
-        return [i for i, s in self.data.items() if s == source]
+    def ids_by_source(self) -> dict[str, list[str]]:
+        grouped: dict[str, list[str]] = {}
+        for chunk_id, source in self.data.items():
+            grouped.setdefault(source, []).append(chunk_id)
+        return grouped
 
     def sources(self) -> set[str]:
         return set(self.data.values())

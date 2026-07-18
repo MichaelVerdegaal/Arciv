@@ -130,10 +130,11 @@ class OnnxEmbedder(BaseEmbeddings):
         if not texts:
             return np.zeros((0, EMBEDDING_DIM), dtype=np.float32)
 
-        order = sorted(
-            range(len(texts)),
-            key=lambda i: len(self._tokenizer.encode(texts[i]).ids),
-        )
+        # Character length as the sort key: a close proxy for token length
+        # that avoids tokenizing every text twice (once to sort, once to
+        # encode). The sort only limits padding waste; each text's vector is
+        # the same wherever it lands in a batch.
+        order = sorted(range(len(texts)), key=lambda i: len(texts[i]))
         batches = [
             self._encode_batch(
                 [texts[i] for i in order[start : start + BATCH_SIZE]],

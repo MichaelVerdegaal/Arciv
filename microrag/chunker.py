@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 
 from chonkie import MarkdownChef, Pipeline
-from chonkie.types import MarkdownImage
+from chonkie.types import Document, MarkdownImage
 
 from .constants import CHUNK_OVERLAP_CHARS, CHUNK_TARGET_CHARS
 
@@ -72,15 +72,22 @@ def chunk_markdown(text: str, source: Path, mtime: float) -> list[dict]:
         key=lambda segment: segment[1],
     )
 
-    chunks: list[dict] = []
+    sections: list[tuple[str, str]] = []
     heading_stack: list[tuple[int, str]] = []
     for kind, _, segment_text in segments:
         if kind == "prose":
-            sections = _split_on_headings(segment_text, heading_stack, title)
+            sections.extend(_split_on_headings(segment_text, heading_stack, title))
         else:
-            sections = [(_breadcrumb(title, heading_stack), segment_text)]
-        for breadcrumb, body in sections:
-            chunks.extend(_pack_section(body, breadcrumb, source, mtime))
+            sections.append((_breadcrumb(title, heading_stack), segment_text))
+
+    # One pipeline run for the whole file: run() pays a fixed introspection
+    # cost per call, so packing all sections at once beats a call per section.
+    bodies = [body.strip() for _, body in sections]
+    docs = _PIPELINE.run(texts=bodies) if bodies else []
+
+    chunks: list[dict] = []
+    for (breadcrumb, _), packed in zip(sections, docs, strict=True):
+        chunks.extend(_pack_section(packed, breadcrumb, source, mtime))
 
     for index, chunk in enumerate(chunks):
         chunk["metadata"]["index"] = index
@@ -155,16 +162,14 @@ def _update_heading_stack(
 
 
 def _pack_section(
-    body: str,
+    packed: Document,
     breadcrumb: str,
     source: Path,
     mtime: float,
 ) -> list[dict]:
-    """Chunk a section body to size, with prefix overlap between adjacent chunks."""
-    doc = _PIPELINE.run(texts=body.strip())
-
+    """Turn one packed section into chunk dicts with breadcrumb and metadata."""
     section_chunks = []
-    for piece in doc.chunks:
+    for piece in packed.chunks:
         piece_text = piece.text.strip()
         if not piece_text:
             continue

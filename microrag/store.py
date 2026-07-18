@@ -63,14 +63,19 @@ class Store:
         """Return the number of chunks in the collection."""
         return self._collection.count()
 
-    def ids_for_source(self, source: str) -> list[str]:
-        """Return the IDs of all chunks whose metadata source equals source."""
-        return self._collection.get(where={"source": source}, include=[])["ids"]
+    def ids_by_source(self) -> dict[str, list[str]]:
+        """Return every chunk ID in the collection, grouped by source path.
 
-    def sources(self) -> set[str]:
-        """Return the distinct source paths present in the collection."""
+        One store round trip, so the indexer can diff a whole corpus against
+        it instead of querying per file. Roughly 200 bytes per chunk in RAM.
+        """
         result = self._collection.get(include=["metadatas"])
-        return {meta["source"] for meta in result["metadatas"]}
+        grouped: dict[str, list[str]] = {}
+        for chunk_id, meta in zip(
+            result["ids"], result["metadatas"] or [], strict=True
+        ):
+            grouped.setdefault(meta["source"], []).append(chunk_id)
+        return grouped
 
     def delete(self, ids: list[str]) -> None:
         """Delete chunks by ID; a no-op for an empty list."""
