@@ -73,7 +73,22 @@ Add to your shell profile to make it permanent.
 uv run pytest
 ```
 
-The embedder tests are skipped if the model has not been downloaded yet.
+The embedder tests and the retrieval quality floor are skipped if the model has not been
+downloaded yet.
+
+## Retrieval quality evaluation
+
+```bash
+uv run python -m evals.run          # human-readable report
+uv run python -m evals.run --json   # one JSON object, for diffing runs
+```
+
+Indexes the fixture corpus (`evals/corpus/`, deliberately confusable topics) through the real
+chunk/embed/store pipeline into a throwaway database, then scores the gold queries in
+`evals/queries.json` — paraphrases, not verbatim strings — at the file level: hit@1/3/5 and MRR,
+plus every query that did not rank first. Requires the downloaded model. Run it before and after
+touching chunking constants or the embedder to see whether retrieval actually improved;
+`tests/test_evals.py::test_retrieval_quality_floor` enforces conservative floors in pytest.
 
 ## Project structure
 

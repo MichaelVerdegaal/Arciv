@@ -68,6 +68,8 @@ All v1 phases are implemented and working:
 - Phase 2 — query CLI with JSON output, stdin query, status introspection.
 - Multi-source: named collections (`--collection`), one per root; `query` merges results across
   collections by cosine distance and emits absolute paths in plain output.
+- Retrieval evaluation suite in `evals/` (fixture corpus, paraphrase gold queries, hit@k/MRR
+  runner): `uv run python -m evals.run`.
 
 The project is a `uv` tool: installable via `uv tool install .` (or a git URL) and callable as
 `microrag` from anywhere with no venv activation.
@@ -103,6 +105,7 @@ ID scheme.
 
 ## Open questions (intentionally unresolved)
 
-- Chunk size and overlap tuning — decide empirically once real queries run against real data.
+- Chunk size and overlap tuning — decide empirically; `evals/` provides the measurement
+  (run it before and after a constants change).
 - Whether asymmetric mode buys enough recall to justify a second model — measure with a small set of
   queries against the existing index.
