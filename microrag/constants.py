@@ -19,8 +19,13 @@ ONNX_DATA_FILENAME: str = "onnx/model.onnx_data"
 
 DEFAULT_DB_DIR: Path = MICRORAG_HOME / "db"
 
+# The embedder counts real model tokens; the chunker counts characters
+# (chonkie's default "character" tokenizer). Roughly 4 characters per token,
+# so 1200-char chunks plus breadcrumb and overlap sit well inside the
+# 512-token model limit.
 MAX_TOKENS: int = 512
-CHUNK_OVERLAP_TOKENS: int = 100
+CHUNK_TARGET_CHARS: int = 1200
+CHUNK_OVERLAP_CHARS: int = 200
 BATCH_SIZE: int = 8
 EMBEDDING_DIM: int = 768
 

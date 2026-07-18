@@ -254,9 +254,7 @@ def _configure_logging(verbose: int, quiet: bool) -> None:
     logger.remove()  # remove default stderr handler
     if quiet:
         level = "ERROR"
-    elif verbose >= 2:
-        level = "DEBUG"
-    elif verbose == 1:
+    elif verbose >= 1:
         level = "DEBUG"
     else:
         level = "INFO"
@@ -283,7 +281,7 @@ def _add_common_options(parser: argparse.ArgumentParser, *, suppress: bool) -> N
         "-v",
         "--verbose",
         action="count",
-        help="Increase log detail; repeat for more (-v debug, -vv trace).",
+        help="Show debug logs (query: also print each result's full text).",
         **verbose_default,
     )
     parser.add_argument(

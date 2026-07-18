@@ -49,10 +49,10 @@ After installation, `microrag` is on your PATH with no venv activation needed.
   and `index --prune` removes chunks for deleted files.
 - An index is pinned to the first root directory it was built from; indexing a different root is
   refused (use a separate `MICRORAG_HOME` per notes collection, or delete the DB dir to rebuild).
-- `query -c N` also shows the N neighboring chunks around each result for more context.
 - `--json` emits machine-readable output: JSONL for `query`, a single object for `status` and the
   `index` summary.
-- `-v`/`-vv` for more log detail, `-q` for errors only, `--version` for the version. Global flags
-  work before and after the subcommand. Tab completion via argcomplete (see SETUP.md).
+- `-v` for debug logs (on `query` it also prints each result's full text), `-q` for errors only,
+  `--version` for the version. Global flags work before and after the subcommand. Tab completion
+  via argcomplete (see SETUP.md).
 - Exit codes: 0 on success, 64 for usage errors we detect, 66 when an input is missing (path, model,
   or index), 69 when the model download fails, 2 for argparse errors.

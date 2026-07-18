@@ -1,45 +1,49 @@
 """Markdown-aware chunking built on chonkie.
 
 Uses MarkdownChef to separate fenced code, tables, and images from prose, then
-splits prose on markdown headings. Each heading section is independently chunked
-by a RecursiveChunker (heading-aware rules from the markdown recipe, then
-paragraph/line/sentence fallbacks) with overlap refinement.
+splits prose on markdown headings. Each heading section is independently packed
+to size by a chonkie Pipeline (RecursiveChunker with the default paragraph/
+sentence rules, then verbatim prefix overlap between adjacent chunks).
 
-Every chunk gets a breadcrumb (e.g. "filename > Heading > Subheading") so
-context survives the vector store.
+Every chunk gets a bounded breadcrumb (filename, top heading, and the
+section's own heading) so context survives the vector store.
 """
 
 import re
 from pathlib import Path
 
 from chonkie import MarkdownChef, Pipeline
-from chonkie.types import MarkdownImage, RecursiveLevel, RecursiveRules
+from chonkie.types import MarkdownImage
 
-from .constants import CHUNK_OVERLAP_TOKENS, MAX_TOKENS
+from .constants import CHUNK_OVERLAP_CHARS, CHUNK_TARGET_CHARS
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
 
-# Heading delimiters from the standard markdown recipe, in order of priority.
-# Level 0: split on headings first (include_delim='next' keeps the `#` marker
-#   so the heading text is part of the next chunk for breadcrumb extraction).
-# Level 1: paragraph breaks.
-# Level 2: line breaks.
-# Level 3: sentence endings.
-# Level 4: token-level (no delimiters, pure size).
-_RULES = RecursiveRules(
-    levels=[
-        RecursiveLevel(
-            delimiters=["######", "#####", "####", "###", "##", "#"],
-            include_delim="next",
-        ),
-        RecursiveLevel(delimiters=["\n\n", "\n\r"], include_delim="prev"),
-        RecursiveLevel(delimiters=["\n", "\r"], include_delim="prev"),
-        RecursiveLevel(delimiters=[". ", "! ", "? "], include_delim="prev"),
-        RecursiveLevel(delimiters=None, include_delim="prev"),
-    ]
-)
+# Cap on each breadcrumb segment, so verbose headings cannot eat into the
+# embedder's token budget (the breadcrumb is prepended to every chunk).
+_BREADCRUMB_SEGMENT_CHARS = 60
 
 _CHEF = MarkdownChef()
+
+# Sections reach the pipeline with their headings already stripped, so the
+# chunker's default paragraph/sentence rules are the right ones. Both
+# components count characters (chonkie's "character" tokenizer); the overlap
+# runs in token mode, which copies the last CHUNK_OVERLAP_CHARS characters
+# verbatim — recursive mode reconstructs the prefix from split pieces and can
+# drop the whitespace between them. Module-level because Pipeline caches its
+# component instances; run() itself holds no per-call state.
+_PIPELINE = (
+    Pipeline()
+    .chunk_with("recursive", tokenizer="character", chunk_size=CHUNK_TARGET_CHARS)
+    .refine_with(
+        "overlap",
+        tokenizer="character",
+        context_size=CHUNK_OVERLAP_CHARS,
+        method="prefix",
+        mode="token",
+        merge=True,
+    )
+)
 
 
 def chunk_markdown(text: str, source: Path, mtime: float) -> list[dict]:
@@ -84,21 +88,25 @@ def chunk_markdown(text: str, source: Path, mtime: float) -> list[dict]:
 
 
 def _breadcrumb(title: str, heading_stack: list[tuple[int, str]]) -> str:
-    """Return title plus the top-level (H1) heading only.
+    """Return a bounded breadcrumb: title, top heading, section heading.
 
+    Only the shallowest and deepest headings in effect are kept — the
+    intermediate levels add length faster than they add retrieval context —
+    and every segment is trimmed to _BREADCRUMB_SEGMENT_CHARS, so deep
+    nesting or verbose headings cannot overflow the chunk's token budget.
     The title (filename stem) leads so chunks carry document-level context
-    even before the first heading; it is skipped when the top-level heading
+    even before the first heading; it is skipped when the top heading
     already matches it, to avoid "Setup > Setup".
     """
-    parts: list[str] = []
-    # Grab only the H1 from the stack (if any).
-    for level, text in heading_stack:
-        if level == 1:
-            parts.append(text)
-            break
-    if not parts or parts[0].casefold() != title.casefold():
-        parts.insert(0, title)
-    return " > ".join(parts)
+    parts = [title]
+    if heading_stack:
+        top = heading_stack[0][1]
+        if top.casefold() == title.casefold():
+            parts = []
+        parts.append(top)
+        if len(heading_stack) > 1:
+            parts.append(heading_stack[-1][1])
+    return " > ".join(part[:_BREADCRUMB_SEGMENT_CHARS] for part in parts)
 
 
 def _has_alt(image: MarkdownImage) -> bool:
@@ -146,50 +154,30 @@ def _update_heading_stack(
     stack.append((level, heading_text))
 
 
-def _build_pipeline() -> Pipeline:
-    """Build a pipeline that chunks with heading-aware rules then refines with overlap.
-
-    Constructed per-call since Pipeline holds mutable state.
-    """
-    return (
-        Pipeline()
-        .chunk_with("recursive", rules=_RULES, chunk_size=MAX_TOKENS)
-        .refine_with(
-            "overlap",
-            context_size=CHUNK_OVERLAP_TOKENS,
-            method="prefix",
-            mode="recursive",
-            merge=True,
-        )
-    )
-
-
 def _pack_section(
     body: str,
     breadcrumb: str,
     source: Path,
     mtime: float,
 ) -> list[dict]:
-    """Chunk a section body to size using the heading-aware pipeline."""
-    pipeline = _build_pipeline()
-    docs = pipeline.run(texts=[body.strip()])
+    """Chunk a section body to size, with prefix overlap between adjacent chunks."""
+    doc = _PIPELINE.run(texts=body.strip())
 
     section_chunks = []
-    for doc in docs:
-        for piece in doc.chunks:
-            piece_text = piece.text.strip()
-            if not piece_text:
-                continue
-            chunk_text = f"{breadcrumb}\n\n{piece_text}" if breadcrumb else piece_text
-            section_chunks.append(
-                {
-                    "text": chunk_text,
-                    "metadata": {
-                        "source": str(source),
-                        "heading": breadcrumb,
-                        "index": -1,
-                        "mtime": mtime,
-                    },
-                }
-            )
+    for piece in doc.chunks:
+        piece_text = piece.text.strip()
+        if not piece_text:
+            continue
+        chunk_text = f"{breadcrumb}\n\n{piece_text}" if breadcrumb else piece_text
+        section_chunks.append(
+            {
+                "text": chunk_text,
+                "metadata": {
+                    "source": str(source),
+                    "heading": breadcrumb,
+                    "index": -1,
+                    "mtime": mtime,
+                },
+            }
+        )
     return section_chunks

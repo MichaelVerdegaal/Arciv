@@ -64,7 +64,7 @@ All v1 phases are implemented and working:
   tests.
 - Phase 1 — chunking (heading-aware, breadcrumb, overlap), indexing with incremental reindex and
   prune.
-- Phase 2 — query CLI with context neighbors, JSON output, stdin query, status introspection.
+- Phase 2 — query CLI with JSON output, stdin query, status introspection.
 
 The project is a `uv` tool: installable via `uv tool install .` (or a git URL) and callable as
 `microrag` from anywhere with no venv activation.

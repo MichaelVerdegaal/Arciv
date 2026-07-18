@@ -82,7 +82,7 @@ microrag/
     constants.py    # QUERY_PREFIX, model id, paths, chunk sizes, collection name
     embedder.py     # OnnxEmbedder (loads ONNX model, produces embeddings)
     chunker.py      # heading-aware markdown chunking via chonkie
-    store.py        # thin ChromaDB wrapper (upsert, query, neighbors)
+    store.py        # thin ChromaDB wrapper (upsert, query)
     indexer.py      # walk files -> chunk -> embed -> upsert
     cli.py          # argparse entrypoints: download, index, query, status
 tests/

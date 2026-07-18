@@ -79,6 +79,28 @@ def test_deep_heading_levels() -> None:
     assert breadcrumbs == ["example > L1", "example > L1 > L6"]
 
 
+def test_breadcrumb_skips_intermediate_heading_levels() -> None:
+    """Only the top and the section's own heading are kept, bounding length."""
+    text = "# Guide\n\na\n\n## Install\n\nb\n\n### Docker\n\nc\n\n#### Compose\n\nd"
+    chunks = chunk_markdown(text, SOURCE, MTIME)
+    breadcrumbs = [chunk["metadata"]["heading"] for chunk in chunks]
+    assert breadcrumbs == [
+        "example > Guide",
+        "example > Guide > Install",
+        "example > Guide > Docker",
+        "example > Guide > Compose",
+    ]
+
+
+def test_breadcrumb_trims_long_headings() -> None:
+    long_heading = "An Extremely Verbose Heading " * 5  # 145 chars
+    text = f"# {long_heading}\n\nbody"
+    chunks = chunk_markdown(text, SOURCE, MTIME)
+    heading = chunks[0]["metadata"]["heading"]
+    assert heading.startswith("example > An Extremely Verbose Heading")
+    assert len(heading) <= len("example > ") + 60
+
+
 def test_metadata_fields() -> None:
     chunks = chunk_markdown("# H\n\nbody", SOURCE, MTIME)
     metadata = chunks[0]["metadata"]

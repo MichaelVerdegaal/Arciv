@@ -231,37 +231,6 @@ def test_status_reports_the_indexed_root(
     assert json.loads(capsys.readouterr().out)["root"] == str(notes.resolve())
 
 
-def test_query_context_prints_neighboring_chunks(
-    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
-) -> None:
-    notes = empty_cwd / "notes"
-    notes.mkdir()
-    (notes / "a.md").write_text(
-        "# One\n\nfirst chunk body\n\n# Two\n\nsecond chunk body\n", encoding="utf-8"
-    )
-    assert main(["index", str(notes)]) == EX_OK
-    capsys.readouterr()
-
-    assert main(["query", "anything", "-k", "1", "-c", "1"]) == EX_OK
-    out = capsys.readouterr().out
-    assert "context=" in out
-    assert "first chunk body" in out and "second chunk body" in out
-
-    assert main(["query", "anything", "-k", "1", "-c", "1", "--json"]) == EX_OK
-    result = json.loads(capsys.readouterr().out)
-    assert len(result["context"]) == 1
-    assert result["context"][0]["offset"] in (-1, 1)
-
-
-def test_query_rejects_negative_context(
-    empty_cwd: Path, capsys: pytest.CaptureFixture
-) -> None:
-    code = main(["query", "anything", "-c", "-2"])
-    captured = capsys.readouterr()
-    assert code == EX_USAGE
-    assert captured.out == ""
-
-
 def test_index_directory_keeps_stdout_clean(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:

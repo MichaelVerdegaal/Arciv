@@ -2,7 +2,13 @@
 
 Known limitations, deliberately not fixed yet (see PLAN.md scope rules):
 
-- None currently.
+- One root per index: the store is pinned to the first indexed root and refuses others (the
+  workaround is a separate `MICRORAG_HOME` per collection). Proper multi-source support needs an
+  owner decision between named Chroma collections (isolated, per-collection querying) and one
+  shared pool keyed by absolute paths (single combined search).
+- Deleted files are only cleaned up when `index --prune` is passed. With the root now pinned and
+  empty walks never pruning, the original mistyped-path danger is gone, so prune-by-default is a
+  candidate — pending owner decision.
 
 ## Parking lot (deliberately not built yet)
 
@@ -23,6 +29,11 @@ owner go-ahead per PLAN.md, which is why a blanket "handle the followups" did no
 
 ## Rejected
 
+- `query -c/--context N` (neighboring chunks around each result): removed as not useful enough —
+  the result's `source` path makes it trivial to `cat` or open the file for surrounding context.
+- Full heading trail in breadcrumbs (`title > H1 > H2 > ... > H6`): deep nesting plus verbose
+  headings made breadcrumbs long enough to eat into the chunk token budget. Breadcrumbs are
+  bounded instead: title, top heading, and the section's own heading, each segment trimmed.
 - `--color auto|always|never`: the CLI emits no colored output (PLAN.md forbids a colors
   library), so the flag would be a knob that does nothing.
 - Filtering/paging built into `query`: stdout is clean data; `grep`, `head`, and `jq` (with
@@ -56,9 +67,6 @@ owner go-ahead per PLAN.md, which is why a blanket "handle the followups" did no
 - Chunks before the first heading carried no document context: every breadcrumb now starts with
   the filename stem (skipped when the top-level heading already matches it) — the LLM-free
   version of "contextual chunk headers".
-- No way to see a hit's surroundings: `query -c/--context N` prints up to N neighboring chunks
-  from the same file on each side of every result — the LLM-free version of the "context
-  enrichment window".
 - Stale chunks from edited files: re-indexing now deletes a source's chunks whose IDs are not in
   the new set; deleted files are handled by `index --prune`.
 - `#` comments in fenced code blocks misread as headings: fixed by switching chunking to chonkie
