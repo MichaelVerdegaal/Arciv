@@ -113,9 +113,10 @@ together.
 uv run microrag index ~/notes
 ```
 
-Re-running `index` is incremental: unchanged files are a no-op, edited files replace their old
-chunks, and chunks whose source file no longer exists under the indexed directory are pruned
-(add `--no-prune` to keep them). A second source directory goes into its own collection:
+Re-running `index` is incremental at the chunk level: chunks whose IDs already exist in the store
+are skipped without re-embedding, edited files replace only their changed chunks, and chunks whose
+source file no longer exists under the indexed directory are pruned (add `--no-prune` to keep
+them). A second source directory goes into its own collection:
 `index ~/blog --collection blog`.
 
 ## Query

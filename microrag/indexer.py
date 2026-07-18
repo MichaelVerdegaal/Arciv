@@ -1,8 +1,17 @@
-"""Walk markdown files, chunk, embed, and upsert into the store."""
+"""Walk markdown files, chunk, embed, and upsert into the store.
+
+Chunk IDs are content-addressed (sha256 of path, index, and text), so a chunk
+that already exists in the store needs no work at all: re-indexing embeds only
+chunks whose IDs are new and deletes the ones that disappeared. Embedding runs
+once over all new chunks from every file, so small files no longer produce
+under-filled inference batches.
+"""
 
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 from chonkie import FileFetcher
 from loguru import logger
 
@@ -11,6 +20,18 @@ from .embedder import OnnxEmbedder
 from .store import Store
 
 _FETCHER = FileFetcher()
+
+
+@dataclass
+class _FilePlan:
+    """What one file needs: chunks to embed, and stored chunks to drop."""
+
+    relative: Path
+    new_ids: list[str]
+    new_texts: list[str]
+    new_metadatas: list[dict]
+    stale_ids: list[str]
+    total_chunks: int
 
 
 def index_directory(
@@ -30,7 +51,7 @@ def index_directory(
             (default; never happens when the walk finds no files at all).
 
     Returns:
-        Tuple of (files indexed, chunks written, chunks pruned).
+        Tuple of (files indexed, new chunks embedded and written, chunks pruned).
     """
     # FileFetcher only accepts directories; a plain-file path means no walk.
     files = sorted(_FETCHER.fetch(dir=path, ext=[".md"])) if path.is_dir() else []
@@ -39,14 +60,22 @@ def index_directory(
         logger.warning(f"No markdown (*.md) files found under {path}")
         return 0, 0, 0
 
-    indexed = 0
-    total_chunks = 0
+    plans = []
     for file_path in files:
         try:
-            total_chunks += _index_file(file_path, path, embedder, store)
-            indexed += 1
+            plans.append(_plan_file(file_path, path, store))
         except (OSError, UnicodeDecodeError):
             logger.exception(f"Failed to index {file_path}")
+
+    # One embedding pass over every new chunk from every file: batches stay
+    # full regardless of file sizes, and unchanged files cost no inference.
+    new_texts = [text for plan in plans for text in plan.new_texts]
+    embeddings = embedder.embed_documents(new_texts)
+
+    offset = 0
+    for plan in plans:
+        _apply_plan(plan, embeddings[offset : offset + len(plan.new_texts)], store)
+        offset += len(plan.new_texts)
 
     pruned = 0
     if prune:
@@ -56,39 +85,54 @@ def index_directory(
             store.delete(stale_ids)
             pruned += len(stale_ids)
             logger.info(f"Pruned {source}: {len(stale_ids)} chunks")
-    return indexed, total_chunks, pruned
+    return len(plans), len(new_texts), pruned
 
 
-def _index_file(
-    file_path: Path,
-    root_path: Path,
-    embedder: OnnxEmbedder,
-    store: Store,
-) -> int:
-    """Index a single markdown file and return the number of chunks written."""
+def _plan_file(file_path: Path, root_path: Path, store: Store) -> _FilePlan:
+    """Chunk one file and diff its chunk IDs against the store."""
     text = file_path.read_text(encoding="utf-8")
     relative = file_path.relative_to(root_path)
     existing_ids = set(store.ids_for_source(str(relative)))
     chunks = chunk_markdown(text, relative, file_path.stat().st_mtime)
+    ids = [_chunk_id(relative, i, chunk["text"]) for i, chunk in enumerate(chunks)]
 
-    texts = [chunk["text"] for chunk in chunks]
-    ids = [_chunk_id(relative, i, text) for i, text in enumerate(texts)]
-    if chunks:
-        embeddings = embedder.embed_documents(texts)
-        metadatas = [chunk["metadata"] for chunk in chunks]
+    new = [
+        (chunk_id, chunk)
+        for chunk_id, chunk in zip(ids, chunks, strict=True)
+        if chunk_id not in existing_ids
+    ]
+    return _FilePlan(
+        relative=relative,
+        new_ids=[chunk_id for chunk_id, _ in new],
+        new_texts=[chunk["text"] for _, chunk in new],
+        new_metadatas=[chunk["metadata"] for _, chunk in new],
+        stale_ids=sorted(existing_ids - set(ids)),
+        total_chunks=len(chunks),
+    )
+
+
+def _apply_plan(plan: _FilePlan, embeddings: np.ndarray, store: Store) -> None:
+    """Write one file's new chunks and drop its stale ones."""
+    if plan.new_ids:
         store.upsert(
-            ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas
+            ids=plan.new_ids,
+            embeddings=embeddings,
+            documents=plan.new_texts,
+            metadatas=plan.new_metadatas,
         )
+    store.delete(plan.stale_ids)
 
-    stale_ids = existing_ids - set(ids)
-    store.delete(sorted(stale_ids))
-    if stale_ids:
+    if not plan.new_ids and not plan.stale_ids:
+        logger.debug(f"{plan.relative}: unchanged ({plan.total_chunks} chunks)")
+    elif plan.stale_ids:
         logger.info(
-            f"{relative}: {len(chunks)} chunks ({len(stale_ids)} stale removed)"
+            f"{plan.relative}: {plan.total_chunks} chunks "
+            f"({len(plan.new_ids)} new, {len(plan.stale_ids)} stale removed)"
         )
     else:
-        logger.info(f"{relative}: {len(chunks)} chunks")
-    return len(chunks)
+        logger.info(
+            f"{plan.relative}: {plan.total_chunks} chunks ({len(plan.new_ids)} new)"
+        )
 
 
 def _chunk_id(relative: Path, index: int, text: str) -> str:

@@ -18,8 +18,9 @@ prefix) and returns the nearest chunks. Everything lives under `MICRORAG_HOME` (
 
 Module boundaries (see PLAN.md): `embedder` knows nothing about Chroma, `store` knows nothing
 about ONNX or tokenizers, `chunker` is pure functions over strings, `cli` is the only place they
-are wired together. Chunk IDs are `sha256(relative_path:index:chunk_text)`, so re-indexing
-unchanged files is a no-op via Chroma upsert.
+are wired together. Chunk IDs are `sha256(relative_path:index:chunk_text)`; the indexer diffs
+them against the store, so already-indexed chunks are never re-embedded and unchanged files cost
+no inference.
 
 ### Key Libraries
 - `chromadb`: persistent vector store, one cosine collection, telemetry disabled.

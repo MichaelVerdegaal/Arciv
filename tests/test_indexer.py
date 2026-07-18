@@ -8,7 +8,11 @@ from microrag.indexer import index_directory
 
 
 class _FakeEmbedder:
+    def __init__(self) -> None:
+        self.embedded_texts: list[str] = []
+
     def embed_documents(self, texts: list[str]) -> np.ndarray:
+        self.embedded_texts.extend(texts)
         return np.zeros((len(texts), 4), dtype=np.float32)
 
 
@@ -82,6 +86,37 @@ def test_prune_removes_deleted_files_by_default(tmp_path: Path) -> None:
     _, _, pruned = index_directory(tmp_path, _FakeEmbedder(), store)
     assert pruned > 0
     assert store.sources() == {"kept.md"}
+
+
+def test_unchanged_files_are_not_reembedded(tmp_path: Path) -> None:
+    (tmp_path / "a.md").write_text("# T\n\nstable content\n", encoding="utf-8")
+    store = _MemoryStore()
+    embedder = _FakeEmbedder()
+
+    _, chunks, _ = index_directory(tmp_path, embedder, store)
+    assert chunks == len(embedder.embedded_texts) > 0
+
+    embedder.embedded_texts.clear()
+    _, chunks, _ = index_directory(tmp_path, embedder, store)
+    assert chunks == 0
+    assert embedder.embedded_texts == []  # no inference for unchanged files
+
+
+def test_only_changed_chunks_are_reembedded(tmp_path: Path) -> None:
+    (tmp_path / "a.md").write_text("# A\n\nkeep me as is\n", encoding="utf-8")
+    edited = tmp_path / "b.md"
+    edited.write_text("# B\n\nfirst body\n\n# B2\n\nsecond body\n", encoding="utf-8")
+    store = _MemoryStore()
+    embedder = _FakeEmbedder()
+    index_directory(tmp_path, embedder, store)
+
+    edited.write_text("# B\n\nfirst body\n\n# B2\n\nedited body\n", encoding="utf-8")
+    embedder.embedded_texts.clear()
+    _, chunks, _ = index_directory(tmp_path, embedder, store)
+
+    # Only the edited chunk of the edited file is embedded again.
+    assert chunks == 1
+    assert embedder.embedded_texts == ["b > B2\n\nedited body"]
 
 
 def test_prune_is_skipped_when_no_files_found(tmp_path: Path) -> None:

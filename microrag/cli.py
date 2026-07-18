@@ -174,7 +174,7 @@ def _index_command(args: argparse.Namespace) -> int:
         )
     else:
         logger.info(
-            f"Indexed {files} file(s), {chunks} chunk(s), pruned {pruned} "
+            f"Indexed {files} file(s), {chunks} new chunk(s), pruned {pruned} "
             f"into collection {collection!r}"
         )
     return EX_OK

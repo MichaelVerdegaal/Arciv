@@ -36,7 +36,8 @@ These are decided. Do not revisit, "improve", or abstract over them.
   `"Represent this sentence for searching relevant passages: "`. Applied to queries only, never to
   documents.
 - Chunk IDs: `sha256(f"{relative_path}:{chunk_index}:{chunk_text}")` hex digest. Combined with
-  Chroma `upsert`, re-indexing unchanged files is a natural no-op.
+  the indexer's ID diff against the store, re-indexing only embeds chunks whose IDs are new —
+  unchanged content costs no inference.
 - Retrieval only in v1. No generation step. "RAG" without the G until the retrieval half is proven;
   local generation is a separate decision with its own constraints.
 

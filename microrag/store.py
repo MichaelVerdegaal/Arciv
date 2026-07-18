@@ -51,9 +51,10 @@ class Store:
             documents: Chunk texts.
             metadatas: Chunk metadata dicts.
         """
+        # Chroma accepts numpy arrays directly; tolist() only added copies.
         self._collection.upsert(
             ids=ids,
-            embeddings=embeddings.tolist(),
+            embeddings=embeddings,
             documents=documents,
             metadatas=metadatas,
         )
@@ -91,7 +92,7 @@ class Store:
             Tuple of (documents, metadatas, distances).
         """
         result = self._collection.query(
-            query_embeddings=query_embeddings.tolist(),
+            query_embeddings=query_embeddings,
             n_results=n_results,
             include=["documents", "metadatas", "distances"],
         )

@@ -46,8 +46,9 @@ After installation, `microrag` is on your PATH with no venv activation needed.
 - All data lives under `MICRORAG_HOME` (default `~/.microrag`), so commands work from any directory.
 - Results go to stdout; logs, progress, and hints go to stderr — query output pipes cleanly.
   `microrag query -` reads the query text from stdin.
-- Re-indexing is incremental: unchanged files are a no-op, edited files replace their old chunks,
-  and chunks for deleted files are pruned automatically (`--no-prune` to keep them).
+- Re-indexing is incremental at the chunk level: chunks already in the store are never re-embedded
+  (unchanged files cost no inference at all), edited files replace only their changed chunks, and
+  chunks for deleted files are pruned automatically (`--no-prune` to keep them).
 - Each source root gets its own collection (`index --collection NAME`, default `microrag`), and a
   collection is pinned to the first root it was built from — indexing a different root into it is
   refused. `query` searches all collections merged by score; `query --collection NAME` narrows it.
