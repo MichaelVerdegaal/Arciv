@@ -29,5 +29,7 @@ CHUNK_OVERLAP_CHARS: int = 200
 BATCH_SIZE: int = 8
 EMBEDDING_DIM: int = 768
 
-COLLECTION_NAME: str = "microrag"
+# Each indexed root gets its own Chroma collection; this one is used when
+# no --collection is given, so single-source setups never see the concept.
+DEFAULT_COLLECTION: str = "microrag"
 VECTOR_SPACE: dict[str, str] = {"hnsw:space": "cosine"}

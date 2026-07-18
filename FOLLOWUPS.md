@@ -2,13 +2,9 @@
 
 Known limitations, deliberately not fixed yet (see PLAN.md scope rules):
 
-- One root per index: the store is pinned to the first indexed root and refuses others (the
-  workaround is a separate `MICRORAG_HOME` per collection). Proper multi-source support needs an
-  owner decision between named Chroma collections (isolated, per-collection querying) and one
-  shared pool keyed by absolute paths (single combined search).
-- Deleted files are only cleaned up when `index --prune` is passed. With the root now pinned and
-  empty walks never pruning, the original mistyped-path danger is gone, so prune-by-default is a
-  candidate — pending owner decision.
+- Indexing a subdirectory of a collection's pinned root is refused (the pin check is an exact
+  match), so refreshing one folder means re-indexing the whole root. Fine at current corpus
+  sizes; revisit if indexing ever feels slow.
 
 ## Parking lot (deliberately not built yet)
 
@@ -59,11 +55,19 @@ owner go-ahead per PLAN.md, which is why a blanket "handle the followups" did no
 
 ## Resolved
 
+- One root per index: named collections now hold one root each (`index --collection NAME`,
+  default `microrag`); `query` merges results across collections by cosine distance and
+  `--collection` narrows it. Roots are recorded per collection in `roots.json` (the legacy
+  `root.txt` marker is still honored for the default collection).
+- Deleted files lingering in the index: pruning now runs by default on every `index` (opt out
+  with `--no-prune`); the mistyped-path danger that motivated opt-in is covered by the root pin
+  and the empty-walk guard. Plain `query` output now emits absolute paths, so results pipe
+  straight into `cat`/`xargs` regardless of which root they came from.
 - Image alt text not indexed: alt texts are now chunked as their own sections under the heading
   in effect at their position (filename-fallback aliases are skipped as noise).
 - Root collision and `--prune` ambiguity: the index is now pinned to the first root it was built
-  from (recorded in a `root` marker inside the DB dir); `index` refuses a different root with a
-  hint to use a separate `MICRORAG_HOME` or delete the DB dir to rebuild.
+  from; `index` refuses a different root. (Since superseded by named collections, one root each —
+  see above.)
 - Chunks before the first heading carried no document context: every breadcrumb now starts with
   the filename stem (skipped when the top-level heading already matches it) — the LLM-free
   version of "contextual chunk headers".

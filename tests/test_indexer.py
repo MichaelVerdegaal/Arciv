@@ -67,7 +67,7 @@ def test_emptied_file_removes_all_its_chunks(tmp_path: Path) -> None:
     assert store.sources() == {"b.md"}
 
 
-def test_prune_removes_deleted_files_only_when_opted_in(tmp_path: Path) -> None:
+def test_prune_removes_deleted_files_by_default(tmp_path: Path) -> None:
     gone = tmp_path / "gone.md"
     gone.write_text("# G\n\nbye\n", encoding="utf-8")
     (tmp_path / "kept.md").write_text("# K\n\nhello\n", encoding="utf-8")
@@ -75,11 +75,11 @@ def test_prune_removes_deleted_files_only_when_opted_in(tmp_path: Path) -> None:
     index_directory(tmp_path, _FakeEmbedder(), store)
     gone.unlink()
 
-    _, _, pruned = index_directory(tmp_path, _FakeEmbedder(), store)
+    _, _, pruned = index_directory(tmp_path, _FakeEmbedder(), store, prune=False)
     assert pruned == 0
-    assert "gone.md" in store.sources()  # default is non-destructive
+    assert "gone.md" in store.sources()  # opt-out keeps deleted files
 
-    _, _, pruned = index_directory(tmp_path, _FakeEmbedder(), store, prune=True)
+    _, _, pruned = index_directory(tmp_path, _FakeEmbedder(), store)
     assert pruned > 0
     assert store.sources() == {"kept.md"}
 

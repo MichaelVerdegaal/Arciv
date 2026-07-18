@@ -28,6 +28,9 @@ class _FakeStore:
     def ids_for_source(self, source: str) -> list[str]:
         return []
 
+    def sources(self) -> set[str]:
+        return set()
+
     def delete(self, ids: list[str]) -> None:
         pass
 
@@ -195,7 +198,7 @@ def test_index_refuses_a_second_root(
     assert code == EX_USAGE
     assert captured.out == ""
     assert str(first.resolve()) in captured.err
-    assert "MICRORAG_HOME" in captured.err
+    assert "--collection" in captured.err
 
     # Re-indexing the recorded root still works.
     assert main(["index", str(first)]) == EX_OK
@@ -215,11 +218,11 @@ def test_index_does_not_pin_root_on_empty_walk(
     capsys.readouterr()
 
 
-def test_status_reports_the_indexed_root(
+def test_status_reports_collections_and_roots(
     empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
 ) -> None:
     assert main(["status", "--json"]) == EX_OK
-    assert json.loads(capsys.readouterr().out)["root"] is None
+    assert json.loads(capsys.readouterr().out)["collections"] == []
 
     notes = empty_cwd / "notes"
     notes.mkdir()
@@ -228,7 +231,90 @@ def test_status_reports_the_indexed_root(
     capsys.readouterr()
 
     assert main(["status", "--json"]) == EX_OK
-    assert json.loads(capsys.readouterr().out)["root"] == str(notes.resolve())
+    obj = json.loads(capsys.readouterr().out)
+    assert [c["name"] for c in obj["collections"]] == ["microrag"]
+    assert obj["collections"][0]["root"] == str(notes.resolve())
+    assert obj["collections"][0]["chunks"] == obj["chunks"] > 0
+
+
+def test_two_roots_index_into_separate_collections(
+    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+) -> None:
+    notes = empty_cwd / "notes"
+    notes.mkdir()
+    (notes / "a.md").write_text("# A\n\nalpha notes\n", encoding="utf-8")
+    blog = empty_cwd / "blog"
+    blog.mkdir()
+    (blog / "a.md").write_text("# A\n\nblog post\n", encoding="utf-8")
+
+    assert main(["index", str(notes)]) == EX_OK
+    assert main(["index", str(blog), "--collection", "blog"]) == EX_OK
+    capsys.readouterr()
+
+    # Default query searches all collections and emits absolute paths.
+    assert main(["query", "anything"]) == EX_OK
+    lines = capsys.readouterr().out.splitlines()
+    assert set(lines) == {str(notes.resolve() / "a.md"), str(blog.resolve() / "a.md")}
+
+    # --collection narrows the search.
+    assert main(["query", "anything", "--collection", "blog"]) == EX_OK
+    assert capsys.readouterr().out.splitlines() == [str(blog.resolve() / "a.md")]
+
+    # JSON results carry the collection and the absolute path.
+    assert main(["query", "anything", "--collection", "blog", "--json"]) == EX_OK
+    result = json.loads(capsys.readouterr().out.splitlines()[0])
+    assert result["collection"] == "blog"
+    assert result["path"] == str(blog.resolve() / "a.md")
+
+
+def test_query_unknown_collection_is_usage_error(
+    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+) -> None:
+    notes = empty_cwd / "notes"
+    notes.mkdir()
+    (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
+    assert main(["index", str(notes)]) == EX_OK
+    capsys.readouterr()
+
+    code = main(["query", "anything", "--collection", "nope"])
+    captured = capsys.readouterr()
+    assert code == EX_USAGE
+    assert captured.out == ""
+    assert "microrag" in captured.err  # lists the known collections
+
+
+def test_index_rejects_invalid_collection_name(
+    empty_cwd: Path, capsys: pytest.CaptureFixture
+) -> None:
+    notes = empty_cwd / "notes"
+    notes.mkdir()
+    code = main(["index", str(notes), "--collection", "a"])
+    captured = capsys.readouterr()
+    assert code == EX_USAGE
+    assert captured.out == ""
+
+
+def test_legacy_root_marker_still_pins_the_default_collection(
+    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+) -> None:
+    notes = empty_cwd / "notes"
+    notes.mkdir()
+    (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
+    other = empty_cwd / "other"
+    other.mkdir()
+    (other / "a.md").write_text("# A\n\nbeta\n", encoding="utf-8")
+
+    assert main(["index", str(notes)]) == EX_OK
+    capsys.readouterr()
+
+    # Rewind the marker to the pre-collections format.
+    db = empty_cwd / "microrag-home" / "db"
+    (db / "roots.json").unlink()
+    (db / "root.txt").write_text(f"{notes.resolve()}\n", encoding="utf-8")
+
+    assert main(["index", str(other)]) == EX_USAGE  # legacy root still pins
+    assert main(["index", str(notes)]) == EX_OK
+    capsys.readouterr()
 
 
 def test_index_directory_keeps_stdout_clean(

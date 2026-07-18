@@ -22,8 +22,9 @@ here, ask before deciding.
 
 These are decided. Do not revisit, "improve", or abstract over them.
 
-- Vector store: ChromaDB via `PersistentClient`, one collection named `microrag`, cosine space
-  (`{"hnsw:space": "cosine"}`).
+- Vector store: ChromaDB via `PersistentClient`, cosine space (`{"hnsw:space": "cosine"}`).
+  Named collections, one per indexed root (default collection `microrag`); each collection is
+  pinned to the first root it was built from, recorded in `roots.json` inside the DB dir.
 - Embedding model: `MongoDB/mdbr-leaf-ir`, the fp32 ONNX export from the repo's `onnx/` folder.
   BERT-style, 23M parameters, 768-dim output, 512-token context.
 - Embeddings are computed by our own code and passed to Chroma explicitly via the `embeddings=`
@@ -63,8 +64,10 @@ All v1 phases are implemented and working:
 - Phase 0 — skeleton, `pyproject.toml`, download command, `OnnxEmbedder` with shape/norm/prefix
   tests.
 - Phase 1 — chunking (heading-aware, breadcrumb, overlap), indexing with incremental reindex and
-  prune.
+  prune-by-default for deleted files (`--no-prune` opts out).
 - Phase 2 — query CLI with JSON output, stdin query, status introspection.
+- Multi-source: named collections (`--collection`), one per root; `query` merges results across
+  collections by cosine distance and emits absolute paths in plain output.
 
 The project is a `uv` tool: installable via `uv tool install .` (or a git URL) and callable as
 `microrag` from anywhere with no venv activation.

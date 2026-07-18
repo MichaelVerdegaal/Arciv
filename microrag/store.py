@@ -5,26 +5,36 @@ from pathlib import Path
 import chromadb
 import numpy as np
 
-from .constants import COLLECTION_NAME, VECTOR_SPACE
+from .constants import DEFAULT_COLLECTION, VECTOR_SPACE
+
+
+def _client(db_dir: Path) -> chromadb.api.ClientAPI:
+    """Open the persistent Chroma client with telemetry disabled."""
+    return chromadb.PersistentClient(
+        path=str(db_dir),
+        settings=chromadb.Settings(anonymized_telemetry=False),
+    )
 
 
 class Store:
-    """Persistent Chroma store with cosine similarity."""
+    """Persistent Chroma store with cosine similarity, one collection per root."""
 
-    def __init__(self, db_dir: Path) -> None:
+    def __init__(self, db_dir: Path, collection: str = DEFAULT_COLLECTION) -> None:
         """Open or create the persistent Chroma client and collection.
 
         Args:
             db_dir: Directory where Chroma persists its data.
+            collection: Name of the collection to open or create.
         """
-        self._client = chromadb.PersistentClient(
-            path=str(db_dir),
-            settings=chromadb.Settings(anonymized_telemetry=False),
-        )
-        self._collection = self._client.get_or_create_collection(
-            name=COLLECTION_NAME,
+        self._collection = _client(db_dir).get_or_create_collection(
+            name=collection,
             metadata=VECTOR_SPACE,
         )
+
+    @classmethod
+    def collection_names(cls, db_dir: Path) -> list[str]:
+        """Return the names of all collections in the store, sorted."""
+        return sorted(c.name for c in _client(db_dir).list_collections())
 
     def upsert(
         self,

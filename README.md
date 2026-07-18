@@ -9,8 +9,9 @@ uv tool install microrag                                            # or from gi
 export HF_TOKEN=hf_...                                              # recommended: avoids Hugging Face rate limits
 microrag download                                                    # one-time model fetch (the only networked command)
 microrag index ~/notes                                               # chunk + embed every *.md under the directory
-microrag query "ONNX runtime throughput"                             # top-5 chunks, best match first
-microrag status                                                      # where the model/index live, chunk count
+microrag index ~/blog --collection blog                              # a second source gets its own collection
+microrag query "ONNX runtime throughput"                             # top-5 matches across all collections
+microrag status                                                      # where the model/index live, per-collection counts
 ```
 
 `microrag <command> --help` is the authoritative reference for each command. See
@@ -46,9 +47,12 @@ After installation, `microrag` is on your PATH with no venv activation needed.
 - Results go to stdout; logs, progress, and hints go to stderr — query output pipes cleanly.
   `microrag query -` reads the query text from stdin.
 - Re-indexing is incremental: unchanged files are a no-op, edited files replace their old chunks,
-  and `index --prune` removes chunks for deleted files.
-- An index is pinned to the first root directory it was built from; indexing a different root is
-  refused (use a separate `MICRORAG_HOME` per notes collection, or delete the DB dir to rebuild).
+  and chunks for deleted files are pruned automatically (`--no-prune` to keep them).
+- Each source root gets its own collection (`index --collection NAME`, default `microrag`), and a
+  collection is pinned to the first root it was built from — indexing a different root into it is
+  refused. `query` searches all collections merged by score; `query --collection NAME` narrows it.
+- Plain `query` output is one absolute file path per line, best match first — pipeable straight
+  into `cat`, `xargs`, or your editor.
 - `--json` emits machine-readable output: JSONL for `query`, a single object for `status` and the
   `index` summary.
 - `-v` for debug logs (on `query` it also prints each result's full text), `-q` for errors only,

@@ -18,7 +18,7 @@ def index_directory(
     embedder: OnnxEmbedder,
     store: Store,
     *,
-    prune: bool = False,
+    prune: bool = True,
 ) -> tuple[int, int, int]:
     """Index all *.md files under path into the store.
 
@@ -26,7 +26,8 @@ def index_directory(
         path: Root directory to walk.
         embedder: Initialized embedder.
         store: Initialized store.
-        prune: Also delete chunks whose source file no longer exists under path.
+        prune: Delete chunks whose source file no longer exists under path
+            (default; never happens when the walk finds no files at all).
 
     Returns:
         Tuple of (files indexed, chunks written, chunks pruned).
