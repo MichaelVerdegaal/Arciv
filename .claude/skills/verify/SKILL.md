@@ -11,9 +11,12 @@ use a local HTTPS site.
 
 ## Browser (web sessions only)
 
-`scrapling install` fails (browser CDN blocked). Bridge the pre-installed Chromium instead —
-patchright expects the `chrome-linux64/` layout under its pinned revision (check
-`browsers.json` in the patchright package for the number, 1223 below):
+The SessionStart hook (`.claude/hooks/session-start.sh`) normally does this already:
+`PLAYWRIGHT_BROWSERS_PATH` is exported for the session and the browser just works. If the
+hook didn't run (or the bridge failed), do it manually — `scrapling install` fails (browser
+CDN blocked), so bridge the pre-installed Chromium instead. Patchright expects the
+`chrome-linux64/` layout under its pinned revision (check `browsers.json` in the patchright
+package for the number, 1223 below):
 
 ```bash
 mkdir -p /tmp/pw/chromium-1223 /tmp/pw/chromium_headless_shell-1223
