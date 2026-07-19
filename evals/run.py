@@ -18,7 +18,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from microrag.constants import MODEL_DIR, ONNX_FILENAME, TOKENIZER_FILENAME
+from microrag.cli import _load_embedder
+from microrag.constants import EX_NOINPUT, EX_OK
 from microrag.embedder import OnnxEmbedder
 from microrag.indexer import index_directory
 from microrag.store import Store
@@ -54,9 +55,16 @@ def evaluate(
     embedder: OnnxEmbedder,
     store: Store,
 ) -> list[QueryResult]:
-    """Index the corpus into the store and score every gold query."""
+    """Index the corpus into the store and score every gold query.
+
+    Raises:
+        ValueError: If the corpus produced no chunks (querying an empty
+            store would only yield a cryptic Chroma error).
+    """
     index_directory(corpus, embedder, store)
     depth = min(RETRIEVE_CHUNKS, store.count())
+    if depth == 0:
+        raise ValueError(f"Corpus at {corpus} produced no chunks to evaluate.")
 
     results = []
     for entry in queries:
@@ -96,6 +104,8 @@ def _rank_of_expected(ranked: list[str], expected: list[str]) -> int | None:
 def aggregate(results: list[QueryResult]) -> dict:
     """Compute hit@k and MRR over all query results."""
     total = len(results)
+    if total == 0:
+        return {"queries": 0, "hit@1": 0.0, "hit@3": 0.0, "hit@5": 0.0, "mrr": 0.0}
 
     def hit_at(k: int) -> float:
         return sum(1 for r in results if r.rank is not None and r.rank <= k) / total
@@ -110,20 +120,6 @@ def aggregate(results: list[QueryResult]) -> dict:
     }
 
 
-def _load_embedder() -> OnnxEmbedder | None:
-    """Load the real embedder, or explain what is missing."""
-    model_path = MODEL_DIR / ONNX_FILENAME
-    tokenizer_path = MODEL_DIR / TOKENIZER_FILENAME
-    if not (model_path.exists() and tokenizer_path.exists()):
-        print(
-            f"Embedding model not found in {MODEL_DIR.resolve()}. "
-            "Run: microrag download",
-            file=sys.stderr,
-        )
-        return None
-    return OnnxEmbedder(model_path=model_path, tokenizer_path=tokenizer_path)
-
-
 def main(argv: list[str] | None = None) -> int:
     """Run the evaluation and print a report."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -136,12 +132,16 @@ def main(argv: list[str] | None = None) -> int:
 
     embedder = _load_embedder()
     if embedder is None:
-        return 66  # EX_NOINPUT, matching the CLI's convention
+        return EX_NOINPUT
 
     queries = load_queries()
     with tempfile.TemporaryDirectory(prefix="microrag-eval-") as tmp:
         store = Store(Path(tmp) / "db", "eval")
-        results = evaluate(CORPUS_DIR, queries, embedder, store)
+        try:
+            results = evaluate(CORPUS_DIR, queries, embedder, store)
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
+            return EX_NOINPUT
 
     metrics = aggregate(results)
     if args.json:
@@ -162,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
                 ensure_ascii=False,
             )
         )
-        return 0
+        return EX_OK
 
     for key, value in metrics.items():
         print(f"{key}\t{value}")
@@ -178,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"          expected {', '.join(r.expected)}; got {r.ranked_sources[:3]}"
             )
-    return 0
+    return EX_OK
 
 
 if __name__ == "__main__":

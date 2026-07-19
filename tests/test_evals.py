@@ -17,6 +17,7 @@ from evals.run import (
     load_queries,
 )
 from microrag.constants import MODEL_DIR, ONNX_FILENAME, TOKENIZER_FILENAME
+from microrag.embedder import OnnxEmbedder
 from microrag.store import Store
 
 MODEL_PATH = MODEL_DIR / ONNX_FILENAME
@@ -72,6 +73,22 @@ def test_aggregate_metrics_math() -> None:
     assert metrics["hit@5"] == 0.5
     assert metrics["mrr"] == round((1 + 1 / 2 + 1 / 6 + 0) / 4, 3)
 
+    assert aggregate([]) == {
+        "queries": 0,
+        "hit@1": 0.0,
+        "hit@3": 0.0,
+        "hit@5": 0.0,
+        "mrr": 0.0,
+    }
+
+
+def test_empty_corpus_is_a_clear_error(tmp_path: Path) -> None:
+    empty_corpus = tmp_path / "corpus"
+    empty_corpus.mkdir()
+    store = Store(tmp_path / "db", "eval")
+    with pytest.raises(ValueError, match="produced no chunks"):
+        evaluate(empty_corpus, load_queries(), _HashEmbedder(), store)
+
 
 def test_harness_runs_end_to_end_with_stub_embedder(tmp_path: Path) -> None:
     queries = load_queries()
@@ -91,8 +108,6 @@ def test_harness_runs_end_to_end_with_stub_embedder(tmp_path: Path) -> None:
 )
 def test_retrieval_quality_floor(tmp_path: Path) -> None:
     """Conservative floors: raise them once a real baseline is established."""
-    from microrag.embedder import OnnxEmbedder
-
     embedder = OnnxEmbedder(model_path=MODEL_PATH, tokenizer_path=TOKENIZER_PATH)
     store = Store(tmp_path / "db", "eval")
     metrics = aggregate(evaluate(CORPUS_DIR, load_queries(), embedder, store))

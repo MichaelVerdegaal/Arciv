@@ -139,7 +139,7 @@ def _plan_file(
     text = file_path.read_text(encoding="utf-8")
     relative = file_path.relative_to(root_path)
     existing_ids = set(existing_by_source.get(str(relative), ()))
-    chunks = chunk_markdown(text, relative, file_path.stat().st_mtime)
+    chunks = chunk_markdown(text, relative)
     ids = [_chunk_id(relative, i, chunk["text"]) for i, chunk in enumerate(chunks)]
 
     new = [

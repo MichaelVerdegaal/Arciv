@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from microrag.cli import EX_NOINPUT, EX_OK, EX_UNAVAILABLE, EX_USAGE, main
+from microrag.constants import EX_DATAERR
 from microrag.indexer import index_directory
 
 
@@ -262,6 +263,42 @@ def test_two_roots_index_into_separate_collections(
     result = json.loads(capsys.readouterr().out.splitlines()[0])
     assert result["collection"] == "blog"
     assert result["path"] == str(blog.resolve() / "a.md")
+
+
+def test_query_rejects_non_positive_limit(
+    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+) -> None:
+    notes = empty_cwd / "notes"
+    notes.mkdir()
+    (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
+    assert main(["index", str(notes)]) == EX_OK
+    capsys.readouterr()
+
+    for limit in ("0", "-3"):
+        code = main(["query", "anything", "-k", limit])
+        captured = capsys.readouterr()
+        assert code == EX_USAGE
+        assert captured.out == ""
+        assert "--limit" in captured.err
+
+
+def test_corrupted_roots_marker_fails_cleanly(
+    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+) -> None:
+    notes = empty_cwd / "notes"
+    notes.mkdir()
+    (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
+    assert main(["index", str(notes)]) == EX_OK
+    capsys.readouterr()
+
+    db = empty_cwd / "microrag-home" / "db"
+    (db / "roots.json").write_text('{"microrag": "truncated', encoding="utf-8")
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(["status"])
+    assert excinfo.value.code == EX_DATAERR
+    captured = capsys.readouterr()
+    assert "roots.json" in captured.err  # names the file to fix or delete
 
 
 def test_query_unknown_collection_is_usage_error(

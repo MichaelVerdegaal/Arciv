@@ -46,7 +46,7 @@ _PIPELINE = (
 )
 
 
-def chunk_markdown(text: str, source: Path, mtime: float) -> list[dict]:
+def chunk_markdown(text: str, source: Path) -> list[dict]:
     """Split markdown text into heading-aware chunks.
 
     Fenced code blocks, tables, and image alt texts are chunked as their own
@@ -57,7 +57,6 @@ def chunk_markdown(text: str, source: Path, mtime: float) -> list[dict]:
     Args:
         text: Raw markdown content.
         source: Relative path of the source file.
-        mtime: File modification time as a Unix timestamp.
 
     Returns:
         List of chunk dicts with keys "text" and "metadata".
@@ -87,7 +86,7 @@ def chunk_markdown(text: str, source: Path, mtime: float) -> list[dict]:
 
     chunks: list[dict] = []
     for (breadcrumb, _), packed in zip(sections, docs, strict=True):
-        chunks.extend(_pack_section(packed, breadcrumb, source, mtime))
+        chunks.extend(_pack_section(packed, breadcrumb, source))
 
     for index, chunk in enumerate(chunks):
         chunk["metadata"]["index"] = index
@@ -165,7 +164,6 @@ def _pack_section(
     packed: Document,
     breadcrumb: str,
     source: Path,
-    mtime: float,
 ) -> list[dict]:
     """Turn one packed section into chunk dicts with breadcrumb and metadata."""
     section_chunks = []
@@ -181,7 +179,6 @@ def _pack_section(
                     "source": str(source),
                     "heading": breadcrumb,
                     "index": -1,
-                    "mtime": mtime,
                 },
             }
         )

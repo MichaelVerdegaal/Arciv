@@ -45,18 +45,23 @@ These are decided. Do not revisit, "improve", or abstract over them.
 
 ```
 microrag/
-    constants.py    # QUERY_PREFIX, model id, paths, chunk sizes, collection name
+    constants.py    # QUERY_PREFIX, model id, paths, chunk sizes, exit codes
     embedder.py     # OnnxEmbedder
     chunker.py      # markdown-aware chunking
     store.py        # thin Chroma wrapper
+    collections.py  # collection name validation + per-collection root pinning
     indexer.py      # walk files -> chunk -> embed -> upsert
     cli.py          # argparse entrypoints: download, index, query, status
 tests/
+evals/              # retrieval-quality suite (dev tool, not shipped)
 ```
 
 Module boundaries: `embedder` knows nothing about Chroma. `store` knows nothing about ONNX or
-tokenizers. `chunker` is pure functions over strings. `cli` is the only place these are wired
-together. If an import crosses these boundaries, it's wrong.
+tokenizers. `chunker` is pure functions over strings. `collections` owns the roots marker and
+name rules. `cli` is the only place these are wired together. If an import crosses these
+boundaries, it's wrong. cli.py sits above the ~300-line signal (~445 lines after the
+multi-collection feature); owner reviewed and approved the size on 2026-07-19 — recheck only if
+it grows further.
 
 ## Status
 

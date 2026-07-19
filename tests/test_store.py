@@ -22,9 +22,9 @@ def test_ids_by_source_groups_all_chunks(tmp_path: Path) -> None:
         embeddings=_unit_vectors(3),
         documents=["x", "y", "z"],
         metadatas=[
-            {"source": "a.md", "heading": "H", "index": 0, "mtime": 0.0},
-            {"source": "a.md", "heading": "H", "index": 1, "mtime": 0.0},
-            {"source": "b.md", "heading": "H", "index": 0, "mtime": 0.0},
+            {"source": "a.md", "heading": "H", "index": 0},
+            {"source": "a.md", "heading": "H", "index": 1},
+            {"source": "b.md", "heading": "H", "index": 0},
         ],
     )
     grouped = store.ids_by_source()
@@ -32,3 +32,23 @@ def test_ids_by_source_groups_all_chunks(tmp_path: Path) -> None:
         "a.md": ["a0", "a1"],
         "b.md": ["b0"],
     }
+
+
+def test_writes_larger_than_chroma_batch_limit_are_sliced(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Upserts and deletes above _MAX_BATCH must be split, not rejected."""
+    monkeypatch.setattr("microrag.store._MAX_BATCH", 2)
+    store = Store(tmp_path / "db", "test-store")
+
+    ids = [f"c{i}" for i in range(5)]
+    store.upsert(
+        ids=ids,
+        embeddings=_unit_vectors(5),
+        documents=list("vwxyz"),
+        metadatas=[{"source": "a.md", "heading": "H", "index": i} for i in range(5)],
+    )
+    assert store.count() == 5
+
+    store.delete(ids)
+    assert store.count() == 0

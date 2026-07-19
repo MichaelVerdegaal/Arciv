@@ -3,7 +3,6 @@
 
 import argparse
 import json
-import re
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -16,9 +15,14 @@ from huggingface_hub import get_token, hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError, HfHubHTTPError
 from loguru import logger
 
+from .collections import COLLECTION_NAME_RE, read_roots, source_path, write_root
 from .constants import (
     DEFAULT_COLLECTION,
     DEFAULT_DB_DIR,
+    EX_NOINPUT,
+    EX_OK,
+    EX_UNAVAILABLE,
+    EX_USAGE,
     MODEL_DIR,
     MODEL_ID,
     ONNX_DATA_FILENAME,
@@ -28,41 +32,6 @@ from .constants import (
 from .embedder import OnnxEmbedder
 from .indexer import index_directory
 from .store import Store
-
-EX_OK = 0
-EX_USAGE = 64
-EX_NOINPUT = 66
-EX_UNAVAILABLE = 69
-
-_ROOTS_MARKER = "roots.json"
-_LEGACY_ROOT_MARKER = "root.txt"
-
-# Chroma's own naming rule (3-512 chars, alphanumeric ends), checked up front
-# so a bad --collection is a clean usage error instead of a traceback.
-_COLLECTION_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{1,510}[a-zA-Z0-9]$")
-
-
-def _read_roots() -> dict[str, str]:
-    """Return the collection -> root mapping recorded for this index."""
-    marker = DEFAULT_DB_DIR / _ROOTS_MARKER
-    if marker.exists():
-        return json.loads(marker.read_text(encoding="utf-8"))
-    # Single-collection indexes from before named collections recorded one
-    # bare root path; treat it as the default collection's root.
-    legacy = DEFAULT_DB_DIR / _LEGACY_ROOT_MARKER
-    if legacy.exists():
-        root = legacy.read_text(encoding="utf-8").strip()
-        if root:
-            return {DEFAULT_COLLECTION: root}
-    return {}
-
-
-def _write_root(collection: str, root: str) -> None:
-    """Record the root a collection was built from."""
-    roots = _read_roots()
-    roots[collection] = root
-    marker = DEFAULT_DB_DIR / _ROOTS_MARKER
-    marker.write_text(json.dumps(roots, indent=2) + "\n", encoding="utf-8")
 
 
 def emit(line: str) -> None:
@@ -131,7 +100,7 @@ def _index_command(args: argparse.Namespace) -> int:
         return EX_NOINPUT
 
     collection = args.collection
-    if not _COLLECTION_RE.fullmatch(collection):
+    if not COLLECTION_NAME_RE.fullmatch(collection):
         logger.error(
             f"Invalid collection name {collection!r}: use 3-512 characters "
             "[a-zA-Z0-9._-], starting and ending with a letter or digit."
@@ -142,7 +111,7 @@ def _index_command(args: argparse.Namespace) -> int:
     # silently collide (and confuses pruning). Pin each collection to the
     # first root it was built from.
     root = str(path.resolve())
-    recorded = _read_roots().get(collection)
+    recorded = read_roots(DEFAULT_DB_DIR).get(collection)
     if recorded is not None and recorded != root:
         logger.error(
             f"Collection {collection!r} was built from {recorded}; indexing {root} "
@@ -161,7 +130,7 @@ def _index_command(args: argparse.Namespace) -> int:
         path, embedder, store, prune=not args.no_prune
     )
     if files and recorded is None:
-        _write_root(collection, root)
+        write_root(DEFAULT_DB_DIR, collection, root)
 
     if args.json:
         emit_json(
@@ -201,6 +170,10 @@ def _query_command(args: argparse.Namespace) -> int:
     else:
         text = args.text
 
+    if args.limit < 1:
+        logger.error(f"-k/--limit must be at least 1, got {args.limit}.")
+        return EX_USAGE
+
     if not DEFAULT_DB_DIR.exists():
         logger.error(
             f"No index found at {DEFAULT_DB_DIR.resolve()}. Run: microrag index <path>"
@@ -220,7 +193,8 @@ def _query_command(args: argparse.Namespace) -> int:
         return EX_NOINPUT
 
     stores = {name: Store(DEFAULT_DB_DIR, name) for name in names}
-    if sum(store.count() for store in stores.values()) == 0:
+    counts = {name: store.count() for name, store in stores.items()}
+    if sum(counts.values()) == 0:
         logger.error("The index is empty. Run: microrag index <path>")
         return EX_NOINPUT
 
@@ -230,7 +204,7 @@ def _query_command(args: argparse.Namespace) -> int:
     # them all, so cosine distances are comparable across collections.
     results = []
     for name, store in stores.items():
-        if store.count() == 0:
+        if counts[name] == 0:
             continue
         documents, metadatas, distances = store.query(query_embedding, args.limit)
         results.extend(
@@ -242,7 +216,7 @@ def _query_command(args: argparse.Namespace) -> int:
     results.sort(key=lambda result: result[0])
     results = results[: args.limit]
 
-    roots = _read_roots()
+    roots = read_roots(DEFAULT_DB_DIR)
     if args.json:
         for dist, doc, meta, name in results:
             emit_json(
@@ -250,7 +224,7 @@ def _query_command(args: argparse.Namespace) -> int:
                     "confidence": round(_confidence(dist), 2),
                     "collection": name,
                     "source": meta["source"],
-                    "path": str(_source_path(meta["source"], roots.get(name))),
+                    "path": str(source_path(meta["source"], roots.get(name))),
                     "heading": meta["heading"],
                     "text": doc,
                 }
@@ -270,17 +244,12 @@ def _query_command(args: argparse.Namespace) -> int:
         # One full path per line, best match first: pipeable into xargs/cat.
         seen: set[Path] = set()
         for _dist, _doc, meta, name in results:
-            path = _source_path(meta["source"], roots.get(name))
+            path = source_path(meta["source"], roots.get(name))
             if path not in seen:
                 seen.add(path)
                 emit(str(path))
 
     return EX_OK
-
-
-def _source_path(source: str, root: str | None) -> Path:
-    """Join a root-relative source with its collection's recorded root."""
-    return Path(root) / source if root else Path(source)
 
 
 def _status_command(args: argparse.Namespace) -> int:
@@ -289,7 +258,7 @@ def _status_command(args: argparse.Namespace) -> int:
         MODEL_DIR / TOKENIZER_FILENAME
     ).exists()
 
-    roots = _read_roots()
+    roots = read_roots(DEFAULT_DB_DIR)
     collections = []
     if DEFAULT_DB_DIR.exists():
         for name in Store.collection_names(DEFAULT_DB_DIR):

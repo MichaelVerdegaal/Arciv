@@ -7,6 +7,11 @@ import numpy as np
 
 from .constants import DEFAULT_COLLECTION, VECTOR_SPACE
 
+# Chroma rejects writes above its max batch size (5461 in chromadb 1.5.9,
+# via get_max_batch_size()); slice with headroom so callers never need to
+# care how many rows they hand over at once.
+_MAX_BATCH = 5000
+
 
 def _client(db_dir: Path) -> chromadb.api.ClientAPI:
     """Open the persistent Chroma client with telemetry disabled."""
@@ -52,12 +57,14 @@ class Store:
             metadatas: Chunk metadata dicts.
         """
         # Chroma accepts numpy arrays directly; tolist() only added copies.
-        self._collection.upsert(
-            ids=ids,
-            embeddings=embeddings,
-            documents=documents,
-            metadatas=metadatas,
-        )
+        for start in range(0, len(ids), _MAX_BATCH):
+            end = start + _MAX_BATCH
+            self._collection.upsert(
+                ids=ids[start:end],
+                embeddings=embeddings[start:end],
+                documents=documents[start:end],
+                metadatas=metadatas[start:end],
+            )
 
     def count(self) -> int:
         """Return the number of chunks in the collection."""
@@ -79,8 +86,8 @@ class Store:
 
     def delete(self, ids: list[str]) -> None:
         """Delete chunks by ID; a no-op for an empty list."""
-        if ids:
-            self._collection.delete(ids=ids)
+        for start in range(0, len(ids), _MAX_BATCH):
+            self._collection.delete(ids=ids[start : start + _MAX_BATCH])
 
     def query(
         self,
