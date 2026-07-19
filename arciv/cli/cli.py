@@ -36,6 +36,7 @@ from arciv.core.pipeline import (
     ArchiveResult,
     archive_source,
     archive_urls,
+    crawl_urls,
     fetch_urls,
     parse_pending,
     report,
@@ -285,12 +286,29 @@ def get(
             help="Fetch the URL, print its links to stdout, and archive nothing.",
         ),
     ] = False,
+    depth: Annotated[
+        int,
+        typer.Option(
+            "--depth",
+            min=0,
+            help=(
+                "Also archive the pages each URL links to, following links "
+                "this many hops (same registered domain only)."
+            ),
+        ),
+    ] = 0,
 ) -> None:
     """Archive a URL, the links in a file, or a whole directory.
 
     Runs the full pipeline (index → fetch → parse) on exactly one of:
     a single URL, a single file (--file), or a directory (--dir). Pass
     ``-`` as the URL to read newline-separated URLs from stdin.
+
+    With --depth N, the crawl follows links N hops past each URL, archiving
+    every page it visits: depth 1 archives a page and the pages it links to,
+    depth 2 also their links, and so on. Each hop applies the URL rules and
+    stays on the seed's registered domain; already-archived pages are not
+    re-downloaded, so an interrupted crawl resumes on rerun.
 
     With --no-save, the URL is fetched but nothing is archived: the page's
     links (absolute, deduplicated) are printed to stdout instead, one per
@@ -302,6 +320,13 @@ def get(
     targets = [t for t in (url, file_path, dir_path) if t is not None]
     if len(targets) != 1:
         _fail("Provide exactly one of: URL, --file, or --dir.", code=EXIT_USAGE)
+
+    if depth:
+        if url is None:
+            _fail("--depth works on URLs, not --file/--dir.", code=EXIT_USAGE)
+        if no_save:
+            # --no-save archives nothing; a crawl exists to archive.
+            _fail("--depth cannot be combined with --no-save.", code=EXIT_USAGE)
 
     if no_save:
         if url is None:
@@ -324,18 +349,21 @@ def get(
         else:  # unreachable: the guard above requires exactly one target
             _fail("Provide exactly one of: URL, --file, or --dir.", code=EXIT_USAGE)
 
-        fetched = fetch_urls(db, urls, refetch=refetch)
-        # A refetch resets parsed_at, so refetched pages re-parse here too
-        parsed = parse_pending(db)
+        if depth:
+            result = crawl_urls(db, urls, depth=depth, refetch=refetch)
+        else:
+            fetched = fetch_urls(db, urls, refetch=refetch)
+            # A refetch resets parsed_at, so refetched pages re-parse here too
+            result = ArchiveResult(urls=urls, fetched=fetched, parsed=parse_pending(db))
         if json_output():
             emit_pipeline_summary(
-                indexed=len(urls),
-                fetched=len(fetched),
-                parsed=parsed,
-                failed=_count_failed(db, urls),
+                indexed=len(result.urls),
+                fetched=len(result.fetched),
+                parsed=result.parsed,
+                failed=_count_failed(db, result.urls),
             )
         else:
-            report(db, len(fetched), urls)
+            report(db, len(result.fetched), result.urls)
 
 
 def _print_page_links(url: str) -> None:
