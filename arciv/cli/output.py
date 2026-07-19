@@ -12,6 +12,7 @@ framework.
 """
 
 import json
+import os
 import sys
 from typing import Any
 
@@ -52,13 +53,22 @@ def emit(text: str = "", *, null: bool = False) -> None:
             ``xargs -0``.
     """
     separator = b"\0" if null else b"\n"
-    sys.stdout.buffer.write(text.encode("utf-8") + separator)
-    sys.stdout.buffer.flush()
+    try:
+        sys.stdout.buffer.write(text.encode("utf-8") + separator)
+        sys.stdout.buffer.flush()
+    except BrokenPipeError:
+        # The downstream consumer (e.g. ``arciv list | head``) closed the
+        # pipe: stop quietly with the conventional SIGPIPE status instead of
+        # a traceback. Stdout is pointed at devnull first so the
+        # interpreter's shutdown flush doesn't raise the same error again.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        raise typer.Exit(141) from None
 
 
 def emit_json(obj: Any) -> None:
     """Write one compact JSON object/array as a line on stdout."""
-    typer.echo(json.dumps(obj, ensure_ascii=False))
+    emit(json.dumps(obj, ensure_ascii=False))
 
 
 def emit_pipeline_summary(

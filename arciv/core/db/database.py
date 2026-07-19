@@ -558,9 +558,14 @@ class PageDatabase:
         slugs = [row["slug"] for row in rows]
         if not urls:
             return []
-        placeholders = ",".join("?" * len(urls))
-        self._conn.execute(f"DELETE FROM links WHERE url IN ({placeholders})", urls)
-        self._conn.execute(f"DELETE FROM pages WHERE url IN ({placeholders})", urls)
+        for chunk in _chunked(urls):
+            placeholders = ",".join("?" * len(chunk))
+            self._conn.execute(
+                f"DELETE FROM links WHERE url IN ({placeholders})", chunk
+            )
+            self._conn.execute(
+                f"DELETE FROM pages WHERE url IN ({placeholders})", chunk
+            )
         self._conn.commit()
         return slugs
 

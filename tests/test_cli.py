@@ -1,10 +1,12 @@
 """Tests for the CLI: command parity, stdout/stderr split, JSON, exit codes."""
 
 import json
+import os
 import sys
 from datetime import UTC, datetime
 
 import pytest
+import typer
 from loguru import logger
 from typer.testing import CliRunner
 
@@ -830,6 +832,27 @@ class TestStreams:
         result = runner.invoke(cli_module.cli, ["-q", "source"])
         assert result.exit_code == 0
         assert result.stderr == ""
+
+    def test_emit_exits_quietly_when_pipe_closes(self, monkeypatch):
+        # `arciv list -n 0 | head` closes stdout early; emit must exit with
+        # the conventional SIGPIPE status instead of a traceback.
+        class _ClosedBuffer:
+            def write(self, data):
+                raise BrokenPipeError
+
+            def flush(self):
+                raise BrokenPipeError
+
+        class _ClosedStdout:
+            buffer = _ClosedBuffer()
+
+            def fileno(self):
+                return os.open(os.devnull, os.O_WRONLY)
+
+        monkeypatch.setattr(sys, "stdout", _ClosedStdout())
+        with pytest.raises(typer.Exit) as exc:
+            output.emit("record")
+        assert exc.value.exit_code == 141
 
 
 class TestJson:

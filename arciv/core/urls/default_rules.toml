@@ -126,10 +126,12 @@ match = "lnkd.in"
   type = "skip"
   reason = "link shortener"
 
+# Regex, not starts_with: rules run before canonicalization strips "www.",
+# and real search links carry it, so a bare-host prefix match never fires.
 [[rule]]
 name = "google search results"
-type = "starts_with"
-match = "https://google.com/search"
+type = "regex"
+match = '^https://(?:www\.)?google\.com/search'
   [[rule.action]]
   type = "skip"
   reason = "search results"

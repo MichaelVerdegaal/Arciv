@@ -102,6 +102,21 @@ class TestParsePending:
         assert parse_pending(db, saved_dir=saved, min_words=10) == 0
         assert "raw file missing" in db.get("https://example.com/a").fail_reason
 
+    def test_invalid_utf8_raw_file_is_rejected_not_fatal(self, db, tmp_path):
+        # A truncated write can leave bytes that aren't valid UTF-8; that one
+        # page is rejected and the rest of the batch still parses.
+        saved = tmp_path / "saved"
+        db.upsert(_fetched_page("https://example.com/bad", "example.com-bad00000"))
+        _save_html(saved, "example.com-ok000000", _make_html("survives"))
+        db.upsert(_fetched_page("https://example.com/ok", "example.com-ok000000"))
+        slug_dir = saved / "example.com-bad00000"
+        slug_dir.mkdir(parents=True)
+        (slug_dir / "page.html").write_bytes(b"<html>\xff\xfe truncated")
+
+        assert parse_pending(db, saved_dir=saved, min_words=10) == 1
+        assert "raw file unreadable" in db.get("https://example.com/bad").fail_reason
+        assert db.get("https://example.com/ok").parsed
+
     def test_raw_text_url_stored_directly(self, db, tmp_path):
         saved = tmp_path / "saved"
         url = "https://raw.example.com/readme.md"

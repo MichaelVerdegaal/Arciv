@@ -935,19 +935,28 @@ def db_remove(
     By default the archived files under saved/ are kept; pass --remove-files
     to delete those too.
     """
-    if not DB_PATH.exists() and not (remove_files and SAVED_DIR.is_dir()):
+    db_exists = DB_PATH.exists()
+    if not db_exists and not (remove_files and SAVED_DIR.is_dir()):
         # Diagnostic, not data: keep it on stderr
         logger.info(f"No database at {DB_PATH}")
         return
     if not force:
-        prompt = f"Delete {DB_PATH}? All page/source tracking is lost"
-        if remove_files:
-            prompt += f" (and all archived files under {SAVED_DIR})"
+        if db_exists:
+            prompt = f"Delete {DB_PATH}? All page/source tracking is lost"
+            if remove_files:
+                prompt += f" (and all archived files under {SAVED_DIR})"
+        else:
+            # Only reachable with --remove-files (see the guard above)
+            prompt = (
+                f"No database at {DB_PATH}; delete the archived files "
+                f"under {SAVED_DIR}?"
+            )
         typer.confirm(prompt, abort=True)
     # The WAL sidecar files belong to the main file and must go with it
     for suffix in ("", "-wal", "-shm"):
         DB_PATH.with_name(DB_PATH.name + suffix).unlink(missing_ok=True)
-    emit(f"Deleted {DB_PATH}")
+    if db_exists:
+        emit(f"Deleted {DB_PATH}")
     if remove_files and SAVED_DIR.is_dir():
         shutil.rmtree(SAVED_DIR)
         emit(f"Removed archived files under {SAVED_DIR}")

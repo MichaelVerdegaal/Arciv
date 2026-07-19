@@ -503,6 +503,22 @@ class TestSources:
         db.add_source(_source(name="alpha", path="/a"))
         assert [s.name for s in db.list_sources()] == ["alpha", "zeta"]
 
+    def test_prune_source_pages_spans_parameter_chunks(self, db):
+        # More exclusively-linked pages than one IN (...) statement may bind
+        # on old SQLite builds; the deletes must run chunked.
+        db.add_source(_source("notes"))
+        urls = [f"https://example.com/{i}" for i in range(501)]
+        for url in urls:
+            db.upsert(_page(url))
+        db.replace_links_for_files(
+            ["/vault/notes/x.md"],
+            [(url, "/vault/notes/x.md", "notes", "t1") for url in urls],
+        )
+        slugs = db.prune_source_pages("notes")
+        assert len(slugs) == 501
+        assert db.count() == 0
+        assert _link_rows(db) == []
+
 
 class TestPrune:
     def _seed(self, db):

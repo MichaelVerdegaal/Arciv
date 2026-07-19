@@ -140,7 +140,14 @@ def _parse_html(
     Raw text URLs (.md, .txt, .rst) skip validation and conversion; the
     fetched content is stored as markdown directly.
     """
-    html = html_path.read_text(encoding="utf-8")
+    # A truncated write (disk full, crash mid-fetch) can leave bytes that are
+    # not valid UTF-8; reject that one page instead of aborting the whole
+    # parse batch, matching how the PDF path isolates read/parse errors.
+    try:
+        html = html_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        _reject(db, page, f"raw file unreadable: {e}")
+        return None
 
     raw_bytes = len(html.encode("utf-8"))
 

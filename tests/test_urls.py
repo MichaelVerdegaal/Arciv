@@ -138,6 +138,17 @@ class TestProcessUrl:
         processed, _ = process_url("https://www.youtube.com/watch?v=abc", DEFAULTS)
         assert processed is None
 
+    def test_google_search_default_skipped_with_and_without_www(self):
+        # Rules run before canonicalization strips "www.", so the rule must
+        # match both spellings itself; real search links carry the www.
+        for url in (
+            "https://google.com/search?q=arciv",
+            "https://www.google.com/search?q=arciv",
+        ):
+            processed, reason = process_url(url, DEFAULTS)
+            assert processed is None
+            assert reason == "search results"
+
     def test_host_case_variants_dedupe_to_same_url(self):
         lower, _ = process_url("https://example.com/Path")
         upper, _ = process_url("https://EXAMPLE.com/Path")
