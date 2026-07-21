@@ -22,7 +22,7 @@ microrag/
     store.py        # thin ChromaDB wrapper (upsert, query, ids_by_source)
     collections.py  # collection name validation + per-collection root pinning
     indexer.py      # walk files -> chunk -> embed -> upsert
-    cli.py          # argparse entrypoints: download, index, query, status
+    cli.py          # Typer entrypoints: download, index, query, status
 tests/
 evals/              # retrieval-quality suite (dev tool, not shipped)
 ```
@@ -70,7 +70,8 @@ root into it is refused. `query` merges results across all collections by cosine
 - `huggingface_hub`: one-time model download (the only networked code path).
 - `numpy`: embedding arrays.
 - `loguru`: logging to stderr.
-- `argcomplete`: shell tab completion for the CLI.
+- `typer`: CLI framework — argument parsing, `--help`, and shell tab completion
+  (`--install-completion`). Pulls in `click` and `rich`.
 
 Dependencies are limited to the whitelist in `pyproject.toml`. Adding anything else requires explicit
 owner approval first (see [AGENTS.md](AGENTS.md#hard-constraints)).

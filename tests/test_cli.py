@@ -45,13 +45,13 @@ def empty_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def test_no_args_shows_help(empty_cwd: Path, capsys: pytest.CaptureFixture) -> None:
     assert main([]) == EX_OK
-    assert "usage: microrag" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Usage: microrag" in out
+    assert "query" in out  # help lists the commands
 
 
 def test_version_flag(capsys: pytest.CaptureFixture) -> None:
-    with pytest.raises(SystemExit) as excinfo:
-        main(["--version"])
-    assert excinfo.value.code == 0
+    assert main(["--version"]) == EX_OK
     assert "microrag" in capsys.readouterr().out
 
 
@@ -124,6 +124,28 @@ def test_status_plain_output_is_tab_separated(
     assert "chunks\t0" in out
 
 
+def test_main_forces_lf_stdout(
+    empty_cwd: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Windows text-mode stdout would rewrite every "\n" into "\r\n" and break
+    # LF-expecting pipe consumers; main() must disable that translation at the
+    # stream. Assert it here since capsys can't observe on-the-wire bytes.
+    import io
+
+    class _RecordingStdout(io.StringIO):
+        def __init__(self) -> None:
+            super().__init__()
+            self.newline_arg = "unset"
+
+        def reconfigure(self, *, newline: str | None = None, **_kwargs) -> None:
+            self.newline_arg = newline
+
+    recording = _RecordingStdout()
+    monkeypatch.setattr("sys.stdout", recording)
+    assert main(["status"]) == EX_OK
+    assert recording.newline_arg == "\n"
+
+
 def test_status_json_output(empty_cwd: Path, capsys: pytest.CaptureFixture) -> None:
     assert main(["status", "--json"]) == EX_OK
     obj = json.loads(capsys.readouterr().out)
@@ -138,6 +160,17 @@ def test_global_flags_work_before_and_after_subcommand(
     json.loads(capsys.readouterr().out)
     assert main(["status", "-q"]) == EX_OK
     capsys.readouterr()
+
+
+def test_verbose_logs_never_reach_stdout(
+    empty_cwd: Path, capsys: pytest.CaptureFixture
+) -> None:
+    # stdout is data only: even at -v, diagnostics stay on stderr.
+    assert main(["status", "-v"]) == EX_OK
+    captured = capsys.readouterr()
+    assert "DEBUG" not in captured.out
+    assert "WARNING" not in captured.out  # "model not downloaded" hint is stderr
+    assert captured.out.startswith("model_dir\t")
 
 
 def test_download_network_failure_is_clean(
@@ -258,6 +291,16 @@ def test_two_roots_index_into_separate_collections(
     assert main(["query", "anything", "--collection", "blog"]) == EX_OK
     assert capsys.readouterr().out.splitlines() == [str(blog.resolve() / "a.md")]
 
+    # -0/--null emits NUL-separated paths (find -print0 style) for xargs -0.
+    assert main(["query", "anything", "-0"]) == EX_OK
+    out = capsys.readouterr().out
+    assert "\n" not in out
+    assert set(out.split("\0")) == {
+        str(notes.resolve() / "a.md"),
+        str(blog.resolve() / "a.md"),
+        "",  # trailing NUL after the last record
+    }
+
     # JSON results carry the collection and the absolute path.
     assert main(["query", "anything", "--collection", "blog", "--json"]) == EX_OK
     result = json.loads(capsys.readouterr().out.splitlines()[0])
@@ -294,9 +337,7 @@ def test_corrupted_roots_marker_fails_cleanly(
     db = empty_cwd / "microrag-home" / "db"
     (db / "roots.json").write_text('{"microrag": "truncated', encoding="utf-8")
 
-    with pytest.raises(SystemExit) as excinfo:
-        main(["status"])
-    assert excinfo.value.code == EX_DATAERR
+    assert main(["status"]) == EX_DATAERR
     captured = capsys.readouterr()
     assert "roots.json" in captured.err  # names the file to fix or delete
 

@@ -117,5 +117,13 @@ which is why a blanket "handle the followups" did not cover them:
 - Oversized single paragraphs never split: chonkie's RecursiveChunker splits them to size.
 - cwd-relative data directories: everything now lives under `MICRORAG_HOME` (default `~/.microrag`).
 - AGENTS.md placeholders and rules copied from another project: filled in / replaced.
-- Shell tab completion: added via argcomplete.
+- Shell tab completion: provided by Typer (`microrag --install-completion` / `--show-completion`).
+  Superseded the earlier argcomplete integration when the CLI moved to Typer.
 - `microrag query -` (stdin): added.
+- CLI framework: migrated from argparse to Typer (owner-approved dependency). Behaviour is preserved
+  — same commands, exit codes (sysexits; Click's own parse errors keep 2), stdout/stderr split, and
+  global flags working both before and after the subcommand (each command reconciles the callback's
+  `-v`/`-q`/`--json` with its own). `main()` runs the app with `standalone_mode=False` so `typer.Exit`
+  codes and a corrupted-marker `SystemExit` surface as the process exit code.
+- `query -0`/`--null`: plain output can be NUL-separated (`find -print0` style) so result paths
+  containing spaces or newlines survive `| xargs -0`. Newline-separated output remains the default.

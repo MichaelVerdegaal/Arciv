@@ -74,11 +74,15 @@ All data sits under one home directory, so commands work from anywhere:
 
 ## Shell completion (optional)
 
+Typer generates completion for your shell:
+
 ```bash
-eval "$(register-python-argcomplete microrag)"
+microrag --install-completion        # writes the completion script and prints how to enable it
+microrag --show-completion           # or print it to stdout to inspect/source yourself
 ```
 
-Add to your shell profile to make it permanent.
+`--install-completion` detects your shell (bash, zsh, fish, PowerShell) and updates the right
+profile; restart the shell afterwards to make it permanent.
 
 ## Tests and lint
 

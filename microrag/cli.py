@@ -1,16 +1,22 @@
-# PYTHON_ARGCOMPLETE_OK
-"""Command-line entrypoints for MicroRAG."""
+"""Command-line entrypoints for MicroRAG.
 
-import argparse
+Built on Typer. The output contract is strict: only payload data goes to
+stdout (through emit/emit_json), while logs, progress, warnings, and hints
+go to stderr via loguru. Global flags (-v/-q/--json) work both before and
+after the subcommand; each command reconciles the callback's values with
+its own so `microrag status --json` and `microrag --json status` behave the
+same.
+"""
+
 import json
 import sys
+from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-import argcomplete
-
 # httpx is huggingface_hub's own HTTP transport, imported only for its error type.
 import httpx
+import typer
 from huggingface_hub import get_token, hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError, HfHubHTTPError
 from loguru import logger
@@ -33,12 +39,29 @@ from .embedder import OnnxEmbedder
 from .indexer import index_directory
 from .store import Store
 
+app = typer.Typer(
+    name="microrag",
+    add_completion=True,
+    context_settings={"help_option_names": ["-h", "--help"]},
+    # Plain Click help/errors, not Rich's bordered panels: deterministic across
+    # terminals (Rich wraps and colorizes based on width/TTY detection) and
+    # keeps help greppable, matching the CLI's plain, pipeable output contract.
+    rich_markup_mode=None,
+    help=(
+        "Local semantic search over markdown files. Results go to stdout; "
+        "logs and progress go to stderr."
+    ),
+)
+
+
+# --- Output: the single choke point for everything that reaches stdout -------
+
 
 def emit(line: str) -> None:
-    """Write one line of payload data to stdout.
+    """Write one newline-terminated line of payload data to stdout.
 
-    Every stdout write goes through emit/emit_json; diagnostics, progress,
-    and hints belong on stderr via logging.
+    Every stdout write goes through emit/emit_json/emit_record; diagnostics,
+    progress, and hints belong on stderr via logging.
     """
     print(line)
 
@@ -48,8 +71,113 @@ def emit_json(obj: dict) -> None:
     print(json.dumps(obj, ensure_ascii=False))
 
 
-def _download_command(args: argparse.Namespace) -> int:
-    """Download the embedding model files from Hugging Face."""
+def emit_record(line: str, *, null: bool) -> None:
+    """Write one record, NUL-terminated with null=True else newline-terminated.
+
+    NUL separators (`find -print0` style) survive paths that contain spaces
+    or newlines, so `microrag query -0 ... | xargs -0` stays correct.
+    """
+    if null:
+        sys.stdout.write(line + "\0")
+    else:
+        emit(line)
+
+
+# --- Global options, shared across the callback and every command ------------
+
+
+@dataclass
+class GlobalOpts:
+    """Reconciled global flags for the running command."""
+
+    verbose: int = 0
+    quiet: bool = False
+    json: bool = False
+
+
+def _opt_verbose() -> int:
+    return typer.Option(
+        0,
+        "-v",
+        "--verbose",
+        count=True,
+        help="Show debug logs (query: also print each result's full text).",
+    )
+
+
+def _opt_quiet() -> bool:
+    return typer.Option(
+        False, "-q", "--quiet", help="Only show errors (wins over --verbose)."
+    )
+
+
+def _opt_json() -> bool:
+    return typer.Option(False, "--json", help="Emit machine-readable output on stdout.")
+
+
+def _resolve(
+    ctx: typer.Context, verbose: int, quiet: bool, json_output: bool
+) -> GlobalOpts:
+    """Merge a command's global flags with the callback's, then set logging.
+
+    Global flags are declared on both the callback (so they parse *before*
+    the subcommand) and each command (so they parse *after*). Verbose counts
+    take the max and the boolean flags OR together, so a flag set in either
+    position wins regardless of order.
+    """
+    base = ctx.obj if isinstance(ctx.obj, GlobalOpts) else GlobalOpts()
+    opts = GlobalOpts(
+        verbose=max(base.verbose, verbose),
+        quiet=base.quiet or quiet,
+        json=base.json or json_output,
+    )
+    _configure_logging(opts.verbose, opts.quiet)
+    return opts
+
+
+def _version_callback(value: bool) -> None:
+    """Print the version and exit; eager so it works without a subcommand."""
+    if value:
+        emit(f"microrag {_version()}")
+        raise typer.Exit(EX_OK)
+
+
+@app.callback(invoke_without_command=True)
+def _root(
+    ctx: typer.Context,
+    version: bool = typer.Option(
+        None,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the version and exit.",
+    ),
+    verbose: int = _opt_verbose(),
+    quiet: bool = _opt_quiet(),
+    json_output: bool = _opt_json(),
+) -> None:
+    """Local semantic search over markdown files."""
+    ctx.obj = GlobalOpts(verbose=verbose, quiet=quiet, json=json_output)
+    _configure_logging(verbose, quiet)
+    if ctx.invoked_subcommand is None:
+        # No subcommand is the obvious read-only action: show help, exit 0.
+        emit(ctx.get_help())
+        raise typer.Exit(EX_OK)
+
+
+# --- Commands ----------------------------------------------------------------
+
+
+@app.command()
+def download(
+    ctx: typer.Context,
+    verbose: int = _opt_verbose(),
+    quiet: bool = _opt_quiet(),
+    json_output: bool = _opt_json(),
+) -> None:
+    """Download the embedding model (one-time; the only networked command)."""
+    opts = _resolve(ctx, verbose, quiet, json_output)
+
     if get_token() is None:
         logger.warning(
             "No Hugging Face token configured. Set the HF_TOKEN environment "
@@ -83,29 +211,45 @@ def _download_command(args: argparse.Namespace) -> int:
             f"Download from Hugging Face failed: {exc}. "
             "Check your network connection and retry: microrag download"
         )
-        return EX_UNAVAILABLE
+        raise typer.Exit(EX_UNAVAILABLE) from None
 
-    if args.json:
+    if opts.json:
         emit_json({"model_dir": str(MODEL_DIR.resolve())})
     else:
         logger.info(f"Model files saved to {MODEL_DIR.resolve()}")
-    return EX_OK
 
 
-def _index_command(args: argparse.Namespace) -> int:
+@app.command()
+def index(
+    ctx: typer.Context,
+    path: Path = typer.Argument(..., help="Directory to index"),
+    collection: str = typer.Option(
+        DEFAULT_COLLECTION,
+        "--collection",
+        help=f"Collection to index into (default: {DEFAULT_COLLECTION})",
+    ),
+    no_prune: bool = typer.Option(
+        False,
+        "--no-prune",
+        help="Keep chunks whose source file no longer exists under PATH",
+    ),
+    verbose: int = _opt_verbose(),
+    quiet: bool = _opt_quiet(),
+    json_output: bool = _opt_json(),
+) -> None:
     """Index a directory of markdown files into a collection."""
-    path = Path(args.path)
+    opts = _resolve(ctx, verbose, quiet, json_output)
+
     if not path.exists():
         logger.error(f"Path does not exist: {path}")
-        return EX_NOINPUT
+        raise typer.Exit(EX_NOINPUT)
 
-    collection = args.collection
     if not COLLECTION_NAME_RE.fullmatch(collection):
         logger.error(
             f"Invalid collection name {collection!r}: use 3-512 characters "
             "[a-zA-Z0-9._-], starting and ending with a letter or digit."
         )
-        return EX_USAGE
+        raise typer.Exit(EX_USAGE)
 
     # Sources are stored root-relative, so mixing roots in one collection can
     # silently collide (and confuses pruning). Pin each collection to the
@@ -119,20 +263,18 @@ def _index_command(args: argparse.Namespace) -> int:
             "new root into its own collection (--collection NAME), or delete "
             f"{DEFAULT_DB_DIR.resolve()} to start over."
         )
-        return EX_USAGE
+        raise typer.Exit(EX_USAGE)
 
     embedder = _load_embedder()
     if embedder is None:
-        return EX_NOINPUT
+        raise typer.Exit(EX_NOINPUT)
 
     store = Store(DEFAULT_DB_DIR, collection)
-    files, chunks, pruned = index_directory(
-        path, embedder, store, prune=not args.no_prune
-    )
+    files, chunks, pruned = index_directory(path, embedder, store, prune=not no_prune)
     if files and recorded is None:
         write_root(DEFAULT_DB_DIR, collection, root)
 
-    if args.json:
+    if opts.json:
         emit_json(
             {
                 "collection": collection,
@@ -146,57 +288,70 @@ def _index_command(args: argparse.Namespace) -> int:
             f"Indexed {files} file(s), {chunks} new chunk(s), pruned {pruned} "
             f"into collection {collection!r}"
         )
-    return EX_OK
 
 
-def _confidence(distance: float) -> float:
-    """Convert a cosine distance into a 0-100 confidence percentage, clamped at 0."""
-    return max(0.0, (1.0 - distance) * 100.0)
+@app.command()
+def query(
+    ctx: typer.Context,
+    text: str = typer.Argument(..., help='Query text ("-" reads it from stdin)'),
+    limit: int = typer.Option(
+        5, "-k", "--limit", help="Number of results (default: 5)"
+    ),
+    collection: str | None = typer.Option(
+        None, "--collection", help="Search only this collection (default: all)"
+    ),
+    null: bool = typer.Option(
+        False,
+        "-0",
+        "--null",
+        help="Separate plain-output paths with NUL instead of newline (xargs -0).",
+    ),
+    verbose: int = _opt_verbose(),
+    quiet: bool = _opt_quiet(),
+    json_output: bool = _opt_json(),
+) -> None:
+    """Query the indexed store, best match first (JSONL with --json)."""
+    opts = _resolve(ctx, verbose, quiet, json_output)
 
-
-def _query_command(args: argparse.Namespace) -> int:
-    """Run a query against the indexed store."""
-    if args.text == "-":
+    if text == "-":
         if sys.stdin.isatty():
             logger.error(
                 'Query text "-" reads from stdin, but stdin is a terminal. '
                 "Example: grep -h TODO notes.md | microrag query -"
             )
-            return EX_USAGE
+            raise typer.Exit(EX_USAGE)
         text = sys.stdin.read().strip()
         if not text:
             logger.error("Empty query text on stdin.")
-            return EX_USAGE
-    else:
-        text = args.text
+            raise typer.Exit(EX_USAGE)
 
-    if args.limit < 1:
-        logger.error(f"-k/--limit must be at least 1, got {args.limit}.")
-        return EX_USAGE
+    if limit < 1:
+        logger.error(f"-k/--limit must be at least 1, got {limit}.")
+        raise typer.Exit(EX_USAGE)
 
     if not DEFAULT_DB_DIR.exists():
         logger.error(
             f"No index found at {DEFAULT_DB_DIR.resolve()}. Run: microrag index <path>"
         )
-        return EX_NOINPUT
+        raise typer.Exit(EX_NOINPUT)
 
     names = Store.collection_names(DEFAULT_DB_DIR)
-    if args.collection is not None:
-        if args.collection not in names:
+    if collection is not None:
+        if collection not in names:
             known = ", ".join(names) or "none"
-            logger.error(f"Unknown collection {args.collection!r} (known: {known}).")
-            return EX_USAGE
-        names = [args.collection]
+            logger.error(f"Unknown collection {collection!r} (known: {known}).")
+            raise typer.Exit(EX_USAGE)
+        names = [collection]
 
     embedder = _load_embedder()
     if embedder is None:
-        return EX_NOINPUT
+        raise typer.Exit(EX_NOINPUT)
 
     stores = {name: Store(DEFAULT_DB_DIR, name) for name in names}
     counts = {name: store.count() for name, store in stores.items()}
     if sum(counts.values()) == 0:
         logger.error("The index is empty. Run: microrag index <path>")
-        return EX_NOINPUT
+        raise typer.Exit(EX_NOINPUT)
 
     query_embedding = embedder.embed_query(text)
 
@@ -206,7 +361,7 @@ def _query_command(args: argparse.Namespace) -> int:
     for name, store in stores.items():
         if counts[name] == 0:
             continue
-        documents, metadatas, distances = store.query(query_embedding, args.limit)
+        documents, metadatas, distances = store.query(query_embedding, limit)
         results.extend(
             (dist, doc, meta, name)
             for doc, meta, dist in zip(
@@ -214,10 +369,10 @@ def _query_command(args: argparse.Namespace) -> int:
             )
         )
     results.sort(key=lambda result: result[0])
-    results = results[: args.limit]
+    results = results[:limit]
 
     roots = read_roots(DEFAULT_DB_DIR)
-    if args.json:
+    if opts.json:
         for dist, doc, meta, name in results:
             emit_json(
                 {
@@ -229,7 +384,7 @@ def _query_command(args: argparse.Namespace) -> int:
                     "text": doc,
                 }
             )
-    elif args.verbose:
+    elif opts.verbose:
         for rank, (dist, doc, meta, name) in enumerate(results, start=1):
             if rank > 1:
                 emit("")
@@ -241,19 +396,25 @@ def _query_command(args: argparse.Namespace) -> int:
             for line in doc.splitlines():
                 emit(f"  | {line}")
     else:
-        # One full path per line, best match first: pipeable into xargs/cat.
+        # One full path per record, best match first: pipeable into xargs/cat.
         seen: set[Path] = set()
         for _dist, _doc, meta, name in results:
             path = source_path(meta["source"], roots.get(name))
             if path not in seen:
                 seen.add(path)
-                emit(str(path))
-
-    return EX_OK
+                emit_record(str(path), null=null)
 
 
-def _status_command(args: argparse.Namespace) -> int:
+@app.command()
+def status(
+    ctx: typer.Context,
+    verbose: int = _opt_verbose(),
+    quiet: bool = _opt_quiet(),
+    json_output: bool = _opt_json(),
+) -> None:
     """Show where data lives on disk and how much is indexed, per collection."""
+    opts = _resolve(ctx, verbose, quiet, json_output)
+
     model_present = (MODEL_DIR / ONNX_FILENAME).exists() and (
         MODEL_DIR / TOKENIZER_FILENAME
     ).exists()
@@ -277,7 +438,7 @@ def _status_command(args: argparse.Namespace) -> int:
         "collections": collections,
         "chunks": sum(c["chunks"] for c in collections),
     }
-    if args.json:
+    if opts.json:
         emit_json(info)
     else:
         for key, value in info.items():
@@ -291,7 +452,14 @@ def _status_command(args: argparse.Namespace) -> int:
 
     if not model_present:
         logger.warning("Model not downloaded yet. Run: microrag download")
-    return EX_OK
+
+
+# --- Helpers -----------------------------------------------------------------
+
+
+def _confidence(distance: float) -> float:
+    """Convert a cosine distance into a 0-100 confidence percentage, clamped at 0."""
+    return max(0.0, (1.0 - distance) * 100.0)
 
 
 def _load_embedder() -> OnnxEmbedder | None:
@@ -326,119 +494,42 @@ def _version() -> str:
         return "unknown"
 
 
-def _add_common_options(parser: argparse.ArgumentParser, *, suppress: bool) -> None:
-    """Add global options to a parser.
-
-    With suppress=True (subparsers), absent flags leave the root parser's
-    values untouched, so options work both before and after the subcommand.
-    """
-    verbose_default = {"default": argparse.SUPPRESS} if suppress else {"default": 0}
-    flag_default = {"default": argparse.SUPPRESS} if suppress else {"default": False}
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="count",
-        help="Show debug logs (query: also print each result's full text).",
-        **verbose_default,
-    )
-    parser.add_argument(
-        "-q",
-        "--quiet",
-        action="store_true",
-        help="Only show errors (wins over --verbose).",
-        **flag_default,
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit machine-readable output on stdout.",
-        **flag_default,
-    )
-
-
 def main(argv: list[str] | None = None) -> int:
-    """Run the CLI."""
-    parser = argparse.ArgumentParser(
-        prog="microrag",
-        description="Local semantic search over markdown files. "
-        "Results go to stdout; logs and progress go to stderr.",
-    )
-    parser.add_argument("--version", action="version", version=f"%(prog)s {_version()}")
-    _add_common_options(parser, suppress=False)
-    subparsers = parser.add_subparsers(dest="command")
+    """Run the CLI and return a process exit code.
 
-    download_parser = subparsers.add_parser(
-        "download",
-        help="Download the embedding model (one-time; the only networked command)",
-        description="Download the embedding model files from Hugging Face into "
-        f"{MODEL_DIR}/. This is the only command that touches the network. "
-        "Set HF_TOKEN to avoid rate limiting and speed up downloads.",
-    )
-    download_parser.set_defaults(func=_download_command)
+    Wraps the Typer app so both entry points (`microrag` and `python -m
+    microrag`) and the tests share one path. Running with
+    standalone_mode=False lets us return sysexits codes instead of letting
+    Click sys.exit itself, and lets typer.Exit(code) surface as that code.
+    """
+    # Windows text-mode stdout translates every "\n" into "\r\n", which breaks
+    # LF-expecting pipe consumers (Git Bash, xargs, arciv). Turn the
+    # translation off once at the stream so all payload stays LF-only; a no-op
+    # where "\n" is native. The guard skips replaced stdouts (test captures)
+    # that lack reconfigure.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(newline="\n")
 
-    index_parser = subparsers.add_parser(
-        "index",
-        help="Index a directory of markdown files",
-        description="Chunk and embed every *.md file under PATH into the local "
-        "vector store. Re-indexing unchanged files is a no-op; chunks for "
-        "deleted files are pruned unless --no-prune is given. Each collection "
-        "is pinned to one root directory — use --collection to index a second "
-        "source.",
-    )
-    index_parser.add_argument("path", help="Directory to index")
-    index_parser.add_argument(
-        "--collection",
-        default=DEFAULT_COLLECTION,
-        help=f"Collection to index into (default: {DEFAULT_COLLECTION})",
-    )
-    index_parser.add_argument(
-        "--no-prune",
-        action="store_true",
-        help="Keep chunks whose source file no longer exists under PATH",
-    )
-    index_parser.set_defaults(func=_index_command)
-
-    query_parser = subparsers.add_parser(
-        "query",
-        help="Query the indexed store",
-        description="Print the top matching chunks for TEXT, best match first. "
-        "With --json, one JSON object per result (JSONL).",
-    )
-    query_parser.add_argument("text", help='Query text ("-" reads it from stdin)')
-    query_parser.add_argument(
-        "-k",
-        "--limit",
-        dest="limit",
-        type=int,
-        default=5,
-        help="Number of results (default: 5)",
-    )
-    query_parser.add_argument(
-        "--collection",
-        default=None,
-        help="Search only this collection (default: all collections)",
-    )
-    query_parser.set_defaults(func=_query_command)
-
-    status_parser = subparsers.add_parser(
-        "status",
-        help="Show model/index locations and chunk count",
-        description="Show where the model and index live on disk, whether the "
-        "model is downloaded, and how many chunks are indexed.",
-    )
-    status_parser.set_defaults(func=_status_command)
-
-    for sub in (download_parser, index_parser, query_parser, status_parser):
-        _add_common_options(sub, suppress=True)
-
-    argcomplete.autocomplete(parser)
-    args = parser.parse_args(argv)
-    _configure_logging(args.verbose, args.quiet)
-
-    if args.command is None:
-        parser.print_help()
-        return EX_OK
-    return args.func(args)
+    try:
+        # prog_name pins the name in help/usage output regardless of argv[0]
+        # (mirrors argparse's prog="microrag"); standalone_mode=False makes
+        # typer.Exit(code) surface as a return value instead of sys.exit.
+        result = app(args=argv, prog_name="microrag", standalone_mode=False)
+    except SystemExit as exc:
+        # Raised by non-CLI modules (e.g. a corrupted roots marker exits with
+        # EX_DATAERR); surface the code as our own exit code.
+        return exc.code if isinstance(exc.code, int) else EX_OK
+    except Exception as exc:
+        # Framework parse/usage errors are click's ClickException — but Typer
+        # vendors its own click, so match structurally (has show()/exit_code)
+        # rather than by import. Real bugs lack these and re-raise.
+        show = getattr(exc, "show", None)
+        code = getattr(exc, "exit_code", None)
+        if callable(show) and isinstance(code, int):
+            show()  # one clean usage line to stderr
+            return code
+        raise
+    return result if isinstance(result, int) else EX_OK
 
 
 if __name__ == "__main__":

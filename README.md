@@ -52,14 +52,15 @@ After installation, `microrag` is on your PATH with no venv activation needed.
   collection is pinned to the first root it was built from; indexing a different root into it is
   refused. `query` searches all collections merged by score; `query --collection NAME` narrows it.
 - Plain `query` output is one absolute file path per line, best match first, pipeable straight
-  into `cat`, `xargs`, or your editor.
+  into `cat`, `xargs`, or your editor. `query -0`/`--null` separates paths with NUL instead of
+  newlines, so paths containing spaces or newlines survive `... | xargs -0`.
 - `--json` emits machine-readable output: JSONL for `query`, a single object for `status` and the
   `index` summary.
 - `-v` for debug logs (on `query` it also prints each result's full text), `-q` for errors only,
   `--version` for the version. Global flags work before and after the subcommand. Tab completion
-  via argcomplete (see [DEVELOPMENT.md](DEVELOPMENT.md#shell-completion-optional)).
+  via `microrag --install-completion` (see [DEVELOPMENT.md](DEVELOPMENT.md#shell-completion-optional)).
 - Exit codes: 0 on success, 64 for usage errors we detect, 66 when an input is missing (path, model,
-  or index), 69 when the model download fails, 2 for argparse errors.
+  or index), 69 when the model download fails, 65 for a corrupted marker file, 2 for CLI parse errors.
 
 ## Documentation
 
