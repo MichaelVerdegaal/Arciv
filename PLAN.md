@@ -3,19 +3,18 @@
 Local semantic search over markdown files. Fully offline after a one-time model download. CPU-only.
 Python.
 
-This document is the source of truth for any coding agent working on this project. When this
-document and an agent's own judgement conflict, this document wins. When something is not covered
-here, ask before deciding.
-
-
+This document is the source of truth for any coding agent working on this project, a lightweight
+stand-in for proper issue tracking. When this document and an agent's own judgement conflict, this
+document wins. When something is not covered here, ask before deciding. For architecture see
+[ARCHITECTURE.md](ARCHITECTURE.md); for agent working rules see [AGENTS.md](AGENTS.md).
 
 ## Locked technical decisions
 
 These are decided. Do not revisit, "improve", or abstract over them.
 
 - Vector store: ChromaDB via `PersistentClient`, cosine space (`{"hnsw:space": "cosine"}`). Named
-  collections, one per indexed root (default collection `microrag`); each collection is pinned to
-  the first root it was built from, recorded in `roots.json` inside the DB dir.
+  collections, one per indexed root (default collection `microrag`); each collection is pinned to the
+  first root it was built from, recorded in `roots.json` inside the DB dir.
 - Embedding model: `MongoDB/mdbr-leaf-ir`, the fp32 ONNX export from the repo's `onnx/` folder.
   BERT-style, 23M parameters, 768-dim output, 512-token context.
 - Embeddings are computed by our own code and passed to Chroma explicitly via the `embeddings=`
@@ -27,53 +26,96 @@ These are decided. Do not revisit, "improve", or abstract over them.
   `"Represent this sentence for searching relevant passages: "`. Applied to queries only, never to
   documents.
 - Chunk IDs: `sha256(f"{relative_path}:{chunk_index}:{chunk_text}")` hex digest. Combined with the
-  indexer's ID diff against the store, re-indexing only embeds chunks whose IDs are new — unchanged
+  indexer's ID diff against the store, re-indexing only embeds chunks whose IDs are new; unchanged
   content costs no inference.
 - Retrieval only in v1. No generation step. "RAG" without the G until the retrieval half is proven;
   local generation is a separate decision with its own constraints.
 
-## Architecture
-
-```
-microrag/
-    constants.py    # QUERY_PREFIX, model id, paths, chunk sizes, exit codes
-    embedder.py     # OnnxEmbedder
-    chunker.py      # markdown-aware chunking
-    store.py        # thin Chroma wrapper
-    collections.py  # collection name validation + per-collection root pinning
-    indexer.py      # walk files -> chunk -> embed -> upsert
-    cli.py          # argparse entrypoints: download, index, query, status
-tests/
-evals/              # retrieval-quality suite (dev tool, not shipped)
-```
-
-Module boundaries: `embedder` knows nothing about Chroma. `store` knows nothing about ONNX or
-tokenizers. `chunker` is pure functions over strings. `collections` owns the roots marker and name
-rules. `cli` is the only place these are wired together. If an import crosses these boundaries, it's
-wrong. cli.py sits above the ~300-line signal (~445 lines after the multi-collection feature); owner
-reviewed and approved the size on 2026-07-19 — recheck only if it grows further.
-
-## Status
-
-
-## Rules for coding agents
-Design discipline:
-
-- No abstract base classes, no factories, no dependency injection, no `VectorStoreInterface` "in
-  case we swap stores later". One store, one model, concrete code.
-- No config system; `constants.py` is the whole configuration story, plus the single `MICRORAG_HOME`
-  env var that relocates the data directory (default `~/.microrag`).
-- A module growing past ~300 lines is a signal to stop and check with the owner, not to split it
-  into a package.
-- Stay within scope. Ideas outside it go in `FOLLOWUPS.md`, not in code.
-- Remove dead code and unused imports before finishing a task.
-
-Ask the owner first before: adding any dependency, changing anything in the "Locked technical
-decisions" section, changing the chunking algorithm (tuning the constants is fine), or touching the
-ID scheme.
-
 ## Open questions (intentionally unresolved)
-- Chunk size and overlap tuning — decide empirically; `evals/` provides the measurement (run it
+
+- Chunk size and overlap tuning: decide empirically; `evals/` provides the measurement (run it
   before and after a constants change).
-- Whether asymmetric mode buys enough recall to justify a second model — measure with a small set of
+- Whether asymmetric mode buys enough recall to justify a second model: measure with a small set of
   queries against the existing index.
+
+## Known limitations
+
+Deliberately not fixed yet:
+
+- Indexing a subdirectory of a collection's pinned root is refused (the pin check is an exact match),
+  so refreshing one folder means re-indexing the whole root. Fine at current corpus sizes; revisit if
+  indexing ever feels slow.
+
+## Parking lot (deliberately not built yet)
+
+- Chonkie's `CodeChunker`/`TableChunker` extras for structure-aware splitting of extracted code
+  blocks and tables: the base install's character-based splitting is good enough until retrieval
+  quality says otherwise.
+
+LLM-free retrieval ideas (from a survey of RAG techniques; anything needing an LLM or a hosted API is
+banned for this project and listed under Rejected). These two still need an explicit owner go-ahead,
+which is why a blanket "handle the followups" did not cover them:
+
+- BM25 + vector fusion retrieval: fully LLM-free, but needs either a new dependency (`rank-bm25`,
+  whitelist approval required) or Chroma `$contains` (explicitly out of scope for v1). Revisit if
+  exact-keyword queries measurably underperform.
+- Chonkie `SemanticChunker`: embedding-driven chunk boundaries, runs offline with `OnnxEmbedder` (it
+  is a `BaseEmbeddings`). The chunking algorithm is locked and indexing cost rises, so only with
+  owner approval and evidence that retrieval quality demands it.
+
+## Rejected
+
+- `query -c/--context N` (neighboring chunks around each result): removed as not useful enough; the
+  result's `source` path makes it trivial to `cat` or open the file for surrounding context.
+- Full heading trail in breadcrumbs (`title > H1 > H2 > ... > H6`): deep nesting plus verbose
+  headings made breadcrumbs long enough to eat into the chunk token budget. Breadcrumbs are bounded
+  instead: title, top heading, and the section's own heading, each segment trimmed.
+- `--color auto|always|never`: the CLI emits no colored output (a colors library is out of scope), so
+  the flag would be a knob that does nothing.
+- Filtering/paging built into `query`: stdout is clean data; `grep`, `head`, and `jq` (with `--json`)
+  already compose.
+- Chonkie recipes (`from_recipe`): fetches chunking rules from Hugging Face Hub at runtime, which
+  violates the no-network-at-runtime constraint. Rules are constructed locally instead.
+- Chonkie `ChromaHandshake` as a replacement for our `Store`: verified against the installed source,
+  it conflicts with locked decisions on every axis. It attaches an embedding function to the
+  collection and upserts documents *without* explicit embeddings; its `search()` embeds queries
+  through the same function, so `QUERY_PREFIX` is never applied (leaf-ir needs the prefix on queries
+  only). It generates its own batch-relative chunk IDs (breaking the sha256 scheme, incremental
+  reindex, and prune, which rely on `source` metadata). Collections it creates get neither cosine
+  space nor `anonymized_telemetry=False`.
+- Chonkie `EmbeddingsRefinery`: compatible in principle (`OnnxEmbedder` is a `BaseEmbeddings`, and
+  `refine()` calls the prefix-free `embed_batch`, correct for documents), but it would only relocate
+  the indexer's `embed_documents` call, and it cannot join the chunker's existing pipeline anyway,
+  because the heading breadcrumb is prepended *after* chunking, so the refinery would embed
+  breadcrumb-less text. The explicit embed call in the indexer stays.
+- LLM/API-dependent enrichment from the RAG-techniques survey: HyDE/HyPE, question-generation
+  augmentation, query rewriting/step-back/decomposition, contextual compression, LLM-generated chunk
+  headers, and reranker-API segment extraction. All require an LLM or hosted API, both banned here.
+
+## Resolved
+
+- One root per index: named collections now hold one root each (`index --collection NAME`, default
+  `microrag`); `query` merges results across collections by cosine distance and `--collection`
+  narrows it. Roots are recorded per collection in `roots.json` (the legacy `root.txt` marker is
+  still honored for the default collection).
+- Deleted files lingering in the index: pruning now runs by default on every `index` (opt out with
+  `--no-prune`); the mistyped-path danger that motivated opt-in is covered by the root pin and the
+  empty-walk guard. Plain `query` output now emits absolute paths, so results pipe straight into
+  `cat`/`xargs` regardless of which root they came from.
+- Image alt text not indexed: alt texts are now chunked as their own sections under the heading in
+  effect at their position (filename-fallback aliases are skipped as noise).
+- Root collision and `--prune` ambiguity: the index is now pinned to the first root it was built
+  from; `index` refuses a different root. (Since superseded by named collections, one root each; see
+  above.)
+- Chunks before the first heading carried no document context: every breadcrumb now starts with the
+  filename stem (skipped when the top-level heading already matches it), the LLM-free version of
+  "contextual chunk headers".
+- Stale chunks from edited files: re-indexing now deletes a source's chunks whose IDs are not in the
+  new set; deleted files are handled by `index --prune`.
+- `#` comments in fenced code blocks misread as headings: fixed by switching chunking to chonkie
+  (MarkdownChef separates code from prose).
+- Oversized single paragraphs never split: chonkie's RecursiveChunker splits them to size.
+- cwd-relative data directories: everything now lives under `MICRORAG_HOME` (default `~/.microrag`).
+- AGENTS.md placeholders and rules copied from another project: filled in / replaced.
+- Shell tab completion: added via argcomplete.
+- `microrag query -` (stdin): added.

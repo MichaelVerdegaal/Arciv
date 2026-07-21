@@ -25,7 +25,17 @@ dev = ["pytest>=8.0.0", "ruff>=0.5.0"]
 microrag = "microrag.cli:main"
 
 [tool.ruff.lint]
-extend-select = ["I", "B", "UP"]
+# ANN: type hints required. D: Google docstring style (presence is the
+# author's call, so D1xx stays off). PTH: pathlib over os. PLC0415: no
+# lazy imports inside functions. UP: builtin generics over typing.List.
+extend-select = ["I", "B", "UP", "PTH", "ANN", "D", "PLC0415"]
+ignore = ["D1"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN", "D", "PLC0415"]
 
 [build-system]
 requires = ["hatchling"]
