@@ -7,24 +7,15 @@ This document is the source of truth for any coding agent working on this projec
 document and an agent's own judgement conflict, this document wins. When something is not covered
 here, ask before deciding.
 
-## Hard constraints (never violate)
 
-- No network calls at runtime. The only permitted network access is the one-time download of model
-  files from Hugging Face, performed by an explicit `download` command.
-- No embedding APIs, no LLM APIs, no telemetry. Chroma's anonymized telemetry must be disabled
-  (`anonymized_telemetry=False` in client settings).
-- No `torch`, no `sentence-transformers`, no CUDA/GPU dependencies. Inference runs on `onnxruntime`
-  with `CPUExecutionProvider` only.
-- Dependencies are limited to the whitelist in `pyproject.toml`. Adding anything else requires
-  explicit approval from the project owner first.
 
 ## Locked technical decisions
 
 These are decided. Do not revisit, "improve", or abstract over them.
 
-- Vector store: ChromaDB via `PersistentClient`, cosine space (`{"hnsw:space": "cosine"}`).
-  Named collections, one per indexed root (default collection `microrag`); each collection is
-  pinned to the first root it was built from, recorded in `roots.json` inside the DB dir.
+- Vector store: ChromaDB via `PersistentClient`, cosine space (`{"hnsw:space": "cosine"}`). Named
+  collections, one per indexed root (default collection `microrag`); each collection is pinned to
+  the first root it was built from, recorded in `roots.json` inside the DB dir.
 - Embedding model: `MongoDB/mdbr-leaf-ir`, the fp32 ONNX export from the repo's `onnx/` folder.
   BERT-style, 23M parameters, 768-dim output, 512-token context.
 - Embeddings are computed by our own code and passed to Chroma explicitly via the `embeddings=`
@@ -35,9 +26,9 @@ These are decided. Do not revisit, "improve", or abstract over them.
 - Query prefix (exact string, defined once as a constant):
   `"Represent this sentence for searching relevant passages: "`. Applied to queries only, never to
   documents.
-- Chunk IDs: `sha256(f"{relative_path}:{chunk_index}:{chunk_text}")` hex digest. Combined with
-  the indexer's ID diff against the store, re-indexing only embeds chunks whose IDs are new —
-  unchanged content costs no inference.
+- Chunk IDs: `sha256(f"{relative_path}:{chunk_index}:{chunk_text}")` hex digest. Combined with the
+  indexer's ID diff against the store, re-indexing only embeds chunks whose IDs are new — unchanged
+  content costs no inference.
 - Retrieval only in v1. No generation step. "RAG" without the G until the retrieval half is proven;
   local generation is a separate decision with its own constraints.
 
@@ -57,43 +48,15 @@ evals/              # retrieval-quality suite (dev tool, not shipped)
 ```
 
 Module boundaries: `embedder` knows nothing about Chroma. `store` knows nothing about ONNX or
-tokenizers. `chunker` is pure functions over strings. `collections` owns the roots marker and
-name rules. `cli` is the only place these are wired together. If an import crosses these
-boundaries, it's wrong. cli.py sits above the ~300-line signal (~445 lines after the
-multi-collection feature); owner reviewed and approved the size on 2026-07-19 — recheck only if
-it grows further.
+tokenizers. `chunker` is pure functions over strings. `collections` owns the roots marker and name
+rules. `cli` is the only place these are wired together. If an import crosses these boundaries, it's
+wrong. cli.py sits above the ~300-line signal (~445 lines after the multi-collection feature); owner
+reviewed and approved the size on 2026-07-19 — recheck only if it grows further.
 
 ## Status
 
-All v1 phases are implemented and working:
-
-- Phase 0 — skeleton, `pyproject.toml`, download command, `OnnxEmbedder` with shape/norm/prefix
-  tests.
-- Phase 1 — chunking (heading-aware, breadcrumb, overlap), indexing with incremental reindex and
-  prune-by-default for deleted files (`--no-prune` opts out).
-- Phase 2 — query CLI with JSON output, stdin query, status introspection.
-- Multi-source: named collections (`--collection`), one per root; `query` merges results across
-  collections by cosine distance and emits absolute paths in plain output.
-- Retrieval evaluation suite in `evals/` (fixture corpus, paraphrase gold queries, hit@k/MRR
-  runner): `uv run python -m evals.run`.
-
-The project is a `uv` tool: installable via `uv tool install .` (or a git URL) and callable as
-`microrag` from anywhere with no venv activation.
 
 ## Rules for coding agents
-
-Code standards:
-
-- Type hint all function parameters and return types; builtin generics (`list`, `dict`), not
-  `typing.List`.
-- Google-style docstrings on public functions; no docstrings or comments on trivial code.
-- `pathlib` everywhere; no hardcoded paths, no `os.path`.
-- Specific exceptions with context; no broad `try/except` that swallows errors. Add error handling
-  only where failure can actually occur (file IO, model load, malformed markdown).
-- Regex patterns as module-level constants with the `_RE` suffix.
-- Relative imports within the package; anything imported in `__init__.py` goes in `__all__`.
-- No lazy imports inside functions. No `*args`/`**kwargs` without a specific need.
-
 Design discipline:
 
 - No abstract base classes, no factories, no dependency injection, no `VectorStoreInterface` "in
@@ -110,8 +73,7 @@ decisions" section, changing the chunking algorithm (tuning the constants is fin
 ID scheme.
 
 ## Open questions (intentionally unresolved)
-
-- Chunk size and overlap tuning — decide empirically; `evals/` provides the measurement
-  (run it before and after a constants change).
+- Chunk size and overlap tuning — decide empirically; `evals/` provides the measurement (run it
+  before and after a constants change).
 - Whether asymmetric mode buys enough recall to justify a second model — measure with a small set of
   queries against the existing index.

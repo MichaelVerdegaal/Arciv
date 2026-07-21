@@ -6,40 +6,42 @@ See [README.md](README.md) for an overview of the project.
 See [SETUP.md](SETUP.md) for setup instructions.
 
 ## Long term
-See [PLAN.md](PLAN.md) for scope rules and long-term plans, and [FOLLOWUPS.md](FOLLOWUPS.md)
-for known limitations.
+See [PLAN.md](PLAN.md) for scope rules and long-term plans, and [FOLLOWUPS.md](FOLLOWUPS.md) for
+known limitations.
 
 ### Architecture
-Local semantic search over markdown notes: `index` walks a directory of `*.md` files, chunks
-them (chonkie-based, heading-aware), embeds each chunk with a local ONNX model (CPU only), and
-upserts into a persistent ChromaDB collection; `query` embeds the query text (with a model-specific
-prefix) and returns the nearest chunks. Everything lives under `MICRORAG_HOME` (default
-`~/.microrag`): the downloaded model in `model/`, the Chroma DB in `db/`.
+Local semantic search over markdown notes: `index` walks a directory of `*.md` files, chunks them
+(chonkie-based, heading-aware), embeds each chunk with a local ONNX model (CPU only), and upserts
+into a persistent ChromaDB collection; `query` embeds the query text (with a model-specific prefix)
+and returns the nearest chunks. Everything lives under `MICRORAG_HOME` (default `~/.microrag`): the
+downloaded model in `model/`, the Chroma DB in `db/`.
 
-Module boundaries (see PLAN.md): `embedder` knows nothing about Chroma, `store` knows nothing
-about ONNX or tokenizers, `chunker` is pure functions over strings, `cli` is the only place they
-are wired together. Chunk IDs are `sha256(relative_path:index:chunk_text)`; the indexer diffs
-them against the store, so already-indexed chunks are never re-embedded and unchanged files cost
-no inference.
+Module boundaries (see PLAN.md): `embedder` knows nothing about Chroma, `store` knows nothing about
+ONNX or tokenizers, `chunker` is pure functions over strings, `cli` is the only place they are wired
+together. Chunk IDs are `sha256(relative_path:index:chunk_text)`; the indexer diffs them against the
+store, so already-indexed chunks are never re-embedded and unchanged files cost no inference.
 
 ### Key Libraries
 - `chromadb`: persistent vector store, one cosine collection, telemetry disabled.
 - `onnxruntime` + `tokenizers`: CPU inference for the `MongoDB/mdbr-leaf-ir` embedding model.
-- `chonkie`: markdown parsing (code fences/tables separated from prose), size-based chunking via
-  a `Pipeline` (recursive chunker + overlap refinery), `FileFetcher` for the markdown file walk,
-  and the `BaseEmbeddings` interface that `OnnxEmbedder` implements.
+- `chonkie`: markdown parsing (code fences/tables separated from prose), size-based chunking via a
+  `Pipeline` (recursive chunker + overlap refinery), `FileFetcher` for the markdown file walk, and
+  the `BaseEmbeddings` interface that `OnnxEmbedder` implements.
 - `huggingface_hub`: one-time model download (the only networked code path).
 - `numpy`: embedding arrays.
 - `argcomplete`: shell tab completion for the CLI.
 
-## Context
-This is a solo project; no other developers read or maintain this code. That means:
+## Hard constraints (never violate)
 
-- No one will explain what "clever" code does when you've forgotten. Write for the version of
-  yourself 6 months from now.
-- No PR reviews catch mistakes. Lean on type hints, explicit naming, and logging to compensate.
-- Refactoring is cheap (no coordination cost), but debugging is expensive (no one to ask).
-
+- No network calls at runtime. The only permitted network access is the one-time download of model
+  files from Hugging Face, performed by an explicit `download` command.
+- No embedding APIs, no LLM APIs, no telemetry. Chroma's anonymized telemetry must be disabled
+  (`anonymized_telemetry=False` in client settings).
+- No `torch`, no `sentence-transformers`, no CUDA/GPU dependencies. Inference runs on `onnxruntime`
+  with `CPUExecutionProvider` only.
+- Dependencies are limited to the whitelist in `pyproject.toml`. Adding anything else requires
+  explicit approval from the project owner first.
+          
 ## Code Standards
 ALWAYS:
 - Type hint all function parameters and return types. Prefer builtin types (`list`, `dict`) over
