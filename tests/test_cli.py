@@ -121,6 +121,7 @@ def test_status_plain_output_is_tab_separated(
     assert main(["status"]) == EX_OK
     out = capsys.readouterr().out
     assert "model_present\tfalse" in out
+    assert "collections_count\t0" in out
     assert "chunks\t0" in out
 
 
@@ -151,6 +152,7 @@ def test_status_json_output(empty_cwd: Path, capsys: pytest.CaptureFixture) -> N
     obj = json.loads(capsys.readouterr().out)
     assert obj["model_present"] is False
     assert obj["chunks"] == 0
+    assert obj["collections_count"] == 0
 
 
 def test_global_flags_work_before_and_after_subcommand(
@@ -266,6 +268,38 @@ def test_status_reports_collections_and_roots(
     assert [c["name"] for c in obj["collections"]] == ["microrag"]
     assert obj["collections"][0]["root"] == str(notes.resolve())
     assert obj["collections"][0]["chunks"] == obj["chunks"] > 0
+    assert obj["collections_count"] == 1
+
+
+def test_collections_command_lists_name_path_files_chunks(
+    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+) -> None:
+    # No index yet: an empty listing, and a next-step hint on stderr.
+    assert main(["collections", "--json"]) == EX_OK
+    assert capsys.readouterr().out == ""
+
+    notes = empty_cwd / "notes"
+    notes.mkdir()
+    (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
+    (notes / "b.md").write_text("# B\n\nbeta\n", encoding="utf-8")
+    assert main(["index", str(notes)]) == EX_OK
+    capsys.readouterr()
+
+    # JSON: one record per collection with name, path, files, chunks.
+    assert main(["collections", "--json"]) == EX_OK
+    record = json.loads(capsys.readouterr().out.splitlines()[0])
+    assert record["name"] == "microrag"
+    assert record["path"] == str(notes.resolve())
+    assert record["files"] == 2
+    assert record["chunks"] > 0
+
+    # Plain: tab-separated name, path, files, chunks.
+    assert main(["collections"]) == EX_OK
+    line = capsys.readouterr().out.splitlines()[0]
+    fields = line.split("\t")
+    assert fields[0] == "microrag"
+    assert fields[1] == str(notes.resolve())
+    assert fields[2] == "2"
 
 
 def test_two_roots_index_into_separate_collections(
@@ -306,6 +340,24 @@ def test_two_roots_index_into_separate_collections(
     result = json.loads(capsys.readouterr().out.splitlines()[0])
     assert result["collection"] == "blog"
     assert result["path"] == str(blog.resolve() / "a.md")
+
+
+def test_query_verbose_shows_heading_once_above_body(
+    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+) -> None:
+    notes = empty_cwd / "notes"
+    notes.mkdir()
+    (notes / "doc.md").write_text("# Heading\n\nbodytext\n", encoding="utf-8")
+    assert main(["index", str(notes)]) == EX_OK
+    capsys.readouterr()
+
+    assert main(["query", "anything", "-v"]) == EX_OK
+    out = capsys.readouterr().out
+    # The breadcrumb shows once, in the heading= line above the body — the
+    # chunker prepends it to the chunk text, so the body must not repeat it.
+    assert "heading=doc > Heading" in out
+    assert "  | doc > Heading" not in out
+    assert "  | bodytext" in out
 
 
 def test_query_rejects_non_positive_limit(

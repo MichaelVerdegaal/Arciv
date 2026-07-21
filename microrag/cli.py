@@ -393,7 +393,9 @@ def query(
             emit(f"    source={meta['source']}")
             emit(f"    heading={meta['heading']}")
             emit("")
-            for line in doc.splitlines():
+            # Chunks are stored with their heading breadcrumb prepended to the
+            # text; drop it from the body so the heading shows once, above.
+            for line in _strip_breadcrumb(doc, meta["heading"]).splitlines():
                 emit(f"  | {line}")
     else:
         # One full path per record, best match first: pipeable into xargs/cat.
@@ -436,6 +438,7 @@ def status(
         "model_present": model_present,
         "db_dir": str(DEFAULT_DB_DIR.resolve()),
         "collections": collections,
+        "collections_count": len(collections),
         "chunks": sum(c["chunks"] for c in collections),
     }
     if opts.json:
@@ -454,12 +457,61 @@ def status(
         logger.warning("Model not downloaded yet. Run: microrag download")
 
 
+@app.command()
+def collections(
+    ctx: typer.Context,
+    verbose: int = _opt_verbose(),
+    quiet: bool = _opt_quiet(),
+    json_output: bool = _opt_json(),
+) -> None:
+    """List indexed collections: name, path, files indexed, chunks indexed."""
+    opts = _resolve(ctx, verbose, quiet, json_output)
+
+    roots = read_roots(DEFAULT_DB_DIR)
+    records = []
+    if DEFAULT_DB_DIR.exists():
+        for name in Store.collection_names(DEFAULT_DB_DIR):
+            store = Store(DEFAULT_DB_DIR, name)
+            records.append(
+                {
+                    "name": name,
+                    "path": roots.get(name),
+                    "files": store.file_count(),
+                    "chunks": store.count(),
+                }
+            )
+
+    if opts.json:
+        for record in records:
+            emit_json(record)
+    else:
+        for record in records:
+            path = record["path"] if record["path"] is not None else "-"
+            emit(f"{record['name']}\t{path}\t{record['files']}\t{record['chunks']}")
+        if not records:
+            logger.info("No collections indexed yet. Run: microrag index <path>")
+
+
 # --- Helpers -----------------------------------------------------------------
 
 
 def _confidence(distance: float) -> float:
     """Convert a cosine distance into a 0-100 confidence percentage, clamped at 0."""
     return max(0.0, (1.0 - distance) * 100.0)
+
+
+def _strip_breadcrumb(doc: str, heading: str) -> str:
+    r"""Remove the leading breadcrumb the chunker prepends to each chunk's text.
+
+    The chunker stores every chunk as ``"{breadcrumb}\n\n{body}"`` and mirrors
+    the breadcrumb into the ``heading`` metadata, so the verbose view would
+    otherwise print it twice. Returns the body unchanged when no breadcrumb is
+    present (empty heading, or text that does not start with it).
+    """
+    prefix = f"{heading}\n\n"
+    if heading and doc.startswith(prefix):
+        return doc[len(prefix) :]
+    return doc
 
 
 def _load_embedder() -> OnnxEmbedder | None:

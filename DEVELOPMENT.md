@@ -70,7 +70,8 @@ All data sits under one home directory, so commands work from anywhere:
 - model files: `$MICRORAG_HOME/model/`
 - Chroma database: `$MICRORAG_HOME/db/`
 
-`microrag status` prints the resolved locations and the current chunk count.
+`microrag status` prints the resolved locations, the number of collections, and the current chunk
+count; `microrag collections` lists each collection's name, path, files indexed, and chunks indexed.
 
 ## Shell completion (optional)
 

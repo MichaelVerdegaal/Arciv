@@ -70,6 +70,10 @@ class Store:
         """Return the number of chunks in the collection."""
         return self._collection.count()
 
+    def file_count(self) -> int:
+        """Return the number of distinct source files indexed in the collection."""
+        return len(self.ids_by_source())
+
     def ids_by_source(self) -> dict[str, list[str]]:
         """Return every chunk ID in the collection, grouped by source path.
 

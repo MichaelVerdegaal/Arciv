@@ -11,7 +11,8 @@ microrag download                                                    # one-time 
 microrag index ~/notes                                               # chunk + embed every *.md under the directory
 microrag index ~/blog --collection blog                              # a second source gets its own collection
 microrag query "ONNX runtime throughput"                             # top-5 matches across all collections
-microrag status                                                      # where the model/index live, per-collection counts
+microrag status                                                      # where the model/index live, collection + chunk counts
+microrag collections                                                 # per-collection name, path, files and chunks indexed
 ```
 
 `microrag <command> --help` is the authoritative reference for each command.
@@ -54,8 +55,8 @@ After installation, `microrag` is on your PATH with no venv activation needed.
 - Plain `query` output is one absolute file path per line, best match first, pipeable straight
   into `cat`, `xargs`, or your editor. `query -0`/`--null` separates paths with NUL instead of
   newlines, so paths containing spaces or newlines survive `... | xargs -0`.
-- `--json` emits machine-readable output: JSONL for `query`, a single object for `status` and the
-  `index` summary.
+- `--json` emits machine-readable output: JSONL for `query` and `collections`, a single object for
+  `status` and the `index` summary.
 - `-v` for debug logs (on `query` it also prints each result's full text), `-q` for errors only,
   `--version` for the version. Global flags work before and after the subcommand. Tab completion
   via `microrag --install-completion` (see [DEVELOPMENT.md](DEVELOPMENT.md#shell-completion-optional)).

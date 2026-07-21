@@ -22,7 +22,7 @@ microrag/
     store.py        # thin ChromaDB wrapper (upsert, query, ids_by_source)
     collections.py  # collection name validation + per-collection root pinning
     indexer.py      # walk files -> chunk -> embed -> upsert
-    cli.py          # Typer entrypoints: download, index, query, status
+    cli.py          # Typer entrypoints: download, index, query, status, collections
 tests/
 evals/              # retrieval-quality suite (dev tool, not shipped)
 ```
