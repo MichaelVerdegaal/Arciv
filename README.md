@@ -36,9 +36,21 @@ links can be inspected, filtered, and piped onward:
 
 ```bash
 arciv extract note.md                # print the URLs in a note
+arciv extract a.md b.md              # extract from many notes, deduped across them
 arciv extract note.md | arciv get -  # archive a note's links, not the note
 cat note.md | arciv extract -        # read note text from stdin
 ```
+
+Feed note *paths* (not text) with `-f/--files-from`; each line is a note file to read, and `-` reads
+the paths from stdin, so `extract` chains after any command that lists notes:
+
+```bash
+arciv extract -f notes.txt                  # extract from every note listed in notes.txt
+microrag query ... | arciv extract -f -     # extract from note paths piped in
+arciv extract a.md -f -                     # a.md plus every note path from stdin
+```
+
+Unreadable files are logged to stderr and skipped; the run still prints the URLs it could gather.
 
 The same idea works for webpages that are pure link hubs (a web book's ToC, a link roundup):
 `get --no-save` fetches the page, prints its links (absolute, deduplicated) to stdout, and archives
