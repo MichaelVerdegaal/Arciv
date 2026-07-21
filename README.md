@@ -10,6 +10,7 @@ export HF_TOKEN=hf_...                                              # recommende
 microrag download                                                    # one-time model fetch (the only networked command)
 microrag index ~/notes                                               # chunk + embed every *.md under the directory
 microrag index ~/blog --collection blog                              # a second source gets its own collection
+microrag refresh                                                     # re-index every collection from its recorded root
 microrag query "ONNX runtime throughput"                             # top-5 matches across all collections
 microrag status                                                      # where the model/index live, collection + chunk counts
 microrag collections                                                 # per-collection name, path, files and chunks indexed
@@ -49,14 +50,18 @@ After installation, `microrag` is on your PATH with no venv activation needed.
 - Re-indexing is incremental at the chunk level: chunks already in the store are never re-embedded
   (unchanged files cost no inference at all), edited files replace only their changed chunks, and
   chunks for deleted files are pruned automatically (`--no-prune` to keep them).
+- `microrag refresh` re-indexes collections from the root each was built from, so you never retype the
+  path — it picks up new, edited, and deleted files with the same incremental diff. It refreshes every
+  collection by default; `refresh --collection NAME` narrows it, and a collection whose recorded root is
+  gone is skipped (never wiped) with a warning.
 - Each source root gets its own collection (`index --collection NAME`, default `microrag`), and a
   collection is pinned to the first root it was built from; indexing a different root into it is
   refused. `query` searches all collections merged by score; `query --collection NAME` narrows it.
 - Plain `query` output is one absolute file path per line, best match first, pipeable straight
   into `cat`, `xargs`, or your editor. `query -0`/`--null` separates paths with NUL instead of
   newlines, so paths containing spaces or newlines survive `... | xargs -0`.
-- `--json` emits machine-readable output: JSONL for `query` and `collections`, a single object for
-  `status` and the `index` summary.
+- `--json` emits machine-readable output: JSONL for `query`, `collections`, and the `refresh` summary
+  (one record per collection), a single object for `status` and the `index` summary.
 - `-v` for debug logs (on `query` it also prints each result's full text), `-q` for errors only,
   `--version` for the version. Global flags work before and after the subcommand. Tab completion
   via `microrag --install-completion` (see [DEVELOPMENT.md](DEVELOPMENT.md#shell-completion-optional)).

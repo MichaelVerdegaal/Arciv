@@ -120,6 +120,9 @@ which is why a blanket "handle the followups" did not cover them:
 - Shell tab completion: provided by Typer (`microrag --install-completion` / `--show-completion`).
   Superseded the earlier argcomplete integration when the CLI moved to Typer.
 - `microrag query -` (stdin): added.
+- Re-indexing without retyping the path: `microrag refresh` re-runs the incremental index against each
+  collection's recorded root (`--collection NAME` to narrow, `--no-prune` for parity with `index`).
+  A collection whose recorded root is unrecorded or missing is skipped with a warning, never wiped.
 - CLI framework: migrated from argparse to Typer (owner-approved dependency). Behaviour is preserved
   — same commands, exit codes (sysexits; Click's own parse errors keep 2), stdout/stderr split, and
   global flags working both before and after the subcommand (each command reconciles the callback's

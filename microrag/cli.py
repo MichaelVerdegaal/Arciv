@@ -291,6 +291,103 @@ def index(
 
 
 @app.command()
+def refresh(
+    ctx: typer.Context,
+    collection: str | None = typer.Option(
+        None, "--collection", help="Refresh only this collection (default: all)"
+    ),
+    no_prune: bool = typer.Option(
+        False,
+        "--no-prune",
+        help="Keep chunks whose source file no longer exists under the root",
+    ),
+    verbose: int = _opt_verbose(),
+    quiet: bool = _opt_quiet(),
+    json_output: bool = _opt_json(),
+) -> None:
+    """Re-index collections from their recorded roots, ingesting changed files.
+
+    Each collection remembers the directory it was built from, so refresh
+    re-walks that root and embeds only what changed — no path to retype.
+    Only whole collections are refreshed; the incremental chunk diff means
+    unchanged files cost nothing.
+    """
+    opts = _resolve(ctx, verbose, quiet, json_output)
+
+    if not DEFAULT_DB_DIR.exists():
+        logger.error(
+            f"No index found at {DEFAULT_DB_DIR.resolve()}. Run: microrag index <path>"
+        )
+        raise typer.Exit(EX_NOINPUT)
+
+    names = Store.collection_names(DEFAULT_DB_DIR)
+    if collection is not None:
+        if not COLLECTION_NAME_RE.fullmatch(collection):
+            logger.error(
+                f"Invalid collection name {collection!r}: use 3-512 characters "
+                "[a-zA-Z0-9._-], starting and ending with a letter or digit."
+            )
+            raise typer.Exit(EX_USAGE)
+        if collection not in names:
+            known = ", ".join(names) or "none"
+            logger.error(f"Unknown collection {collection!r} (known: {known}).")
+            raise typer.Exit(EX_USAGE)
+        names = [collection]
+
+    if not names:
+        logger.error("No collections to refresh. Run: microrag index <path>")
+        raise typer.Exit(EX_NOINPUT)
+
+    # A collection can only be refreshed from a recorded root that still exists.
+    # Skip the ones that can't be (never deleting their data), so one broken
+    # root doesn't abort a refresh across the rest.
+    roots = read_roots(DEFAULT_DB_DIR)
+    targets: list[tuple[str, Path]] = []
+    for name in names:
+        root = roots.get(name)
+        if root is None:
+            logger.warning(
+                f"Skipping {name!r}: no recorded root. Re-run "
+                f"'microrag index <path> --collection {name}' to record one."
+            )
+            continue
+        root_path = Path(root)
+        if not root_path.is_dir():
+            logger.warning(f"Skipping {name!r}: recorded root {root} no longer exists.")
+            continue
+        targets.append((name, root_path))
+
+    if not targets:
+        logger.warning("Nothing to refresh.")
+        raise typer.Exit(EX_OK)
+
+    embedder = _load_embedder()
+    if embedder is None:
+        raise typer.Exit(EX_NOINPUT)
+
+    for name, root_path in targets:
+        store = Store(DEFAULT_DB_DIR, name)
+        files, chunks, pruned = index_directory(
+            root_path, embedder, store, prune=not no_prune
+        )
+        if opts.json:
+            emit_json(
+                {
+                    "collection": name,
+                    "root": str(root_path),
+                    "files": files,
+                    "chunks": chunks,
+                    "pruned": pruned,
+                }
+            )
+        else:
+            logger.info(
+                f"Refreshed {name!r} from {root_path}: {files} file(s), "
+                f"{chunks} new chunk(s), pruned {pruned}"
+            )
+
+
+@app.command()
 def query(
     ctx: typer.Context,
     text: str = typer.Argument(..., help='Query text ("-" reads it from stdin)'),

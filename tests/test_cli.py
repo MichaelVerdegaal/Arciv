@@ -444,6 +444,129 @@ def test_legacy_root_marker_still_pins_the_default_collection(
     capsys.readouterr()
 
 
+def test_refresh_ingests_new_files_from_recorded_root(
+    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+) -> None:
+    # Refresh re-walks the recorded root, so a file added after indexing gets
+    # picked up without retyping the path.
+    notes = empty_cwd / "notes"
+    notes.mkdir()
+    (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
+    assert main(["index", str(notes)]) == EX_OK
+    capsys.readouterr()
+
+    (notes / "b.md").write_text("# B\n\nbeta\n", encoding="utf-8")
+    assert main(["refresh"]) == EX_OK
+    assert capsys.readouterr().out == ""  # plain mode keeps stdout clean
+
+    assert main(["collections", "--json"]) == EX_OK
+    record = json.loads(capsys.readouterr().out.splitlines()[0])
+    assert record["files"] == 2
+
+
+def test_refresh_specific_collection_leaves_others_untouched(
+    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+) -> None:
+    notes = empty_cwd / "notes"
+    notes.mkdir()
+    (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
+    blog = empty_cwd / "blog"
+    blog.mkdir()
+    (blog / "a.md").write_text("# A\n\nblog\n", encoding="utf-8")
+    assert main(["index", str(notes)]) == EX_OK
+    assert main(["index", str(blog), "--collection", "blog"]) == EX_OK
+    capsys.readouterr()
+
+    # Add a file to each root, then refresh only blog.
+    (notes / "b.md").write_text("# B\n\nbeta\n", encoding="utf-8")
+    (blog / "b.md").write_text("# B\n\nblog two\n", encoding="utf-8")
+    assert main(["refresh", "--collection", "blog"]) == EX_OK
+    capsys.readouterr()
+
+    assert main(["collections", "--json"]) == EX_OK
+    by_name = {
+        r["name"]: r for r in map(json.loads, capsys.readouterr().out.splitlines())
+    }
+    assert by_name["blog"]["files"] == 2  # refreshed
+    assert by_name["microrag"]["files"] == 1  # untouched
+
+
+def test_refresh_without_index_names_next_step(
+    empty_cwd: Path, capsys: pytest.CaptureFixture
+) -> None:
+    code = main(["refresh"])
+    captured = capsys.readouterr()
+    assert code == EX_NOINPUT
+    assert captured.out == ""
+    assert "microrag index" in captured.err
+
+
+def test_refresh_unknown_collection_is_usage_error(
+    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+) -> None:
+    notes = empty_cwd / "notes"
+    notes.mkdir()
+    (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
+    assert main(["index", str(notes)]) == EX_OK
+    capsys.readouterr()
+
+    code = main(["refresh", "--collection", "nope"])
+    captured = capsys.readouterr()
+    assert code == EX_USAGE
+    assert captured.out == ""
+    assert "microrag" in captured.err  # lists the known collections
+
+
+def test_refresh_skips_collection_whose_root_is_gone(
+    empty_cwd: Path,
+    fake_embedder: _FakeEmbedder,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    notes = empty_cwd / "notes"
+    notes.mkdir()
+    (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
+    assert main(["index", str(notes)]) == EX_OK
+    capsys.readouterr()
+
+    # The recorded root disappears (moved/deleted); refresh must not crash or
+    # wipe the collection, just skip it with a clear warning.
+    for md in notes.iterdir():
+        md.unlink()
+    notes.rmdir()
+    assert main(["refresh"]) == EX_OK
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "no longer exists" in captured.err
+
+    # The data survived the skip.
+    assert main(["collections", "--json"]) == EX_OK
+    assert json.loads(capsys.readouterr().out.splitlines()[0])["chunks"] > 0
+
+
+def test_refresh_prunes_deleted_files(
+    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+) -> None:
+    notes = empty_cwd / "notes"
+    notes.mkdir()
+    (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
+    (notes / "b.md").write_text("# B\n\nbeta\n", encoding="utf-8")
+    assert main(["index", str(notes)]) == EX_OK
+    capsys.readouterr()
+
+    (notes / "b.md").unlink()
+    # --no-prune keeps the orphaned file's chunks.
+    assert main(["refresh", "--no-prune", "--json"]) == EX_OK
+    record = json.loads(capsys.readouterr().out.splitlines()[0])
+    assert record["pruned"] == 0
+    assert record["files"] == 1
+
+    # A plain refresh prunes them.
+    assert main(["refresh", "--json"]) == EX_OK
+    record = json.loads(capsys.readouterr().out.splitlines()[0])
+    assert record["pruned"] > 0
+
+
 def test_index_directory_keeps_stdout_clean(
     tmp_path: Path, capsys: pytest.CaptureFixture
 ) -> None:

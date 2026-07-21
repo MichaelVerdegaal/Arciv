@@ -22,7 +22,7 @@ microrag/
     store.py        # thin ChromaDB wrapper (upsert, query, ids_by_source)
     collections.py  # collection name validation + per-collection root pinning
     indexer.py      # walk files -> chunk -> embed -> upsert
-    cli.py          # Typer entrypoints: download, index, query, status, collections
+    cli.py          # Typer entrypoints: download, index, refresh, query, status, collections
 tests/
 evals/              # retrieval-quality suite (dev tool, not shipped)
 ```
@@ -59,6 +59,11 @@ Each indexed root gets its own Chroma collection (default `microrag`). A collect
 first root it was built from, recorded in `roots.json` inside the DB directory; indexing a different
 root into it is refused. `query` merges results across all collections by cosine distance, and
 `query --collection NAME` narrows the search.
+
+Because each root is recorded, `refresh` re-runs the incremental index against a collection's recorded
+root without retyping the path — every collection by default, or one with `refresh --collection NAME`.
+A collection whose recorded root is missing (unrecorded, or the directory no longer exists) is skipped
+with a warning rather than failing the run or deleting its data.
 
 ## Key libraries
 
