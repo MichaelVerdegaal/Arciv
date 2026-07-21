@@ -957,6 +957,90 @@ class TestExtract:
             {"url": "https://example.com/other"},
         ]
 
+    def test_variadic_dedupes_across_files(self, runner, data_dir, tmp_path):
+        a = tmp_path / "a.md"
+        a.write_text("see https://example.com/a and https://example.com/x\n")
+        b = tmp_path / "b.md"
+        b.write_text("also https://example.com/b and https://example.com/x\n")
+        result = runner.invoke(cli_module.cli, ["extract", str(a), str(b)])
+        assert result.exit_code == 0
+        assert result.output.splitlines() == [
+            "https://example.com/a",
+            "https://example.com/x",
+            "https://example.com/b",
+        ]
+
+    def test_files_from_reads_paths_file(self, runner, data_dir, tmp_path):
+        a = tmp_path / "a.md"
+        a.write_text("https://example.com/a\n")
+        b = tmp_path / "b.md"
+        b.write_text("https://example.com/b\n")
+        listing = tmp_path / "notes.txt"
+        listing.write_text(f"{a}\n\n{b}\n")
+        result = runner.invoke(cli_module.cli, ["extract", "-f", str(listing)])
+        assert result.exit_code == 0
+        assert result.output.splitlines() == [
+            "https://example.com/a",
+            "https://example.com/b",
+        ]
+
+    def test_files_from_dash_reads_paths_from_stdin(self, runner, data_dir, tmp_path):
+        a = tmp_path / "a.md"
+        a.write_text("https://example.com/a\n")
+        b = tmp_path / "b.md"
+        b.write_text("https://example.com/b\n")
+        result = runner.invoke(
+            cli_module.cli, ["extract", "-f", "-"], input=f"{a}\n{b}\n"
+        )
+        assert result.exit_code == 0
+        assert result.output.splitlines() == [
+            "https://example.com/a",
+            "https://example.com/b",
+        ]
+
+    def test_positional_plus_files_from_dash(self, runner, data_dir, tmp_path):
+        a = tmp_path / "a.md"
+        a.write_text("https://example.com/a\n")
+        b = tmp_path / "b.md"
+        b.write_text("https://example.com/b\n")
+        result = runner.invoke(
+            cli_module.cli, ["extract", str(a), "-f", "-"], input=f"{b}\n"
+        )
+        assert result.exit_code == 0
+        assert result.output.splitlines() == [
+            "https://example.com/a",
+            "https://example.com/b",
+        ]
+
+    def test_stdin_conflict_errors(self, runner, data_dir):
+        result = runner.invoke(
+            cli_module.cli, ["extract", "-", "-f", "-"], input="whatever\n"
+        )
+        assert result.exit_code != 0
+
+    def test_tty_guard_errors(self, runner, data_dir, monkeypatch):
+        import types
+
+        # Replace the module's ``sys`` reference so the runner re-swapping the
+        # real ``sys.stdin`` during invoke does not clobber our isatty stub.
+        fake_stdin = types.SimpleNamespace(isatty=lambda: True, read=lambda: "")
+        fake_sys = types.SimpleNamespace(stdin=fake_stdin)
+        monkeypatch.setattr(cli_module, "sys", fake_sys)
+        result = runner.invoke(cli_module.cli, ["extract", "-"])
+        assert result.exit_code != 0
+        assert "Cannot read from stdin" in result.output
+
+    def test_partial_failure_prints_and_exits_noinput(
+        self, runner, data_dir, tmp_path
+    ):
+        good = tmp_path / "good.md"
+        good.write_text("https://example.com/good\n")
+        missing = tmp_path / "nope.md"
+        result = runner.invoke(cli_module.cli, ["extract", str(good), str(missing)])
+        assert result.exit_code == output.EXIT_NOINPUT
+        assert "https://example.com/good" in result.output.splitlines()
+        assert "Cannot read" in result.stderr
+
 
 class TestGetNoSave:
     def test_prints_links_and_touches_nothing(self, runner, data_dir, monkeypatch):

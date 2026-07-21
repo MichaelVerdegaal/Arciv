@@ -380,47 +380,105 @@ def _resolve_url_targets(url: str) -> list[str]:
     return [line.strip() for line in sys.stdin if line.strip()]
 
 
+def _collect_paths_from(files_from: str) -> list[Path]:
+    """Read newline-delimited note paths from a file, or stdin if "-".
+
+    Args:
+        files_from: A file path, or "-" to read paths from stdin.
+
+    Returns:
+        Paths in file order, blank lines skipped.
+
+    Raises:
+        OSError: If ``files_from`` names a file that cannot be read.
+        UnicodeDecodeError: If that file is not valid UTF-8.
+    """
+    if files_from == "-":
+        lines = sys.stdin.read().splitlines()
+    else:
+        lines = Path(files_from).read_text(encoding="utf-8").splitlines()
+    return [Path(line.rstrip("\r\n")) for line in lines if line.strip()]
+
+
 @cli.command()
 def extract(
-    target: Annotated[
-        str,
-        typer.Argument(
-            help="Note file to extract links from, or '-' to read text from stdin."
+    targets: Annotated[
+        list[str] | None,
+        typer.Argument(help="Note files, or - for text from stdin."),
+    ] = None,
+    files_from: Annotated[
+        str | None,
+        typer.Option(
+            "-f",
+            "--files-from",
+            help="Read note paths from this file, or - for stdin.",
         ),
-    ],
+    ] = None,
 ) -> None:
-    """Print the URLs found in a note file, one per line, archiving nothing.
+    """Print the URLs found in note files, one per line, archiving nothing.
 
     Offline link extraction: the same URL scan the index stage runs, but with
     no database writes and no fetching, so the output composes with pipes.
-    URLs are printed raw (only deduplicated, first occurrence wins); the
-    downstream command applies the rules, e.g.:
+    URLs are printed raw (deduplicated across every source, first occurrence
+    wins); the downstream command applies the rules, e.g.:
 
         arciv extract note.md | grep example.com | arciv get -
 
-    Pass ``-`` to read note text from stdin. With --json, emits JSONL (one
-    ``{"url"}`` object per line).
+    Positional arguments are text sources: each is a note file to read, or
+    ``-`` to read the text as one blob from stdin. ``--files-from FILE`` reads
+    newline-delimited note *paths* (``-`` reads them from stdin), each of which
+    becomes a file source appended after the positionals. Stdin can back at
+    most one source. Unreadable files are logged to stderr and skipped; if any
+    source fails the exit code is ``EXIT_NOINPUT`` (66). With --json, emits
+    JSONL (one ``{"url"}`` object per line).
     """
-    if target == "-":
-        if sys.stdin.isatty():
-            _fail(
-                "Reading text from stdin ('extract -') but stdin is a terminal. "
-                "Pipe text in, e.g.: cat note.md | arciv extract -",
-                code=EXIT_USAGE,
-            )
-        text = sys.stdin.read()
-    else:
-        try:
-            text = read_note(Path(target))
-        except (OSError, UnicodeDecodeError) as e:
-            _fail(f"Cannot read {target}: {e}", code=EXIT_NOINPUT)
+    targets = targets or []
+    if not targets and files_from is None:
+        raise typer.BadParameter("Provide at least one note file, '-', or --files-from.")
+
+    # Stdin is a single stream: at most one source may consume it (rule 1).
+    dash_positionals = targets.count("-")
+    stdin_from_files = files_from == "-"
+    stdin_consumers = dash_positionals + (1 if stdin_from_files else 0)
+    if stdin_consumers > 1:
+        raise typer.BadParameter(
+            "Only one source can read from stdin: '-' as a note and "
+            "'--files-from -' both want it."
+        )
+    if stdin_consumers > 0 and sys.stdin.isatty():
+        raise typer.BadParameter("Cannot read from stdin: no pipe connected")
+
+    # Text sources in order: positionals first, then --files-from entries. A
+    # str "-" marks the stdin blob; a Path marks a file to read (rule 4).
+    sources: list[str | Path] = [
+        "-" if target == "-" else Path(target) for target in targets
+    ]
+    if files_from is not None:
+        sources.extend(_collect_paths_from(files_from))
+
+    all_urls: list[str] = []
+    any_failed = False
+    for source in sources:
+        if source == "-":
+            text = sys.stdin.read()
+        else:
+            try:
+                text = read_note(source)  # type: ignore[arg-type]
+            except (OSError, UnicodeDecodeError) as e:
+                logger.warning(f"Cannot read {source}: {e}")
+                any_failed = True
+                continue
+        all_urls.extend(extract_urls(text))
 
     # Dedupe preserving first-occurrence order, like the index stage does.
-    for url in dict.fromkeys(extract_urls(text)):
+    for url in dict.fromkeys(all_urls):
         if json_output():
             emit_json({"url": url})
         else:
             emit(url)
+
+    if any_failed:
+        raise typer.Exit(EXIT_NOINPUT)
 
 
 def _report_archive(name: str, result: ArchiveResult) -> None:
