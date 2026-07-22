@@ -26,10 +26,11 @@ Each stage has a dedicated CLI command;`arciv get` runs all three in order on a 
 
 ### Search (optional extra)
 Local semantic search lives in `arciv/search/` (engine) and `arciv/cli/search.py` (the `arciv
-search` sub-app), behind the optional `search` extra. Hard rule: nothing in `arciv/search` may be
-imported at `arciv` startup, so `arciv/cli/search.py` keeps light top-level imports and defers
-chromadb/onnxruntime to the command bodies; a plain `arciv` install must keep working (the sub-app
-becomes an install-hint stub). See PLAN.md's "Semantic search" section for the locked decisions and
+search` sub-app), behind the optional `search` extra. Hard rule: nothing that requires the search
+extra's dependencies (chromadb, onnxruntime, chonkie, numpy, huggingface_hub) may be imported at
+`arciv` startup, so `arciv/cli/search.py` defers those to the command bodies; a plain `arciv`
+install must keep working (the sub-app becomes an install-hint stub). `arciv/search/constants.py`
+is dependency-light and is the only `arciv/search` module imported eagerly. See PLAN.md's "Semantic search" section for the locked decisions and
 the storage boundary (Chroma is a derived index, never the store of record).
 
 ### Key Libraries

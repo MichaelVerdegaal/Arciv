@@ -11,7 +11,11 @@ from pathlib import Path
 
 from loguru import logger
 
-from .constants import DEFAULT_COLLECTION, EX_DATAERR
+# The corrupted-marker SystemExit below carries a CLI exit code; output.py is
+# the one home for those (a light, cycle-free import despite the layering).
+from arciv.cli.output import EXIT_DATAERR
+
+from .constants import DEFAULT_COLLECTION
 
 _ROOTS_MARKER = "roots.json"
 _LEGACY_ROOT_MARKER = "root.txt"
@@ -37,7 +41,7 @@ def read_roots(db_dir: Path) -> dict[str, str]:
                 "file, then re-run 'arciv search index <path>' once per collection "
                 "to re-record its root."
             )
-            raise SystemExit(EX_DATAERR) from None
+            raise SystemExit(EXIT_DATAERR) from None
     # Single-collection indexes from before named collections recorded one
     # bare root path; treat it as the default collection's root.
     legacy = db_dir / _LEGACY_ROOT_MARKER

@@ -18,12 +18,12 @@ from typer.testing import CliRunner
 import arciv.cli.cli as cli_module
 import arciv.cli.search as search_module
 from arciv.cli import output
-from arciv.search.constants import (
-    EX_DATAERR,
-    EX_NOINPUT,
-    EX_OK,
-    EX_UNAVAILABLE,
-    EX_USAGE,
+from arciv.cli.output import (
+    EXIT_DATAERR,
+    EXIT_NOINPUT,
+    EXIT_OK,
+    EXIT_UNAVAILABLE,
+    EXIT_USAGE,
 )
 from arciv.search.indexer import index_directory
 
@@ -97,14 +97,14 @@ def _search(runner: CliRunner, *args: str, **kwargs):
 
 def test_help_lists_commands(runner: CliRunner, search_env: Path) -> None:
     result = _search(runner, "--help")
-    assert result.exit_code == EX_OK
+    assert result.exit_code == EXIT_OK
     assert "query" in result.output  # help lists the commands
     assert "index" in result.output
 
 
 def test_index_missing_path(runner: CliRunner, search_env: Path) -> None:
     result = _search(runner, "index", str(search_env / "nope"))
-    assert result.exit_code == EX_NOINPUT
+    assert result.exit_code == EXIT_NOINPUT
     assert result.stdout == ""
     assert "Path does not exist" in result.stderr
 
@@ -115,7 +115,7 @@ def test_index_without_model_names_next_step(
     notes = search_env / "notes"
     notes.mkdir()
     result = _search(runner, "index", str(notes))
-    assert result.exit_code == EX_NOINPUT
+    assert result.exit_code == EXIT_NOINPUT
     assert result.stdout == ""
     assert "arciv search download" in result.stderr
 
@@ -124,7 +124,7 @@ def test_query_without_index_names_next_step(
     runner: CliRunner, search_env: Path
 ) -> None:
     result = _search(runner, "query", "anything")
-    assert result.exit_code == EX_NOINPUT
+    assert result.exit_code == EXIT_NOINPUT
     assert result.stdout == ""
     assert "arciv search index" in result.stderr
 
@@ -134,7 +134,7 @@ def test_query_dash_empty_stdin_is_usage_error(
 ) -> None:
     # "-" reads stdin; empty input is a clean usage error, not a crash.
     result = _search(runner, "query", "-", input="")
-    assert result.exit_code == EX_USAGE
+    assert result.exit_code == EXIT_USAGE
     assert result.stdout == ""
     assert "Empty query text on stdin" in result.stderr
 
@@ -142,7 +142,7 @@ def test_query_dash_empty_stdin_is_usage_error(
 def test_query_dash_reads_stdin(runner: CliRunner, search_env: Path) -> None:
     # No index exists, so it proceeds past stdin handling to the missing-index error.
     result = _search(runner, "query", "-", input="some piped query")
-    assert result.exit_code == EX_NOINPUT
+    assert result.exit_code == EXIT_NOINPUT
     assert "arciv search index" in result.stderr
 
 
@@ -150,7 +150,7 @@ def test_status_plain_output_is_tab_separated(
     runner: CliRunner, search_env: Path
 ) -> None:
     result = _search(runner, "status")
-    assert result.exit_code == EX_OK
+    assert result.exit_code == EXIT_OK
     assert "model_present\tfalse" in result.stdout
     assert "collections_count\t0" in result.stdout
     assert "chunks\t0" in result.stdout
@@ -158,7 +158,7 @@ def test_status_plain_output_is_tab_separated(
 
 def test_status_json_output(runner: CliRunner, search_env: Path) -> None:
     result = _search(runner, "status", "--json")
-    assert result.exit_code == EX_OK
+    assert result.exit_code == EXIT_OK
     obj = json.loads(result.stdout)
     assert obj["model_present"] is False
     assert obj["chunks"] == 0
@@ -171,17 +171,17 @@ def test_global_flags_work_before_and_after_subcommand(
     # --json is a parent-callback flag; it must reach the search command
     # whether written before or after "search status".
     before = runner.invoke(cli_module.cli, ["--json", "search", "status"])
-    assert before.exit_code == EX_OK
+    assert before.exit_code == EXIT_OK
     json.loads(before.stdout)
     after = _search(runner, "status", "--json")
-    assert after.exit_code == EX_OK
+    assert after.exit_code == EXIT_OK
     json.loads(after.stdout)
 
 
 def test_verbose_logs_never_reach_stdout(runner: CliRunner, search_env: Path) -> None:
     # stdout is data only: even at -v, diagnostics stay on stderr.
     result = _search(runner, "status", "-v")
-    assert result.exit_code == EX_OK
+    assert result.exit_code == EXIT_OK
     assert "DEBUG" not in result.stdout
     assert "WARNING" not in result.stdout  # "model not downloaded" hint is stderr
     assert result.stdout.startswith("model_dir\t")
@@ -197,7 +197,7 @@ def test_download_network_failure_is_clean(
     # patch it on the source module.
     monkeypatch.setattr("huggingface_hub.hf_hub_download", _fail)
     result = _search(runner, "download")
-    assert result.exit_code == EX_UNAVAILABLE
+    assert result.exit_code == EXIT_UNAVAILABLE
     assert result.stdout == ""
     assert "Traceback" not in result.stderr
     assert "arciv search download" in result.stderr
@@ -213,16 +213,16 @@ def test_index_refuses_a_second_root(
     second.mkdir()
     (second / "a.md").write_text("# A\n\ncollides\n", encoding="utf-8")
 
-    assert _search(runner, "index", str(first)).exit_code == EX_OK
+    assert _search(runner, "index", str(first)).exit_code == EXIT_OK
 
     result = _search(runner, "index", str(second))
-    assert result.exit_code == EX_USAGE
+    assert result.exit_code == EXIT_USAGE
     assert result.stdout == ""
     assert str(first.resolve()) in result.stderr
     assert "--collection" in result.stderr
 
     # Re-indexing the recorded root still works.
-    assert _search(runner, "index", str(first)).exit_code == EX_OK
+    assert _search(runner, "index", str(first)).exit_code == EXIT_OK
 
 
 def test_index_does_not_pin_root_on_empty_walk(
@@ -234,24 +234,24 @@ def test_index_does_not_pin_root_on_empty_walk(
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
 
-    assert _search(runner, "index", str(empty)).exit_code == EX_OK  # must not pin
-    assert _search(runner, "index", str(notes)).exit_code == EX_OK
+    assert _search(runner, "index", str(empty)).exit_code == EXIT_OK  # must not pin
+    assert _search(runner, "index", str(notes)).exit_code == EXIT_OK
 
 
 def test_status_reports_collections_and_roots(
     runner: CliRunner, search_env: Path, fake_embedder: _FakeEmbedder
 ) -> None:
     empty = _search(runner, "status", "--json")
-    assert empty.exit_code == EX_OK
+    assert empty.exit_code == EXIT_OK
     assert json.loads(empty.stdout)["collections"] == []
 
     notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
-    assert _search(runner, "index", str(notes)).exit_code == EX_OK
+    assert _search(runner, "index", str(notes)).exit_code == EXIT_OK
 
     result = _search(runner, "status", "--json")
-    assert result.exit_code == EX_OK
+    assert result.exit_code == EXIT_OK
     obj = json.loads(result.stdout)
     assert [c["name"] for c in obj["collections"]] == ["microrag"]
     assert obj["collections"][0]["root"] == str(notes.resolve())
@@ -264,18 +264,18 @@ def test_collections_command_lists_name_path_files_chunks(
 ) -> None:
     # No index yet: an empty listing, and a next-step hint on stderr.
     empty = _search(runner, "collections", "--json")
-    assert empty.exit_code == EX_OK
+    assert empty.exit_code == EXIT_OK
     assert empty.stdout == ""
 
     notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
     (notes / "b.md").write_text("# B\n\nbeta\n", encoding="utf-8")
-    assert _search(runner, "index", str(notes)).exit_code == EX_OK
+    assert _search(runner, "index", str(notes)).exit_code == EXIT_OK
 
     # JSON: one record per collection with name, path, files, chunks.
     result = _search(runner, "collections", "--json")
-    assert result.exit_code == EX_OK
+    assert result.exit_code == EXIT_OK
     record = json.loads(result.stdout.splitlines()[0])
     assert record["name"] == "microrag"
     assert record["path"] == str(notes.resolve())
@@ -284,7 +284,7 @@ def test_collections_command_lists_name_path_files_chunks(
 
     # Plain: tab-separated name, path, files, chunks.
     plain = _search(runner, "collections")
-    assert plain.exit_code == EX_OK
+    assert plain.exit_code == EXIT_OK
     fields = plain.stdout.splitlines()[0].split("\t")
     assert fields[0] == "microrag"
     assert fields[1] == str(notes.resolve())
@@ -301,14 +301,14 @@ def test_two_roots_index_into_separate_collections(
     blog.mkdir()
     (blog / "a.md").write_text("# A\n\nblog post\n", encoding="utf-8")
 
-    assert _search(runner, "index", str(notes)).exit_code == EX_OK
+    assert _search(runner, "index", str(notes)).exit_code == EXIT_OK
     assert (
-        _search(runner, "index", str(blog), "--collection", "blog").exit_code == EX_OK
+        _search(runner, "index", str(blog), "--collection", "blog").exit_code == EXIT_OK
     )
 
     # Default query searches all collections and emits absolute paths.
     everything = _search(runner, "query", "anything")
-    assert everything.exit_code == EX_OK
+    assert everything.exit_code == EXIT_OK
     assert set(everything.stdout.splitlines()) == {
         str(notes.resolve() / "a.md"),
         str(blog.resolve() / "a.md"),
@@ -340,10 +340,10 @@ def test_query_verbose_shows_heading_once_above_body(
     notes = search_env / "notes"
     notes.mkdir()
     (notes / "doc.md").write_text("# Heading\n\nbodytext\n", encoding="utf-8")
-    assert _search(runner, "index", str(notes)).exit_code == EX_OK
+    assert _search(runner, "index", str(notes)).exit_code == EXIT_OK
 
     result = _search(runner, "query", "anything", "-v")
-    assert result.exit_code == EX_OK
+    assert result.exit_code == EXIT_OK
     out = result.stdout
     # The breadcrumb shows once, in the heading= line above the body - the
     # chunker prepends it to the chunk text, so the body must not repeat it.
@@ -358,11 +358,11 @@ def test_query_rejects_non_positive_limit(
     notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
-    assert _search(runner, "index", str(notes)).exit_code == EX_OK
+    assert _search(runner, "index", str(notes)).exit_code == EXIT_OK
 
     for limit in ("0", "-3"):
         result = _search(runner, "query", "anything", "-k", limit)
-        assert result.exit_code == EX_USAGE
+        assert result.exit_code == EXIT_USAGE
         assert result.stdout == ""
         assert "--limit" in result.stderr
 
@@ -373,13 +373,13 @@ def test_corrupted_roots_marker_fails_cleanly(
     notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
-    assert _search(runner, "index", str(notes)).exit_code == EX_OK
+    assert _search(runner, "index", str(notes)).exit_code == EXIT_OK
 
     db = search_env / "search-home" / "db"
     (db / "roots.json").write_text('{"microrag": "truncated', encoding="utf-8")
 
     result = _search(runner, "status")
-    assert result.exit_code == EX_DATAERR
+    assert result.exit_code == EXIT_DATAERR
     assert "roots.json" in result.stderr  # names the file to fix or delete
 
 
@@ -389,10 +389,10 @@ def test_query_unknown_collection_is_usage_error(
     notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
-    assert _search(runner, "index", str(notes)).exit_code == EX_OK
+    assert _search(runner, "index", str(notes)).exit_code == EXIT_OK
 
     result = _search(runner, "query", "anything", "--collection", "nope")
-    assert result.exit_code == EX_USAGE
+    assert result.exit_code == EXIT_USAGE
     assert result.stdout == ""
     assert "microrag" in result.stderr  # lists the known collections
 
@@ -403,7 +403,7 @@ def test_index_rejects_invalid_collection_name(
     notes = search_env / "notes"
     notes.mkdir()
     result = _search(runner, "index", str(notes), "--collection", "a")
-    assert result.exit_code == EX_USAGE
+    assert result.exit_code == EXIT_USAGE
     assert result.stdout == ""
 
 
@@ -417,15 +417,15 @@ def test_legacy_root_marker_still_pins_the_default_collection(
     other.mkdir()
     (other / "a.md").write_text("# A\n\nbeta\n", encoding="utf-8")
 
-    assert _search(runner, "index", str(notes)).exit_code == EX_OK
+    assert _search(runner, "index", str(notes)).exit_code == EXIT_OK
 
     # Rewind the marker to the pre-collections format.
     db = search_env / "search-home" / "db"
     (db / "roots.json").unlink()
     (db / "root.txt").write_text(f"{notes.resolve()}\n", encoding="utf-8")
 
-    assert _search(runner, "index", str(other)).exit_code == EX_USAGE  # legacy pins
-    assert _search(runner, "index", str(notes)).exit_code == EX_OK
+    assert _search(runner, "index", str(other)).exit_code == EXIT_USAGE  # legacy pins
+    assert _search(runner, "index", str(notes)).exit_code == EXIT_OK
 
 
 def test_refresh_ingests_new_files_from_recorded_root(
@@ -436,11 +436,11 @@ def test_refresh_ingests_new_files_from_recorded_root(
     notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
-    assert _search(runner, "index", str(notes)).exit_code == EX_OK
+    assert _search(runner, "index", str(notes)).exit_code == EXIT_OK
 
     (notes / "b.md").write_text("# B\n\nbeta\n", encoding="utf-8")
     refreshed = _search(runner, "refresh")
-    assert refreshed.exit_code == EX_OK
+    assert refreshed.exit_code == EXIT_OK
     assert refreshed.stdout == ""  # plain mode keeps stdout clean
 
     result = _search(runner, "collections", "--json")
@@ -457,15 +457,15 @@ def test_refresh_specific_collection_leaves_others_untouched(
     blog = search_env / "blog"
     blog.mkdir()
     (blog / "a.md").write_text("# A\n\nblog\n", encoding="utf-8")
-    assert _search(runner, "index", str(notes)).exit_code == EX_OK
+    assert _search(runner, "index", str(notes)).exit_code == EXIT_OK
     assert (
-        _search(runner, "index", str(blog), "--collection", "blog").exit_code == EX_OK
+        _search(runner, "index", str(blog), "--collection", "blog").exit_code == EXIT_OK
     )
 
     # Add a file to each root, then refresh only blog.
     (notes / "b.md").write_text("# B\n\nbeta\n", encoding="utf-8")
     (blog / "b.md").write_text("# B\n\nblog two\n", encoding="utf-8")
-    assert _search(runner, "refresh", "--collection", "blog").exit_code == EX_OK
+    assert _search(runner, "refresh", "--collection", "blog").exit_code == EXIT_OK
 
     result = _search(runner, "collections", "--json")
     by_name = {r["name"]: r for r in map(json.loads, result.stdout.splitlines())}
@@ -477,7 +477,7 @@ def test_refresh_without_index_names_next_step(
     runner: CliRunner, search_env: Path
 ) -> None:
     result = _search(runner, "refresh")
-    assert result.exit_code == EX_NOINPUT
+    assert result.exit_code == EXIT_NOINPUT
     assert result.stdout == ""
     assert "arciv search index" in result.stderr
 
@@ -488,10 +488,10 @@ def test_refresh_unknown_collection_is_usage_error(
     notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
-    assert _search(runner, "index", str(notes)).exit_code == EX_OK
+    assert _search(runner, "index", str(notes)).exit_code == EXIT_OK
 
     result = _search(runner, "refresh", "--collection", "nope")
-    assert result.exit_code == EX_USAGE
+    assert result.exit_code == EXIT_USAGE
     assert result.stdout == ""
     assert "microrag" in result.stderr  # lists the known collections
 
@@ -502,7 +502,7 @@ def test_refresh_skips_collection_whose_root_is_gone(
     notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
-    assert _search(runner, "index", str(notes)).exit_code == EX_OK
+    assert _search(runner, "index", str(notes)).exit_code == EXIT_OK
 
     # The recorded root disappears (moved/deleted); refresh must not crash or
     # wipe the collection, just skip it with a clear warning.
@@ -510,7 +510,7 @@ def test_refresh_skips_collection_whose_root_is_gone(
         md.unlink()
     notes.rmdir()
     result = _search(runner, "refresh")
-    assert result.exit_code == EX_OK
+    assert result.exit_code == EXIT_OK
     assert result.stdout == ""
     assert "no longer exists" in result.stderr
 
@@ -526,7 +526,7 @@ def test_refresh_prunes_deleted_files(
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
     (notes / "b.md").write_text("# B\n\nbeta\n", encoding="utf-8")
-    assert _search(runner, "index", str(notes)).exit_code == EX_OK
+    assert _search(runner, "index", str(notes)).exit_code == EXIT_OK
 
     (notes / "b.md").unlink()
     # --no-prune keeps the orphaned file's chunks.

@@ -18,8 +18,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from arciv.cli.output import EXIT_NOINPUT, EXIT_OK
 from arciv.cli.search import _load_embedder
-from arciv.search.constants import EX_NOINPUT, EX_OK
 from arciv.search.embedder import OnnxEmbedder
 from arciv.search.indexer import index_directory
 from arciv.search.store import Store
@@ -132,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
 
     embedder = _load_embedder()
     if embedder is None:
-        return EX_NOINPUT
+        return EXIT_NOINPUT
 
     queries = load_queries()
     with tempfile.TemporaryDirectory(prefix="arciv-search-eval-") as tmp:
@@ -141,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
             results = evaluate(CORPUS_DIR, queries, embedder, store)
         except ValueError as exc:
             print(exc, file=sys.stderr)
-            return EX_NOINPUT
+            return EXIT_NOINPUT
 
     metrics = aggregate(results)
     if args.json:
@@ -162,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
                 ensure_ascii=False,
             )
         )
-        return EX_OK
+        return EXIT_OK
 
     for key, value in metrics.items():
         print(f"{key}\t{value}")
@@ -178,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"          expected {', '.join(r.expected)}; got {r.ranked_sources[:3]}"
             )
-    return EX_OK
+    return EXIT_OK
 
 
 if __name__ == "__main__":

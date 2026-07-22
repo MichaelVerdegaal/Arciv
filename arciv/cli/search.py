@@ -25,9 +25,6 @@ from loguru import logger
 from arciv.search.constants import (
     DEFAULT_COLLECTION,
     DEFAULT_DB_DIR,
-    EX_NOINPUT,
-    EX_UNAVAILABLE,
-    EX_USAGE,
     MODEL_DIR,
     MODEL_ID,
     ONNX_DATA_FILENAME,
@@ -35,7 +32,15 @@ from arciv.search.constants import (
     TOKENIZER_FILENAME,
 )
 
-from .output import emit, emit_json, json_output, verbosity
+from .output import (
+    EXIT_NOINPUT,
+    EXIT_UNAVAILABLE,
+    EXIT_USAGE,
+    emit,
+    emit_json,
+    json_output,
+    verbosity,
+)
 
 if TYPE_CHECKING:
     from arciv.search.embedder import OnnxEmbedder
@@ -72,7 +77,7 @@ def register_search(parent: typer.Typer) -> None:
     ) -> None:
         """Local semantic search over markdown (needs the 'search' extra)."""
         logger.error(f'The "search" command needs the search extra. {_INSTALL_HINT}')
-        raise typer.Exit(EX_USAGE)
+        raise typer.Exit(EXIT_USAGE)
 
     parent.command(
         name="search",
@@ -130,7 +135,7 @@ def download() -> None:
             f"Download from Hugging Face failed: {exc}. "
             "Check your network connection and retry: arciv search download"
         )
-        raise typer.Exit(EX_UNAVAILABLE) from None
+        raise typer.Exit(EXIT_UNAVAILABLE) from None
 
     if json_output():
         emit_json({"model_dir": str(MODEL_DIR.resolve())})
@@ -163,14 +168,14 @@ def index(
 
     if not path.exists():
         logger.error(f"Path does not exist: {path}")
-        raise typer.Exit(EX_NOINPUT)
+        raise typer.Exit(EXIT_NOINPUT)
 
     if not COLLECTION_NAME_RE.fullmatch(collection):
         logger.error(
             f"Invalid collection name {collection!r}: use 3-512 characters "
             "[a-zA-Z0-9._-], starting and ending with a letter or digit."
         )
-        raise typer.Exit(EX_USAGE)
+        raise typer.Exit(EXIT_USAGE)
 
     # Sources are stored root-relative, so mixing roots in one collection can
     # silently collide (and confuses pruning). Pin each collection to the
@@ -184,11 +189,11 @@ def index(
             "new root into its own collection (--collection NAME), or delete "
             f"{DEFAULT_DB_DIR.resolve()} to start over."
         )
-        raise typer.Exit(EX_USAGE)
+        raise typer.Exit(EXIT_USAGE)
 
     embedder = _load_embedder()
     if embedder is None:
-        raise typer.Exit(EX_NOINPUT)
+        raise typer.Exit(EXIT_NOINPUT)
 
     store = Store(DEFAULT_DB_DIR, collection)
     files, chunks, pruned = index_directory(path, embedder, store, prune=not no_prune)
@@ -243,7 +248,7 @@ def refresh(
             f"No index found at {DEFAULT_DB_DIR.resolve()}. "
             "Run: arciv search index <path>"
         )
-        raise typer.Exit(EX_NOINPUT)
+        raise typer.Exit(EXIT_NOINPUT)
 
     names = Store.collection_names(DEFAULT_DB_DIR)
     if collection is not None:
@@ -252,16 +257,16 @@ def refresh(
                 f"Invalid collection name {collection!r}: use 3-512 characters "
                 "[a-zA-Z0-9._-], starting and ending with a letter or digit."
             )
-            raise typer.Exit(EX_USAGE)
+            raise typer.Exit(EXIT_USAGE)
         if collection not in names:
             known = ", ".join(names) or "none"
             logger.error(f"Unknown collection {collection!r} (known: {known}).")
-            raise typer.Exit(EX_USAGE)
+            raise typer.Exit(EXIT_USAGE)
         names = [collection]
 
     if not names:
         logger.error("No collections to refresh. Run: arciv search index <path>")
-        raise typer.Exit(EX_NOINPUT)
+        raise typer.Exit(EXIT_NOINPUT)
 
     # A collection can only be refreshed from a recorded root that still exists.
     # Skip the ones that can't be (never deleting their data), so one broken
@@ -288,7 +293,7 @@ def refresh(
 
     embedder = _load_embedder()
     if embedder is None:
-        raise typer.Exit(EX_NOINPUT)
+        raise typer.Exit(EXIT_NOINPUT)
 
     for name, root_path in targets:
         store = Store(DEFAULT_DB_DIR, name)
@@ -347,40 +352,40 @@ def query(
                 'Query text "-" reads from stdin, but stdin is a terminal. '
                 "Example: grep -h TODO notes.md | arciv search query -"
             )
-            raise typer.Exit(EX_USAGE)
+            raise typer.Exit(EXIT_USAGE)
         text = sys.stdin.read().strip()
         if not text:
             logger.error("Empty query text on stdin.")
-            raise typer.Exit(EX_USAGE)
+            raise typer.Exit(EXIT_USAGE)
 
     if limit < 1:
         logger.error(f"-k/--limit must be at least 1, got {limit}.")
-        raise typer.Exit(EX_USAGE)
+        raise typer.Exit(EXIT_USAGE)
 
     if not DEFAULT_DB_DIR.exists():
         logger.error(
             f"No index found at {DEFAULT_DB_DIR.resolve()}. "
             "Run: arciv search index <path>"
         )
-        raise typer.Exit(EX_NOINPUT)
+        raise typer.Exit(EXIT_NOINPUT)
 
     names = Store.collection_names(DEFAULT_DB_DIR)
     if collection is not None:
         if collection not in names:
             known = ", ".join(names) or "none"
             logger.error(f"Unknown collection {collection!r} (known: {known}).")
-            raise typer.Exit(EX_USAGE)
+            raise typer.Exit(EXIT_USAGE)
         names = [collection]
 
     embedder = _load_embedder()
     if embedder is None:
-        raise typer.Exit(EX_NOINPUT)
+        raise typer.Exit(EXIT_NOINPUT)
 
     stores = {name: Store(DEFAULT_DB_DIR, name) for name in names}
     counts = {name: store.count() for name, store in stores.items()}
     if sum(counts.values()) == 0:
         logger.error("The index is empty. Run: arciv search index <path>")
-        raise typer.Exit(EX_NOINPUT)
+        raise typer.Exit(EXIT_NOINPUT)
 
     query_embedding = embedder.embed_query(text)
 

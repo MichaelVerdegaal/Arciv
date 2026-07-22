@@ -62,6 +62,6 @@ arciv search download
 ```
 
 The model and index live under `ARCIV_SEARCH_HOME`. It resolves to the Arciv data dir's `search/`
-subfolder by default; if `MICRORAG_HOME` is set or a `~/.microrag` already exists (from the
-standalone MicroRag tool), that is reused so nothing re-downloads or re-indexes. `arciv search
-status` prints the resolved paths.
+subfolder by default; an existing `~/.microrag` (from the standalone MicroRag tool) is reused so
+nothing re-downloads or re-indexes. `ARCIV_SEARCH_HOME` is the only env override (the old
+`MICRORAG_HOME` variable is not read). `arciv search status` prints the resolved paths.

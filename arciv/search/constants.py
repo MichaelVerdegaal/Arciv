@@ -34,9 +34,4 @@ EMBEDDING_DIM: int = 768
 DEFAULT_COLLECTION: str = "microrag"
 VECTOR_SPACE: dict[str, str] = {"hnsw:space": "cosine"}
 
-# Exit codes, following sysexits.h.
-EX_OK: int = 0
-EX_USAGE: int = 64  # command line usage error
-EX_DATAERR: int = 65  # input data was incorrect (e.g. a corrupted marker file)
-EX_NOINPUT: int = 66  # an input file did not exist
-EX_UNAVAILABLE: int = 69  # a required service is unavailable
+# Exit codes live with the rest of the CLI's in arciv.cli.output.

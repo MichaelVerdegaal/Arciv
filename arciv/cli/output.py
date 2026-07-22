@@ -15,13 +15,15 @@ import json
 import sys
 from typing import Any
 
-import typer
-
-# Exit codes. The 64/66 values follow the BSD sysexits convention so
-# scripts can branch on them. (Typer's own argument-parsing errors still
-# exit 2, the click/Unix convention for a usage error.)
+# Exit codes, following the BSD sysexits convention so scripts can branch
+# on them. One home for the whole CLI, search sub-app included. (Typer's
+# own argument-parsing errors still exit 2, the click/Unix convention for
+# a usage error.)
+EXIT_OK = 0
 EXIT_USAGE = 64  # bad/missing argument combination
-EXIT_NOINPUT = 66  # unknown URL or missing source
+EXIT_DATAERR = 65  # input data was corrupt (e.g. the search roots marker)
+EXIT_NOINPUT = 66  # unknown URL, missing source, or a missing file/model/index
+EXIT_UNAVAILABLE = 69  # a required service is unavailable (model download failed)
 
 # Whether --json was requested; set once by the CLI callback.
 _json_output = False
@@ -73,8 +75,13 @@ def emit(text: str = "", *, null: bool = False) -> None:
 
 
 def emit_json(obj: Any) -> None:
-    """Write one compact JSON object/array as a line on stdout."""
-    typer.echo(json.dumps(obj, ensure_ascii=False))
+    """Write one compact JSON object/array as a line on stdout.
+
+    Goes through ``emit`` so the line ends in a raw LF on every platform;
+    Windows text-mode stdout would otherwise rewrite it to CRLF and break
+    LF-expecting pipe consumers of ``--json`` output.
+    """
+    emit(json.dumps(obj, ensure_ascii=False))
 
 
 def emit_pipeline_summary(
