@@ -1030,9 +1030,7 @@ class TestExtract:
         assert result.exit_code != 0
         assert "Cannot read from stdin" in result.output
 
-    def test_partial_failure_prints_and_exits_noinput(
-        self, runner, data_dir, tmp_path
-    ):
+    def test_partial_failure_prints_and_exits_noinput(self, runner, data_dir, tmp_path):
         good = tmp_path / "good.md"
         good.write_text("https://example.com/good\n")
         missing = tmp_path / "nope.md"

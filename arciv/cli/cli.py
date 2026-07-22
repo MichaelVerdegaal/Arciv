@@ -462,7 +462,9 @@ def extract(
     """
     targets = targets or []
     if not targets and files_from is None:
-        raise typer.BadParameter("Provide at least one note file, '-', or --files-from.")
+        raise typer.BadParameter(
+            "Provide at least one note file, '-', or --files-from."
+        )
 
     # Stdin is a single stream: at most one source may consume it (rule 1).
     dash_positionals = targets.count("-")
