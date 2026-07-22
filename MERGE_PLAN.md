@@ -17,59 +17,29 @@ makes that one tool.
   `huggingface-hub`, `numpy`, `chonkie`) are only needed for search — exactly the shape of an
   optional extra. Arciv's core dependency list is untouched.
 
-## Open decisions
+## Decisions (locked 2026-07-22)
 
-Each has a recommendation the rest of this plan assumes. Overruling any of them changes the
-plan mechanically, not structurally.
+One name for the feature everywhere: **search**. The subpackage, CLI command, extra, and data
+directory all use it, so nothing needs a mental mapping between "rag", "microrag", and "search".
 
-### D1. Code layout — recommended: `arciv/rag/` subpackage
+- **D1. Code layout**: subpackage. Modules move to `arciv/search/`; the MicroRag CLI becomes
+  `arciv/cli/search.py` (a Typer sub-app). One package identity; mypy/ruff cover it like the rest
+  of Arciv.
+- **D2. CLI surface**: `arciv search query|index|refresh|download|status|collections`. The
+  `microrag` entry point is retired. Without the extra installed, `arciv search` prints a one-line
+  install hint and exits with the usage code.
+- **D3. Git history**: preserved. MicroRag's history is merged in via
+  `git merge --allow-unrelated-histories` after a file-move commit on the MicroRag side.
+- **D4. Data home**: the model + Chroma DB default to `DATA_DIR / "search"` (e.g.
+  `~/.local/share/arciv/search`), overridable with `ARCIV_SEARCH_HOME`. An existing
+  `MICRORAG_HOME` / `~/.microrag` keeps working (see Phase 4) so nothing re-downloads or
+  re-indexes.
+- **D5. Extra name**: `arciv[search]`.
+- **D6. MicroRag repo**: the owner archives it. Its README gets a final note that development
+  moved into Arciv; no cross-repo links in either direction.
 
-Move `chunker.py`, `embedder.py`, `store.py`, `indexer.py`, `collections.py`, `constants.py`
-into `arciv/rag/`; the MicroRag CLI becomes `arciv/cli/search.py` (a Typer sub-app). One package
-identity, and mypy/ruff cover the code like the rest of Arciv.
-
-Alternative: keep a top-level `microrag/` package shipped from the Arciv repo (wheel includes
-both packages). Less churn and preserves `import microrag`, but it's cohabitation, not a merge.
-
-### D2. CLI surface — recommended: `arciv search` sub-app, retire the `microrag` command
-
-`arciv search query|index|refresh|download|status|collections`. When the extra isn't installed,
-`arciv search ...` prints a one-line install hint and exits with the usage code. The pipe idiom
-becomes `arciv search query ... | arciv extract -f -`.
-
-Alternative A: also keep a `microrag` console script pointing at the same code, for existing
-shell habits. Cheap to do, but two names for one tool forever.
-Alternative B: keep only the separate `microrag` command. Weakest integration; not recommended.
-
-### D3. Git history — recommended: preserve it
-
-Bring MicroRag in with its history: in a MicroRag clone, `git mv` files to their new paths on a
-branch; in Arciv, `git remote add microrag ... && git fetch` and `git merge --allow-unrelated-histories`.
-`git blame`/`git log --follow` keep working on the moved files. Cost: one slightly unusual merge
-commit.
-
-Alternative: plain copy in one commit whose message records the source repo and version
-(microrag v0.3.4, commit sha). Cleaner history; the archived MicroRag repo stays the record.
-
-### D4. Search data home — recommended: move under Arciv's data dir, honor the old one
-
-Default the model + Chroma DB to `DATA_DIR / "rag"` (e.g. `~/.local/share/arciv/rag`), overridable
-with `ARCIV_RAG_HOME`. Compatibility: if `MICRORAG_HOME` is set, or `~/.microrag` exists while the
-new location doesn't, use the old location and log a hint once — nothing re-downloads or
-re-indexes.
-
-Alternative: keep `~/.microrag` as-is. Zero migration surface, but search data lives outside
-`arciv db dir` forever.
-
-### D5. Extra name — recommended: `search`
-
-`arciv[search]` matches the user-facing verb (`arciv search`). Alternative: `rag` (matches the
-subpackage name) or `semantic`.
-
-### D6. Fate of the MicroRag repo — recommended: archive after the merge lands
-
-Final release note in its README pointing at Arciv, then GitHub-archive it. Its history is either
-merged into Arciv (D3 recommended) or referenced by the import commit.
+Also settled: dependency bounds use `>=` (the lockfile pins), and auto-indexing the archive into
+search is explicitly not part of this merge (see Non-goals).
 
 ## Implementation phases
 
@@ -77,13 +47,15 @@ Each phase leaves the repo green (`ruff check`, `pytest`, `mypy`).
 
 ### Phase 1 — import the code
 
-1. Bring MicroRag's code in per D3 (history-preserving merge or copy).
+1. Bring MicroRag's code in with history (D3): in a MicroRag clone, `git mv` files to their new
+   paths on a branch; in Arciv, add it as a remote, fetch, and
+   `git merge --allow-unrelated-histories`. `git blame`/`git log --follow` keep working.
 2. Land it at the D1 layout:
-   - `arciv/rag/{__init__,constants,chunker,embedder,store,indexer,collections}.py`
+   - `arciv/search/{__init__,constants,chunker,embedder,store,indexer,collections}.py`
    - `arciv/cli/search.py` (was `microrag/cli.py`)
-   - `tests/rag/` (was `microrag/tests/`; avoids the `test_cli.py` filename collision)
+   - `tests/search/` (was `microrag/tests/`; avoids the `test_cli.py` filename collision)
    - `evals/` (retrieval-quality suite; dev-only, not shipped — stays out of the wheel)
-3. Fix imports (`microrag.` → `arciv.rag.`) and drop `microrag/__main__.py`.
+3. Fix imports (`microrag.` → `arciv.search.`) and drop `microrag/__main__.py`.
 
 ### Phase 2 — packaging
 
@@ -101,21 +73,21 @@ Each phase leaves the repo green (`ruff check`, `pytest`, `mypy`).
    ]
    ```
 
-   MicroRag pins these `==`; Arciv's convention is `>=`. Adopt `>=` and let `uv.lock` do the
-   pinning, unless a known incompatibility argues for keeping a pin.
+   MicroRag pinned these `==`; per the locked decision these become `>=` and `uv.lock` does the
+   pinning.
 2. Merge dev groups (pytest/ruff already shared; keep Arciv's hypothesis, pytest-cov, mypy).
 3. Add the search modules to the mypy overrides list where needed (`chromadb.*`, `chonkie.*`,
    `onnxruntime.*`, `tokenizers.*` ship incomplete or no type info).
 4. Ruff: MicroRag enforces `ANN`, `D` (google), `PTH`, `PLC0415` beyond Arciv's `I/B/UP`.
-   Decide once: adopt the stricter set repo-wide, or scope it to `arciv/rag/**` with a
-   per-file-ignores block. Recommended: scope it, widen later if wanted. Note `PLC0415`
-   (no function-level imports) must be off for the import-guard modules below, and keep
-   MicroRag's `extend-immutable-calls` for `typer.Argument`/`typer.Option`.
+   Scope the stricter set to `arciv/search/**` with a per-file-ignores block; widen repo-wide
+   later if wanted. `PLC0415` (no function-level imports) must be off for the import-guard
+   modules below, and MicroRag's `extend-immutable-calls` for `typer.Argument`/`typer.Option`
+   carries over.
 
 ### Phase 3 — optionality (the load-bearing part)
 
-1. Nothing in `arciv/rag/` may be imported at `arciv` startup. `arciv/cli/cli.py` registers the
-   sub-app through a guard:
+1. Nothing in `arciv/search/` may be imported at `arciv` startup. `arciv/cli/cli.py` registers
+   the sub-app through a guard:
 
    ```python
    # arciv/cli/search.py
@@ -138,33 +110,41 @@ Each phase leaves the repo green (`ruff check`, `pytest`, `mypy`).
 
 ### Phase 4 — data home (D4)
 
-1. `settings.py` gains `RAG_HOME` with the resolution order: `ARCIV_RAG_HOME` →
-   `MICRORAG_HOME` → existing `~/.microrag` (if present) → `DATA_DIR / "rag"`.
-2. `arciv/rag/constants.py` reads paths from settings instead of its own env handling.
+1. `settings.py` gains `SEARCH_HOME` with the resolution order: `ARCIV_SEARCH_HOME` →
+   `MICRORAG_HOME` → existing `~/.microrag` (if present) → `DATA_DIR / "search"`.
+2. `arciv/search/constants.py` reads paths from settings instead of its own env handling.
 3. `arciv db dir` / `arciv status` mention the search home so it's discoverable.
 
 ### Phase 5 — tests, CI, evals
 
-1. `tests/rag/` gets a conftest guard: `pytest.importorskip("chromadb")` (or a marker), so the
+1. `tests/search/` gets a conftest guard: `pytest.importorskip("chromadb")` (or a marker), so the
    suite passes on a core-only environment.
-2. CI runs two jobs: core (`uv sync --no-extra`, full suite minus rag) and full
-   (`uv sync --extra search`, everything). The core job is what proves the extra is truly optional.
+2. CI runs two jobs: core (no extra, full suite minus search) and full
+   (`uv sync --extra search`, everything). The core job is what proves the extra is truly
+   optional.
 3. Port MicroRag's `evals/` runner and keep it a dev tool (not in the wheel, not in CI-required).
 
 ### Phase 6 — docs and wind-down
 
-1. README: add a Search section (install with the extra, the command tour, the new pipe idiom).
+1. README: add a Search section (install with the extra, the command tour, the new pipe idiom
+   `arciv search query ... | arciv extract -f -`).
 2. Fold the relevant parts of MicroRag's ARCHITECTURE.md into Arciv's docs; record the merge and
-   the D1–D6 outcomes in PLAN.md's decision log.
+   the decision outcomes in PLAN.md's decision log.
 3. SETUP.md: extra install instructions, `HF_TOKEN` note for the model download.
-4. MicroRag repo: final README pointing here, then archive (D6).
+4. MicroRag repo: README updated to note development moved into Arciv (no cross-repo links);
+   the owner archives the repo.
 
 ## Non-goals (for this merge)
 
-Deeper integration — e.g. `arciv get` auto-indexing archived markdown into the search index, or
-`arciv search` defaulting to the archive directory — is deliberately out of scope. It's a natural
-phase 2 once the merge is stable, and doing it now would couple the pipeline to the optional extra
-before the seam has settled.
+- **Auto-indexing** — `arciv get` feeding archived markdown into the search index, or
+  `arciv search` defaulting to the archive directory — is deliberately out of scope (owner call).
+  It's a natural phase 2 once the merge is stable, and doing it now would couple the pipeline to
+  the optional extra before the seam has settled.
+- **Chroma as the document store.** Chroma remains a derived index: rebuildable from the archive
+  at any time, never the only copy of anything. The archive's source of truth stays markdown +
+  raw HTML on disk with SQLite tracking state. (Chroma's persistent client does sit on SQLite
+  internally, but it stores text chunks keyed to embeddings — no binary blobs, no joins, no
+  aggregates — so it cannot replace the archive's relational bookkeeping or file storage.)
 
 ## Risks and small print
 
@@ -174,8 +154,7 @@ before the seam has settled.
   (`hatch build` + inspect once).
 - **chromadb import cost**: the canary import in the guard is at sub-app registration; if it
   measurably slows `arciv --help`, switch the guard to `importlib.util.find_spec`.
-- **`refresh` roots**: `roots.json` stores absolute paths; moving the data home per D4's fallback
-  logic doesn't touch it, so refresh keeps working. Only a manual move of the DB dir would — same
-  as today.
-- **Two `test_cli.py` files**: solved by the `tests/rag/` subdirectory; pytest needs no config
+- **`refresh` roots**: `roots.json` stores absolute paths; the D4 fallback logic doesn't touch
+  it, so refresh keeps working. Only a manual move of the DB dir would — same as today.
+- **Two `test_cli.py` files**: solved by the `tests/search/` subdirectory; pytest needs no config
   change since `testpaths = ["tests"]` already covers it.
