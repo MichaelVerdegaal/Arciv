@@ -34,11 +34,41 @@ remain the pipe's job); already-fetched pages are skipped but still contribute l
 crawl resumes on rerun with the database as the checkpoint. Full design notes live in git history,
 per convention.
 
+## Semantic search (shipped as the `search` extra)
+Local semantic search over markdown, merged in from the standalone MicroRag tool. The engine lives
+in `arciv/search/` and the `arciv search` sub-app in `arciv/cli/search.py`, behind the optional
+`search` extra so a plain `arciv` install never pulls chromadb/onnxruntime (the sub-app degrades to
+an install hint when the extra is absent). Retrieval only, no generation; the "G" in RAG is a
+separate decision with its own constraints.
+
+Locked pieces carried over from MicroRag: ChromaDB `PersistentClient`, cosine space, one named
+collection per indexed root pinned in `roots.json`; the `MongoDB/mdbr-leaf-ir` fp32 ONNX embedder on
+CPU with explicit embeddings (no Chroma embedding function, so the query-only prompt prefix stays
+correct); content-addressed chunk IDs for incremental re-index.
+
+Storage boundary: Chroma is a derived index, not a store of record. It holds text chunks keyed to
+embeddings and is rebuildable from the archive at any time; the source of truth stays markdown + raw
+HTML on disk with SQLite tracking pipeline state. Chroma-as-document-store was considered and
+rejected: no blob/image storage, only flat metadata filters (no joins/aggregates for `list
+--domain`, `status`, `prune`), and it would force chromadb into the core dependencies.
+
+Follow-ups, deliberately out of the merge:
+- Auto-indexing: `arciv get` feeding archived markdown into the search index, or `arciv search`
+  defaulting to the archive dir. The natural next step once the seam settles.
+- The default collection is still named `microrag`; renaming it would orphan existing indexes, so it
+  needs a migration decision.
+- `arciv/search` uses Arciv's base ruff (I/B/UP), not MicroRag's stricter ANN/D/PTH/PLC0415 set.
+  Re-enable per-directory if wanted.
+- `arciv db dir` / `arciv status` don't mention the search home (unchanged output contract);
+  `arciv search status` surfaces it instead.
+- MicroRag shipped a LICENSE; Arciv has none. Licensing is the owner's call.
+
 ## Parking lot
 - Image archiving: a branch saves images and inlines markdown links to them, parked because it added
   an obscene amount of code for reading material where the text is the point. If revisited, do it as
   response interception in the same `StealthyFetcher` pass, not a second urllib round-trip.
-- FTS5 / semantic search: only once the search gap is actually felt.
+- FTS5 keyword search over the archive: still open (zero new dependencies, complementary to the
+  semantic search that shipped above). Only once the exact-keyword gap is actually felt.
 - Wayback Machine fallback for paywalled content.
 - Automatic re-scraping of updated pages.
 - `arciv show`: a read-only viewer that renders a page's markdown to a pager or browser, if a viewer

@@ -44,3 +44,24 @@ Optional override, via environment variable or a `.env` file (see [.env.example]
   user data directory (Linux: `~/.local/share/arciv`, Windows: `%LOCALAPPDATA%\arciv`). Set
   `ARCIV_DATA_DIR=data` in `.env` to keep the archive inside the repository when developing from a
   clone.
+
+## Semantic search (optional)
+
+Semantic search ships as the `search` extra (a local Chroma vector store plus an ONNX embedding
+model). It is not part of the core install:
+
+```bash
+uv tool install "arciv[search]"      # or: uv sync --extra search from a clone
+```
+
+Then fetch the embedding model once, the only networked command:
+
+```bash
+export HF_TOKEN=hf_...   # optional: a read-scope token avoids Hugging Face rate limits
+arciv search download
+```
+
+The model and index live under `ARCIV_SEARCH_HOME`. It resolves to the Arciv data dir's `search/`
+subfolder by default; an existing `~/.microrag` (from the standalone MicroRag tool) is reused so
+nothing re-downloads or re-indexes. `ARCIV_SEARCH_HOME` is the only env override (the old
+`MICRORAG_HOME` variable is not read). `arciv search status` prints the resolved paths.

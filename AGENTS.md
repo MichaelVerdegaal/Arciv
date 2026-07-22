@@ -24,6 +24,15 @@ Three stages, no writeback into the notes.
 Each stage has a dedicated CLI command;`arciv get` runs all three in order on a URL, a file
 (`--file`), or a directory (`--dir`).
 
+### Search (optional extra)
+Local semantic search lives in `arciv/search/` (engine) and `arciv/cli/search.py` (the `arciv
+search` sub-app), behind the optional `search` extra. Hard rule: nothing that requires the search
+extra's dependencies (chromadb, onnxruntime, chonkie, numpy, huggingface_hub) may be imported at
+`arciv` startup, so `arciv/cli/search.py` defers those to the command bodies; a plain `arciv`
+install must keep working (the sub-app becomes an install-hint stub). `arciv/search/constants.py`
+is dependency-light and is the only `arciv/search` module imported eagerly. See PLAN.md's "Semantic search" section for the locked decisions and
+the storage boundary (Chroma is a derived index, never the store of record).
+
 ### Key Libraries
 - `scrapling`: unified fetch layer (patchright stealth browser for HTML, curl_cffi for
   PDFs/downloads)

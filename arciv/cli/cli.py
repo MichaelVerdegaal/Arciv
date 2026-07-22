@@ -59,7 +59,9 @@ from .output import (
     emit_pipeline_summary,
     json_output,
     set_json_output,
+    set_verbosity,
 )
+from .search import register_search
 
 
 class GlobalOptionGroup(TyperGroup):
@@ -141,6 +143,9 @@ source_app = typer.Typer(
     invoke_without_command=True,
 )
 cli.add_typer(source_app, name="source")
+# `search` is the optional semantic-search sub-app; it registers as a stub
+# (an install hint) when the `search` extra is not installed. See search.py.
+register_search(cli)
 
 
 # Choices for the global --color option. A Literal gives Typer the same
@@ -249,6 +254,7 @@ def main(
     """
     configure_logger(level=_resolve_level(verbose, quiet), color=color)
     set_json_output(json_out)
+    set_verbosity(verbose)
 
 
 @cli.command()

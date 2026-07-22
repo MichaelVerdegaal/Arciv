@@ -1,6 +1,9 @@
 """Tests for settings helpers: env var parsing degrades gracefully."""
 
-from arciv.settings import _env_int
+import pathlib
+
+import arciv.settings as settings_module
+from arciv.settings import _env_int, _resolve_search_home
 
 
 class TestEnvInt:
@@ -23,3 +26,35 @@ class TestEnvInt:
     def test_negative_falls_back_to_default(self, monkeypatch):
         monkeypatch.setenv("ARCIV_TEST_INT", "-5")
         assert _env_int("ARCIV_TEST_INT", 8) == 8
+
+
+class TestSearchHome:
+    """Resolution order for the optional search extra's data home (D4)."""
+
+    def test_explicit_override_wins(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ARCIV_SEARCH_HOME", str(tmp_path / "custom"))
+        assert _resolve_search_home() == (tmp_path / "custom").resolve()
+
+    def test_legacy_microrag_home_env_is_ignored(self, tmp_path, monkeypatch):
+        # ARCIV_SEARCH_HOME is the only env override: a stale MICRORAG_HOME
+        # export must not silently redirect an already-migrated setup.
+        monkeypatch.delenv("ARCIV_SEARCH_HOME", raising=False)
+        monkeypatch.setenv("MICRORAG_HOME", str(tmp_path / "legacy"))
+        monkeypatch.setattr(settings_module, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: tmp_path))
+        assert _resolve_search_home() == tmp_path / "search"
+
+    def test_defaults_under_data_dir(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("ARCIV_SEARCH_HOME", raising=False)
+        monkeypatch.setattr(settings_module, "DATA_DIR", tmp_path)
+        # No prior ~/.microrag: home() points at an empty temp dir.
+        monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: tmp_path))
+        assert _resolve_search_home() == tmp_path / "search"
+
+    def test_existing_microrag_dir_is_reused(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("ARCIV_SEARCH_HOME", raising=False)
+        monkeypatch.setattr(settings_module, "DATA_DIR", tmp_path / "data")
+        home = tmp_path / "home"
+        (home / ".microrag").mkdir(parents=True)
+        monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: home))
+        assert _resolve_search_home() == (home / ".microrag").resolve()

@@ -29,19 +29,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # mypy reads the types of the runtime deps it follows (typer, loguru,
-    # platformdirs), so it needs the full sync, not the dev-only group the
-    # lint job uses. The browser binary isn't needed for static analysis.
+    # platformdirs, plus numpy/huggingface_hub from the search extra), so it
+    # needs the full sync with the extra, not the dev-only group the lint job
+    # uses. The browser binary isn't needed for static analysis.
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v7
-      - run: uv sync --frozen
+      - run: uv sync --frozen --extra search
       - run: uv run --no-sync mypy
 
-  test:
+  # Core (no search extra): the suite minus tests/search (auto-skipped), on every
+  # Python the project supports. This is what proves `arciv` works, and imports,
+  # without chromadb/onnxruntime installed.
+  test-core:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Every Python the project claims to support (requires-python) gets the
-    # full suite, so a dependency losing wheel support breaks CI, not users
     strategy:
       fail-fast: false
       matrix:
@@ -54,6 +56,19 @@ jobs:
       - run: uv sync --frozen
       # Coverage lives here, not in pyproject addopts, so a plain local
       # `pytest` (single-test runs, debuggers) isn't slowed by instrumentation
+      - run: uv run pytest --cov=arciv --cov-report=term-missing
+
+  # Full (with the search extra): the whole suite including tests/search. Pinned
+  # to 3.12 because the ML wheels (onnxruntime, chromadb) lag the newest Python.
+  test-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen --extra search
       - run: uv run pytest --cov=arciv --cov-report=term-missing
 
   windows-smoke:
