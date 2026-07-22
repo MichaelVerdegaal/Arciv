@@ -1,32 +1,31 @@
-"""Command-line entrypoints for MicroRAG.
+"""The ``arciv search`` sub-app: local semantic search over markdown.
 
-Built on Typer. The output contract is strict: only payload data goes to
-stdout (through emit/emit_json), while logs, progress, warnings, and hints
-go to stderr via loguru. Global flags (-v/-q/--json) work both before and
-after the subcommand; each command reconciles the callback's values with
-its own so `microrag status --json` and `microrag --json status` behave the
-same.
+The engine lives in ``arciv/search``; this module wires it onto the main CLI
+as a Typer sub-app. Its heavy dependencies (chromadb, onnxruntime, the
+embedding model) sit behind the optional ``search`` extra, so the top-level
+imports here stay light and the real work imports them inside the command
+bodies. A plain ``arciv`` install therefore never imports chromadb, and even
+with the extra installed ``arciv list`` pays none of that import cost.
+
+Global options (-v/-q/--color/--json) are handled by the parent callback in
+cli.py, so the commands read ``json_output()``/``verbosity()`` instead of
+declaring their own flags. The output contract matches the rest of Arciv:
+payload data on stdout via emit/emit_json, everything diagnostic on stderr
+via loguru.
 """
 
-import json
+import importlib.util
 import sys
-from dataclasses import dataclass
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import TYPE_CHECKING, Annotated
 
-# httpx is huggingface_hub's own HTTP transport, imported only for its error type.
-import httpx
 import typer
-from huggingface_hub import get_token, hf_hub_download
-from huggingface_hub.errors import EntryNotFoundError, HfHubHTTPError
 from loguru import logger
 
-from .collections import COLLECTION_NAME_RE, read_roots, source_path, write_root
-from .constants import (
+from arciv.search.constants import (
     DEFAULT_COLLECTION,
     DEFAULT_DB_DIR,
     EX_NOINPUT,
-    EX_OK,
     EX_UNAVAILABLE,
     EX_USAGE,
     MODEL_DIR,
@@ -35,148 +34,68 @@ from .constants import (
     ONNX_FILENAME,
     TOKENIZER_FILENAME,
 )
-from .embedder import OnnxEmbedder
-from .indexer import index_directory
-from .store import Store
 
-app = typer.Typer(
-    name="microrag",
-    add_completion=True,
-    context_settings={"help_option_names": ["-h", "--help"]},
-    # Plain Click help/errors, not Rich's bordered panels: deterministic across
-    # terminals (Rich wraps and colorizes based on width/TTY detection) and
-    # keeps help greppable, matching the CLI's plain, pipeable output contract.
-    rich_markup_mode=None,
+from .output import emit, emit_json, json_output, verbosity
+
+if TYPE_CHECKING:
+    from arciv.search.embedder import OnnxEmbedder
+
+
+_INSTALL_HINT = 'Install the search extra with: uv tool install "arciv[search]"'
+
+
+def search_extra_installed() -> bool:
+    """Whether the optional search extra is importable.
+
+    Uses ``find_spec`` rather than importing chromadb, so deciding that
+    ``arciv search`` is only a stub costs nothing on a plain install.
+    """
+    return importlib.util.find_spec("chromadb") is not None
+
+
+def register_search(parent: typer.Typer) -> None:
+    """Mount ``search`` on the parent CLI: the real sub-app, or a stub.
+
+    When the extra is missing the stub still appears in ``arciv --help`` and
+    swallows any arguments (``arciv search query ...``) to print the install
+    hint instead of a confusing unknown-command error.
+    """
+    if search_extra_installed():
+        parent.add_typer(search_app, name="search")
+        return
+
+    def search_unavailable(
+        _args: Annotated[
+            list[str] | None,
+            typer.Argument(help="(the search extra is not installed)"),
+        ] = None,
+    ) -> None:
+        """Local semantic search over markdown (needs the 'search' extra)."""
+        logger.error(f'The "search" command needs the search extra. {_INSTALL_HINT}')
+        raise typer.Exit(EX_USAGE)
+
+    parent.command(
+        name="search",
+        context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    )(search_unavailable)
+
+
+search_app = typer.Typer(
+    name="search",
+    no_args_is_help=True,
     help=(
-        "Local semantic search over markdown files. Results go to stdout; "
+        "Local semantic search over your markdown. Results go to stdout; "
         "logs and progress go to stderr."
     ),
 )
 
 
-# --- Output: the single choke point for everything that reaches stdout -------
-
-
-def emit(line: str) -> None:
-    """Write one newline-terminated line of payload data to stdout.
-
-    Every stdout write goes through emit/emit_json/emit_record; diagnostics,
-    progress, and hints belong on stderr via logging.
-    """
-    print(line)
-
-
-def emit_json(obj: dict) -> None:
-    """Write one JSON object as a single line to stdout."""
-    print(json.dumps(obj, ensure_ascii=False))
-
-
-def emit_record(line: str, *, null: bool) -> None:
-    """Write one record, NUL-terminated with null=True else newline-terminated.
-
-    NUL separators (`find -print0` style) survive paths that contain spaces
-    or newlines, so `microrag query -0 ... | xargs -0` stays correct.
-    """
-    if null:
-        sys.stdout.write(line + "\0")
-    else:
-        emit(line)
-
-
-# --- Global options, shared across the callback and every command ------------
-
-
-@dataclass
-class GlobalOpts:
-    """Reconciled global flags for the running command."""
-
-    verbose: int = 0
-    quiet: bool = False
-    json: bool = False
-
-
-def _opt_verbose() -> int:
-    return typer.Option(
-        0,
-        "-v",
-        "--verbose",
-        count=True,
-        help="Show debug logs (query: also print each result's full text).",
-    )
-
-
-def _opt_quiet() -> bool:
-    return typer.Option(
-        False, "-q", "--quiet", help="Only show errors (wins over --verbose)."
-    )
-
-
-def _opt_json() -> bool:
-    return typer.Option(False, "--json", help="Emit machine-readable output on stdout.")
-
-
-def _resolve(
-    ctx: typer.Context, verbose: int, quiet: bool, json_output: bool
-) -> GlobalOpts:
-    """Merge a command's global flags with the callback's, then set logging.
-
-    Global flags are declared on both the callback (so they parse *before*
-    the subcommand) and each command (so they parse *after*). Verbose counts
-    take the max and the boolean flags OR together, so a flag set in either
-    position wins regardless of order.
-    """
-    base = ctx.obj if isinstance(ctx.obj, GlobalOpts) else GlobalOpts()
-    opts = GlobalOpts(
-        verbose=max(base.verbose, verbose),
-        quiet=base.quiet or quiet,
-        json=base.json or json_output,
-    )
-    _configure_logging(opts.verbose, opts.quiet)
-    return opts
-
-
-def _version_callback(value: bool) -> None:
-    """Print the version and exit; eager so it works without a subcommand."""
-    if value:
-        emit(f"microrag {_version()}")
-        raise typer.Exit(EX_OK)
-
-
-@app.callback(invoke_without_command=True)
-def _root(
-    ctx: typer.Context,
-    version: bool = typer.Option(
-        None,
-        "--version",
-        callback=_version_callback,
-        is_eager=True,
-        help="Show the version and exit.",
-    ),
-    verbose: int = _opt_verbose(),
-    quiet: bool = _opt_quiet(),
-    json_output: bool = _opt_json(),
-) -> None:
-    """Local semantic search over markdown files."""
-    ctx.obj = GlobalOpts(verbose=verbose, quiet=quiet, json=json_output)
-    _configure_logging(verbose, quiet)
-    if ctx.invoked_subcommand is None:
-        # No subcommand is the obvious read-only action: show help, exit 0.
-        emit(ctx.get_help())
-        raise typer.Exit(EX_OK)
-
-
-# --- Commands ----------------------------------------------------------------
-
-
-@app.command()
-def download(
-    ctx: typer.Context,
-    verbose: int = _opt_verbose(),
-    quiet: bool = _opt_quiet(),
-    json_output: bool = _opt_json(),
-) -> None:
+@search_app.command()
+def download() -> None:
     """Download the embedding model (one-time; the only networked command)."""
-    opts = _resolve(ctx, verbose, quiet, json_output)
+    import httpx
+    from huggingface_hub import get_token, hf_hub_download
+    from huggingface_hub.errors import EntryNotFoundError, HfHubHTTPError
 
     if get_token() is None:
         logger.warning(
@@ -209,36 +128,38 @@ def download(
     except (HfHubHTTPError, httpx.HTTPError) as exc:
         logger.error(
             f"Download from Hugging Face failed: {exc}. "
-            "Check your network connection and retry: microrag download"
+            "Check your network connection and retry: arciv search download"
         )
         raise typer.Exit(EX_UNAVAILABLE) from None
 
-    if opts.json:
+    if json_output():
         emit_json({"model_dir": str(MODEL_DIR.resolve())})
     else:
         logger.info(f"Model files saved to {MODEL_DIR.resolve()}")
 
 
-@app.command()
+@search_app.command()
 def index(
-    ctx: typer.Context,
-    path: Path = typer.Argument(..., help="Directory to index"),
-    collection: str = typer.Option(
-        DEFAULT_COLLECTION,
-        "--collection",
-        help=f"Collection to index into (default: {DEFAULT_COLLECTION})",
-    ),
-    no_prune: bool = typer.Option(
-        False,
-        "--no-prune",
-        help="Keep chunks whose source file no longer exists under PATH",
-    ),
-    verbose: int = _opt_verbose(),
-    quiet: bool = _opt_quiet(),
-    json_output: bool = _opt_json(),
+    path: Annotated[Path, typer.Argument(help="Directory to index")],
+    collection: Annotated[
+        str,
+        typer.Option(
+            "--collection",
+            help=f"Collection to index into (default: {DEFAULT_COLLECTION})",
+        ),
+    ] = DEFAULT_COLLECTION,
+    no_prune: Annotated[
+        bool,
+        typer.Option(
+            "--no-prune",
+            help="Keep chunks whose source file no longer exists under PATH",
+        ),
+    ] = False,
 ) -> None:
     """Index a directory of markdown files into a collection."""
-    opts = _resolve(ctx, verbose, quiet, json_output)
+    from arciv.search.collections import COLLECTION_NAME_RE, read_roots, write_root
+    from arciv.search.indexer import index_directory
+    from arciv.search.store import Store
 
     if not path.exists():
         logger.error(f"Path does not exist: {path}")
@@ -274,7 +195,7 @@ def index(
     if files and recorded is None:
         write_root(DEFAULT_DB_DIR, collection, root)
 
-    if opts.json:
+    if json_output():
         emit_json(
             {
                 "collection": collection,
@@ -290,33 +211,37 @@ def index(
         )
 
 
-@app.command()
+@search_app.command()
 def refresh(
-    ctx: typer.Context,
-    collection: str | None = typer.Option(
-        None, "--collection", help="Refresh only this collection (default: all)"
-    ),
-    no_prune: bool = typer.Option(
-        False,
-        "--no-prune",
-        help="Keep chunks whose source file no longer exists under the root",
-    ),
-    verbose: int = _opt_verbose(),
-    quiet: bool = _opt_quiet(),
-    json_output: bool = _opt_json(),
+    collection: Annotated[
+        str | None,
+        typer.Option(
+            "--collection", help="Refresh only this collection (default: all)"
+        ),
+    ] = None,
+    no_prune: Annotated[
+        bool,
+        typer.Option(
+            "--no-prune",
+            help="Keep chunks whose source file no longer exists under the root",
+        ),
+    ] = False,
 ) -> None:
     """Re-index collections from their recorded roots, ingesting changed files.
 
     Each collection remembers the directory it was built from, so refresh
-    re-walks that root and embeds only what changed — no path to retype.
+    re-walks that root and embeds only what changed - no path to retype.
     Only whole collections are refreshed; the incremental chunk diff means
     unchanged files cost nothing.
     """
-    opts = _resolve(ctx, verbose, quiet, json_output)
+    from arciv.search.collections import COLLECTION_NAME_RE, read_roots
+    from arciv.search.indexer import index_directory
+    from arciv.search.store import Store
 
     if not DEFAULT_DB_DIR.exists():
         logger.error(
-            f"No index found at {DEFAULT_DB_DIR.resolve()}. Run: microrag index <path>"
+            f"No index found at {DEFAULT_DB_DIR.resolve()}. "
+            "Run: arciv search index <path>"
         )
         raise typer.Exit(EX_NOINPUT)
 
@@ -335,7 +260,7 @@ def refresh(
         names = [collection]
 
     if not names:
-        logger.error("No collections to refresh. Run: microrag index <path>")
+        logger.error("No collections to refresh. Run: arciv search index <path>")
         raise typer.Exit(EX_NOINPUT)
 
     # A collection can only be refreshed from a recorded root that still exists.
@@ -348,7 +273,7 @@ def refresh(
         if root is None:
             logger.warning(
                 f"Skipping {name!r}: no recorded root. Re-run "
-                f"'microrag index <path> --collection {name}' to record one."
+                f"'arciv search index <path> --collection {name}' to record one."
             )
             continue
         root_path = Path(root)
@@ -359,7 +284,7 @@ def refresh(
 
     if not targets:
         logger.warning("Nothing to refresh.")
-        raise typer.Exit(EX_OK)
+        raise typer.Exit()
 
     embedder = _load_embedder()
     if embedder is None:
@@ -370,7 +295,7 @@ def refresh(
         files, chunks, pruned = index_directory(
             root_path, embedder, store, prune=not no_prune
         )
-        if opts.json:
+        if json_output():
             emit_json(
                 {
                     "collection": name,
@@ -387,34 +312,40 @@ def refresh(
             )
 
 
-@app.command()
+@search_app.command()
 def query(
-    ctx: typer.Context,
-    text: str = typer.Argument(..., help='Query text ("-" reads it from stdin)'),
-    limit: int = typer.Option(
-        5, "-k", "--limit", help="Number of results (default: 5)"
-    ),
-    collection: str | None = typer.Option(
-        None, "--collection", help="Search only this collection (default: all)"
-    ),
-    null: bool = typer.Option(
-        False,
-        "-0",
-        "--null",
-        help="Separate plain-output paths with NUL instead of newline (xargs -0).",
-    ),
-    verbose: int = _opt_verbose(),
-    quiet: bool = _opt_quiet(),
-    json_output: bool = _opt_json(),
+    text: Annotated[str, typer.Argument(help='Query text ("-" reads it from stdin)')],
+    limit: Annotated[
+        int, typer.Option("-k", "--limit", help="Number of results (default: 5)")
+    ] = 5,
+    collection: Annotated[
+        str | None,
+        typer.Option("--collection", help="Search only this collection (default: all)"),
+    ] = None,
+    null: Annotated[
+        bool,
+        typer.Option(
+            "-0",
+            "--null",
+            help="Separate plain-output paths with NUL instead of newline (xargs -0).",
+        ),
+    ] = False,
 ) -> None:
-    """Query the indexed store, best match first (JSONL with --json)."""
-    opts = _resolve(ctx, verbose, quiet, json_output)
+    """Query the indexed store, best match first (JSONL with --json).
+
+    Plain output is one absolute path per line (deduplicated, best match
+    first) so it pipes straight into ``arciv extract -f -``, ``cat``, or an
+    editor. ``-v`` prints ranked results with their text; ``--json`` emits
+    JSONL with every field.
+    """
+    from arciv.search.collections import read_roots, source_path
+    from arciv.search.store import Store
 
     if text == "-":
         if sys.stdin.isatty():
             logger.error(
                 'Query text "-" reads from stdin, but stdin is a terminal. '
-                "Example: grep -h TODO notes.md | microrag query -"
+                "Example: grep -h TODO notes.md | arciv search query -"
             )
             raise typer.Exit(EX_USAGE)
         text = sys.stdin.read().strip()
@@ -428,7 +359,8 @@ def query(
 
     if not DEFAULT_DB_DIR.exists():
         logger.error(
-            f"No index found at {DEFAULT_DB_DIR.resolve()}. Run: microrag index <path>"
+            f"No index found at {DEFAULT_DB_DIR.resolve()}. "
+            "Run: arciv search index <path>"
         )
         raise typer.Exit(EX_NOINPUT)
 
@@ -447,7 +379,7 @@ def query(
     stores = {name: Store(DEFAULT_DB_DIR, name) for name in names}
     counts = {name: store.count() for name, store in stores.items()}
     if sum(counts.values()) == 0:
-        logger.error("The index is empty. Run: microrag index <path>")
+        logger.error("The index is empty. Run: arciv search index <path>")
         raise typer.Exit(EX_NOINPUT)
 
     query_embedding = embedder.embed_query(text)
@@ -469,7 +401,7 @@ def query(
     results = results[:limit]
 
     roots = read_roots(DEFAULT_DB_DIR)
-    if opts.json:
+    if json_output():
         for dist, doc, meta, name in results:
             emit_json(
                 {
@@ -481,15 +413,15 @@ def query(
                     "text": doc,
                 }
             )
-    elif opts.verbose:
+    elif verbosity():
         for rank, (dist, doc, meta, name) in enumerate(results, start=1):
             if rank > 1:
-                emit("")
+                emit()
             emit(f"[{rank}] confidence={_confidence(dist):.1f}%")
             emit(f"    collection={name}")
             emit(f"    source={meta['source']}")
             emit(f"    heading={meta['heading']}")
-            emit("")
+            emit()
             # Chunks are stored with their heading breadcrumb prepended to the
             # text; drop it from the body so the heading shows once, above.
             for line in _strip_breadcrumb(doc, meta["heading"]).splitlines():
@@ -501,18 +433,14 @@ def query(
             path = source_path(meta["source"], roots.get(name))
             if path not in seen:
                 seen.add(path)
-                emit_record(str(path), null=null)
+                emit(str(path), null=null)
 
 
-@app.command()
-def status(
-    ctx: typer.Context,
-    verbose: int = _opt_verbose(),
-    quiet: bool = _opt_quiet(),
-    json_output: bool = _opt_json(),
-) -> None:
+@search_app.command()
+def status() -> None:
     """Show where data lives on disk and how much is indexed, per collection."""
-    opts = _resolve(ctx, verbose, quiet, json_output)
+    from arciv.search.collections import read_roots
+    from arciv.search.store import Store
 
     model_present = (MODEL_DIR / ONNX_FILENAME).exists() and (
         MODEL_DIR / TOKENIZER_FILENAME
@@ -538,7 +466,7 @@ def status(
         "collections_count": len(collections),
         "chunks": sum(c["chunks"] for c in collections),
     }
-    if opts.json:
+    if json_output():
         emit_json(info)
     else:
         for key, value in info.items():
@@ -551,18 +479,14 @@ def status(
             emit(f"{key}\t{rendered}")
 
     if not model_present:
-        logger.warning("Model not downloaded yet. Run: microrag download")
+        logger.warning("Model not downloaded yet. Run: arciv search download")
 
 
-@app.command()
-def collections(
-    ctx: typer.Context,
-    verbose: int = _opt_verbose(),
-    quiet: bool = _opt_quiet(),
-    json_output: bool = _opt_json(),
-) -> None:
+@search_app.command()
+def collections() -> None:
     """List indexed collections: name, path, files indexed, chunks indexed."""
-    opts = _resolve(ctx, verbose, quiet, json_output)
+    from arciv.search.collections import read_roots
+    from arciv.search.store import Store
 
     roots = read_roots(DEFAULT_DB_DIR)
     records = []
@@ -578,7 +502,7 @@ def collections(
                 }
             )
 
-    if opts.json:
+    if json_output():
         for record in records:
             emit_json(record)
     else:
@@ -586,7 +510,7 @@ def collections(
             path = record["path"] if record["path"] is not None else "-"
             emit(f"{record['name']}\t{path}\t{record['files']}\t{record['chunks']}")
         if not records:
-            logger.info("No collections indexed yet. Run: microrag index <path>")
+            logger.info("No collections indexed yet. Run: arciv search index <path>")
 
 
 # --- Helpers -----------------------------------------------------------------
@@ -611,75 +535,16 @@ def _strip_breadcrumb(doc: str, heading: str) -> str:
     return doc
 
 
-def _load_embedder() -> OnnxEmbedder | None:
+def _load_embedder() -> "OnnxEmbedder | None":
     """Load the local ONNX embedder, or log the next step and return None."""
+    from arciv.search.embedder import OnnxEmbedder
+
     model_path = MODEL_DIR / ONNX_FILENAME
     tokenizer_path = MODEL_DIR / TOKENIZER_FILENAME
     if not (model_path.exists() and tokenizer_path.exists()):
         logger.error(
-            f"Embedding model not found in {MODEL_DIR.resolve()}. Run: microrag download"
+            f"Embedding model not found in {MODEL_DIR.resolve()}. "
+            "Run: arciv search download"
         )
         return None
     return OnnxEmbedder(model_path=model_path, tokenizer_path=tokenizer_path)
-
-
-def _configure_logging(verbose: int, quiet: bool) -> None:
-    """Send all diagnostics to stderr; --quiet wins over --verbose."""
-    logger.remove()  # remove default stderr handler
-    if quiet:
-        level = "ERROR"
-    elif verbose >= 1:
-        level = "DEBUG"
-    else:
-        level = "INFO"
-    logger.add(sys.stderr, level=level, format="{level}: {message}")
-
-
-def _version() -> str:
-    """Return the installed package version."""
-    try:
-        return version("microrag")
-    except PackageNotFoundError:
-        return "unknown"
-
-
-def main(argv: list[str] | None = None) -> int:
-    """Run the CLI and return a process exit code.
-
-    Wraps the Typer app so both entry points (`microrag` and `python -m
-    microrag`) and the tests share one path. Running with
-    standalone_mode=False lets us return sysexits codes instead of letting
-    Click sys.exit itself, and lets typer.Exit(code) surface as that code.
-    """
-    # Windows text-mode stdout translates every "\n" into "\r\n", which breaks
-    # LF-expecting pipe consumers (Git Bash, xargs, arciv). Turn the
-    # translation off once at the stream so all payload stays LF-only; a no-op
-    # where "\n" is native. The guard skips replaced stdouts (test captures)
-    # that lack reconfigure.
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(newline="\n")
-
-    try:
-        # prog_name pins the name in help/usage output regardless of argv[0]
-        # (mirrors argparse's prog="microrag"); standalone_mode=False makes
-        # typer.Exit(code) surface as a return value instead of sys.exit.
-        result = app(args=argv, prog_name="microrag", standalone_mode=False)
-    except SystemExit as exc:
-        # Raised by non-CLI modules (e.g. a corrupted roots marker exits with
-        # EX_DATAERR); surface the code as our own exit code.
-        return exc.code if isinstance(exc.code, int) else EX_OK
-    except Exception as exc:
-        # Framework parse/usage errors are click's ClickException — but Typer
-        # vendors its own click, so match structurally (has show()/exit_code)
-        # rather than by import. Real bugs lack these and re-raise.
-        show = getattr(exc, "show", None)
-        code = getattr(exc, "exit_code", None)
-        if callable(show) and isinstance(code, int):
-            show()  # one clean usage line to stderr
-            return code
-        raise
-    return result if isinstance(result, int) else EX_OK
-
-
-if __name__ == "__main__":
-    sys.exit(main())

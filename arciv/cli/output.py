@@ -26,6 +26,11 @@ EXIT_NOINPUT = 66  # unknown URL or missing source
 # Whether --json was requested; set once by the CLI callback.
 _json_output = False
 
+# The -v count, set once by the CLI callback. Logging level is derived from
+# it in configure_logger, but a couple of commands (e.g. `arciv search query`)
+# also vary their stdout richness with it, so it is readable here too.
+_verbosity = 0
+
 
 def set_json_output(enabled: bool) -> None:
     """Record whether commands should emit machine (JSON) output."""
@@ -36,6 +41,17 @@ def set_json_output(enabled: bool) -> None:
 def json_output() -> bool:
     """Whether --json was requested for this run."""
     return _json_output
+
+
+def set_verbosity(level: int) -> None:
+    """Record the -v count for this run."""
+    global _verbosity
+    _verbosity = level
+
+
+def verbosity() -> int:
+    """The -v count requested for this run (0 when unset)."""
+    return _verbosity
 
 
 def emit(text: str = "", *, null: bool = False) -> None:

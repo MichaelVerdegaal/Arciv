@@ -34,7 +34,7 @@ def read_roots(db_dir: Path) -> dict[str, str]:
         except json.JSONDecodeError as exc:
             logger.error(
                 f"Corrupted roots marker at {marker}: {exc}. Fix or delete the "
-                "file, then re-run 'microrag index <path>' once per collection "
+                "file, then re-run 'arciv search index <path>' once per collection "
                 "to re-record its root."
             )
             raise SystemExit(EX_DATAERR) from None

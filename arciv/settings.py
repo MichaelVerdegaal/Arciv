@@ -28,6 +28,34 @@ DATA_DIR = Path(
 SAVED_DIR = DATA_DIR / "saved"
 LOGS_DIR = DATA_DIR / "logs"
 
+
+def _resolve_search_home() -> Path:
+    """Where the optional ``arciv search`` extra keeps its model and index.
+
+    Resolution order, first hit wins:
+
+    1. ``ARCIV_SEARCH_HOME`` (explicit override).
+    2. ``MICRORAG_HOME`` if set, or an existing ``~/.microrag`` when the new
+       location does not exist yet - so a prior MicroRag install keeps working
+       without re-downloading the model or re-indexing.
+    3. ``DATA_DIR/search``, alongside the rest of the archive.
+    """
+    explicit = os.getenv("ARCIV_SEARCH_HOME")
+    if explicit:
+        return Path(explicit).resolve()
+    default = DATA_DIR / "search"
+    legacy_env = os.getenv("MICRORAG_HOME")
+    if legacy_env:
+        return Path(legacy_env).resolve()
+    legacy_default = Path.home() / ".microrag"
+    if legacy_default.is_dir() and not default.exists():
+        return legacy_default.resolve()
+    return default
+
+
+# Home for the search model files and vector index (see _resolve_search_home).
+SEARCH_HOME = _resolve_search_home()
+
 # File constants
 DB_PATH = DATA_DIR / "arciv.db"
 # Optional, hand-edited TOML of URL rules; loaded ahead of the packaged defaults

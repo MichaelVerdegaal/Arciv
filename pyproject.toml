@@ -17,6 +17,20 @@ dependencies = [
     "typer>=0.26.7",              # CLI framework
 ]
 
+[project.optional-dependencies]
+# Local semantic search (the `arciv search` sub-app). Kept out of the core
+# install so a plain `arciv` stays light; `uv tool install "arciv[search]"`
+# pulls these in. loguru/typer are already core, so they are not repeated.
+# Bounds are lower floors (>=); uv.lock pins the exact versions.
+search = [
+    "chromadb>=1.5.9",       # Persistent vector store (cosine, one collection per root)
+    "onnxruntime>=1.27.0",   # CPU inference for the embedding model
+    "tokenizers>=0.23.1",    # Tokenizer for the ONNX model
+    "huggingface-hub>=1.23.0", # One-time model download (the only networked path)
+    "numpy>=2.5.1",          # Embedding arrays
+    "chonkie>=1.7.0",        # Markdown-aware chunking
+]
+
 [project.scripts]
 arciv = "arciv.cli.cli:cli"
 
@@ -46,9 +60,22 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 
 # Fetch/parse/URL libraries ship no type information; treat their imports as
-# Any rather than erroring on the missing stubs.
+# Any rather than erroring on the missing stubs. The search extra's chromadb,
+# chonkie, onnxruntime, and tokenizers are the same (numpy and huggingface_hub
+# ship their own types, so they are not listed — the typecheck job syncs the
+# search extra so those resolve normally).
 [[tool.mypy.overrides]]
-module = ["aiofiles.*", "scrapling.*", "trafilatura.*", "liteparse.*", "tldextract.*"]
+module = [
+    "aiofiles.*",
+    "scrapling.*",
+    "trafilatura.*",
+    "liteparse.*",
+    "tldextract.*",
+    "chromadb.*",
+    "chonkie.*",
+    "onnxruntime.*",
+    "tokenizers.*",
+]
 ignore_missing_imports = true
 
 [tool.ruff.lint]
