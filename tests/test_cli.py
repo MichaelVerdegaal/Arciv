@@ -1030,9 +1030,7 @@ class TestExtract:
         assert result.exit_code != 0
         assert "Cannot read from stdin" in result.output
 
-    def test_partial_failure_prints_and_exits_noinput(
-        self, runner, data_dir, tmp_path
-    ):
+    def test_partial_failure_prints_and_exits_noinput(self, runner, data_dir, tmp_path):
         good = tmp_path / "good.md"
         good.write_text("https://example.com/good\n")
         missing = tmp_path / "nope.md"
@@ -1117,6 +1115,87 @@ class TestGetNoSave:
     def test_refetch_is_usage_error(self, runner, data_dir):
         result = runner.invoke(
             cli_module.cli, ["get", "https://a.com/x", "--no-save", "--refetch"]
+        )
+        assert result.exit_code == output.EXIT_USAGE
+
+
+class TestGetDepth:
+    def test_depth_runs_the_crawl(self, runner, data_dir, monkeypatch):
+        captured = {}
+
+        def fake_crawl_urls(db, urls, depth, refetch=False):
+            captured["args"] = (list(urls), depth, refetch)
+            return ArchiveResult(
+                urls=["https://a.com/1", "https://a.com/2"],
+                fetched=[],
+                parsed=2,
+            )
+
+        monkeypatch.setattr(
+            cli_module, "register_urls", lambda db, urls: ["https://a.com/1"]
+        )
+        monkeypatch.setattr(cli_module, "crawl_urls", fake_crawl_urls)
+        result = runner.invoke(
+            cli_module.cli, ["get", "https://a.com/1", "--depth", "2"]
+        )
+        assert result.exit_code == 0
+        assert captured["args"] == (["https://a.com/1"], 2, False)
+
+    def test_json_summary_covers_all_levels(self, runner, data_dir, monkeypatch):
+        monkeypatch.setattr(
+            cli_module, "register_urls", lambda db, urls: ["https://a.com/1"]
+        )
+        monkeypatch.setattr(
+            cli_module,
+            "crawl_urls",
+            lambda db, urls, depth, refetch=False: ArchiveResult(
+                urls=["https://a.com/1", "https://a.com/2"], fetched=[], parsed=2
+            ),
+        )
+        result = runner.invoke(
+            cli_module.cli, ["--json", "get", "https://a.com/1", "--depth", "1"]
+        )
+        assert result.exit_code == 0
+        obj = json.loads(result.stdout)
+        assert obj == {"indexed": 2, "fetched": 0, "parsed": 2, "failed": 0}
+
+    def test_depth_zero_is_the_plain_get(self, runner, data_dir, monkeypatch):
+        called = {"crawl": False}
+        monkeypatch.setattr(
+            cli_module, "register_urls", lambda db, urls: ["https://a.com/1"]
+        )
+        monkeypatch.setattr(
+            cli_module,
+            "crawl_urls",
+            lambda *a, **k: called.__setitem__("crawl", True),
+        )
+        monkeypatch.setattr(
+            cli_module, "fetch_urls", lambda db, urls, refetch=False: []
+        )
+        monkeypatch.setattr(cli_module, "parse_pending", lambda db: 0)
+        result = runner.invoke(
+            cli_module.cli, ["get", "https://a.com/1", "--depth", "0"]
+        )
+        assert result.exit_code == 0
+        assert called["crawl"] is False
+
+    def test_negative_depth_is_rejected(self, runner, data_dir):
+        result = runner.invoke(
+            cli_module.cli, ["get", "https://a.com/1", "--depth", "-1"]
+        )
+        assert result.exit_code != 0
+
+    def test_depth_with_file_is_usage_error(self, runner, data_dir, tmp_path):
+        note = tmp_path / "note.md"
+        note.write_text("x", encoding="utf-8")
+        result = runner.invoke(
+            cli_module.cli, ["get", "--file", str(note), "--depth", "1"]
+        )
+        assert result.exit_code == output.EXIT_USAGE
+
+    def test_depth_with_no_save_is_usage_error(self, runner, data_dir):
+        result = runner.invoke(
+            cli_module.cli, ["get", "https://a.com/x", "--no-save", "--depth", "1"]
         )
         assert result.exit_code == output.EXIT_USAGE
 

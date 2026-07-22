@@ -33,6 +33,29 @@ Each stage has a dedicated CLI command;`arciv get` runs all three in order on a 
 - `loguru`: logging (one log statement per URL processed)
 - `aiofiles`: async file operations (downloaded files, cache, etc.)
 
+## Development commands
+Same commands CI runs (uv-based; a plain `pytest` works too once the venv is active or on PATH):
+
+```bash
+uv sync --frozen              # install locked dependencies into .venv
+uv run pytest                 # full suite; -k <name> for one test
+uv run ruff check             # lint
+uv run ruff format --check    # formatting
+uv run mypy                   # typecheck (config in pyproject.toml)
+```
+
+When driving the CLI by hand, set `ARCIV_DATA_DIR` to a disposable directory so the run
+doesn't write an archive into the OS user data dir.
+
+## Sandboxed agent sessions
+Remote sessions (Claude Code on the web) run in a network-restricted container. The
+SessionStart hook (`.claude/hooks/session-start.sh`) prepares it automatically: syncs
+dependencies, puts `.venv/bin` on PATH, defaults `ARCIV_DATA_DIR` to `/tmp/arciv-data`, and
+bridges the image's pre-installed Chromium so Scrapling's browser works (the browser CDN and
+most of the open internet are blocked by the egress proxy — `scrapling install` cannot work
+there, and neither can fetching arbitrary sites). To verify fetch/crawl/parse changes for
+real, run the pipeline against a local HTTPS site: see `.claude/skills/verify/SKILL.md`.
+
 ## Context
 This is a solo project; no other developers read or maintain this code. That means:
 

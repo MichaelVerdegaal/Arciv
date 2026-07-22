@@ -64,6 +64,18 @@ arciv get https://book.example/toc --no-save | arciv get -  # archive them all
 The printed links are raw: filtering belongs to grep in the middle of the pipe, and the downstream
 `get -` applies the URL rules anyway.
 
+When the linked pages should be archived wholesale, `--depth` crawls instead of printing: depth 1
+archives a page and the pages it links to, depth 2 also their links, and so on:
+
+```bash
+arciv get https://book.example/toc --depth 1   # archive the ToC and every chapter it links
+arciv get https://docs.example/guide --depth 2 # two hops deep
+```
+
+Each hop applies the URL rules and stays on the seed's registered domain (cross-domain hops are the
+pipe's job, where grep sits in the middle). Already-archived pages are not re-downloaded but their
+links are still followed, so an interrupted crawl picks up where it left off on rerun.
+
 Register directories you index repeatedly as named sources:
 
 ```bash
