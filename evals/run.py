@@ -5,7 +5,7 @@ Indexes the fixture corpus in evals/corpus through the real pipeline
 from evals/queries.json, and scores file-level retrieval: did the file that
 answers the query show up, and how high?
 
-Requires the embedding model (run `microrag download` once). Fully offline.
+Requires the embedding model (run `arciv search download` once). Fully offline.
 
 Usage:
     uv run python -m evals.run [--json]
@@ -18,11 +18,11 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from microrag.cli import _load_embedder
-from microrag.constants import EX_NOINPUT, EX_OK
-from microrag.embedder import OnnxEmbedder
-from microrag.indexer import index_directory
-from microrag.store import Store
+from arciv.cli.search import _load_embedder
+from arciv.search.constants import EX_NOINPUT, EX_OK
+from arciv.search.embedder import OnnxEmbedder
+from arciv.search.indexer import index_directory
+from arciv.search.store import Store
 
 EVALS_DIR = Path(__file__).parent
 CORPUS_DIR = EVALS_DIR / "corpus"
@@ -135,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
         return EX_NOINPUT
 
     queries = load_queries()
-    with tempfile.TemporaryDirectory(prefix="microrag-eval-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="arciv-search-eval-") as tmp:
         store = Store(Path(tmp) / "db", "eval")
         try:
             results = evaluate(CORPUS_DIR, queries, embedder, store)

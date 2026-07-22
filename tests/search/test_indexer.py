@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from microrag.indexer import index_directory
+from arciv.search.indexer import index_directory
 
 
 class _FakeEmbedder:
@@ -135,7 +135,7 @@ def test_flush_window_does_not_change_what_is_stored(
     unbounded = _MemoryStore()
     one_pass = index_directory(tmp_path, _FakeEmbedder(), unbounded)
 
-    monkeypatch.setattr("microrag.indexer.FLUSH_CHUNKS", 2)
+    monkeypatch.setattr("arciv.search.indexer.FLUSH_CHUNKS", 2)
     windowed_store = _MemoryStore()
     windowed_embedder = _FakeEmbedder()
     windowed = index_directory(tmp_path, windowed_embedder, windowed_store)

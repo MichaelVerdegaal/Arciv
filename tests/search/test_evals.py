@@ -9,6 +9,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from arciv.search.constants import MODEL_DIR, ONNX_FILENAME, TOKENIZER_FILENAME
+from arciv.search.embedder import OnnxEmbedder
+from arciv.search.store import Store
 from evals.run import (
     CORPUS_DIR,
     QueryResult,
@@ -16,9 +19,6 @@ from evals.run import (
     evaluate,
     load_queries,
 )
-from microrag.constants import MODEL_DIR, ONNX_FILENAME, TOKENIZER_FILENAME
-from microrag.embedder import OnnxEmbedder
-from microrag.store import Store
 
 MODEL_PATH = MODEL_DIR / ONNX_FILENAME
 TOKENIZER_PATH = MODEL_DIR / TOKENIZER_FILENAME
@@ -104,7 +104,7 @@ def test_harness_runs_end_to_end_with_stub_embedder(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(
     not (MODEL_PATH.exists() and TOKENIZER_PATH.exists()),
-    reason=f"Model files not found at {MODEL_DIR}; run 'microrag download' first.",
+    reason=f"Model files not found at {MODEL_DIR}; run 'arciv search download' first.",
 )
 def test_retrieval_quality_floor(tmp_path: Path) -> None:
     """Conservative floors: raise them once a real baseline is established."""

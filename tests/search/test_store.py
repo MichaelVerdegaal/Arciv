@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from microrag.store import Store
+from arciv.search.store import Store
 
 
 def _unit_vectors(n: int) -> np.ndarray:
@@ -38,7 +38,7 @@ def test_writes_larger_than_chroma_batch_limit_are_sliced(
     tmp_path: Path, monkeypatch
 ) -> None:
     """Upserts and deletes above _MAX_BATCH must be split, not rejected."""
-    monkeypatch.setattr("microrag.store._MAX_BATCH", 2)
+    monkeypatch.setattr("arciv.search.store._MAX_BATCH", 2)
     store = Store(tmp_path / "db", "test-store")
 
     ids = [f"c{i}" for i in range(5)]

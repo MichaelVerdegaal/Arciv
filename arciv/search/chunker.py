@@ -11,6 +11,7 @@ section's own heading) so context survives the vector store.
 
 import re
 from pathlib import Path
+from typing import cast
 
 from chonkie import MarkdownChef, Pipeline
 from chonkie.types import Document, MarkdownImage
@@ -82,7 +83,11 @@ def chunk_markdown(text: str, source: Path) -> list[dict]:
     # One pipeline run for the whole file: run() pays a fixed introspection
     # cost per call, so packing all sections at once beats a call per section.
     bodies = [body.strip() for _, body in sections]
-    docs = _PIPELINE.run(texts=bodies) if bodies else []
+    # Pipeline.run returns list[Document] when given a list of texts; its type
+    # is the broader Document | list[Document] union.
+    docs: list[Document] = (
+        cast("list[Document]", _PIPELINE.run(texts=bodies)) if bodies else []
+    )
 
     chunks: list[dict] = []
     for (breadcrumb, _), packed in zip(sections, docs, strict=True):

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from microrag.chunker import chunk_markdown
+from arciv.search.chunker import chunk_markdown
 
 SOURCE = Path("notes/example.md")
 

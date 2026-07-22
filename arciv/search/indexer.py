@@ -11,6 +11,7 @@ matter how large the corpus is.
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from chonkie import FileFetcher
 from loguru import logger
@@ -59,7 +60,12 @@ def index_directory(
         Tuple of (files indexed, new chunks embedded and written, chunks pruned).
     """
     # FileFetcher only accepts directories; a plain-file path means no walk.
-    files = sorted(_FETCHER.fetch(dir=path, ext=[".md"])) if path.is_dir() else []
+    # fetch() is typed Path | list[Path]; with a dir it returns the list.
+    files = (
+        sorted(cast("list[Path]", _FETCHER.fetch(dir=path, ext=[".md"])))
+        if path.is_dir()
+        else []
+    )
     if not files:
         # Never prune on an empty walk: a mistyped path must not wipe the index.
         logger.warning(f"No markdown (*.md) files found under {path}")

@@ -17,7 +17,7 @@ via loguru.
 import importlib.util
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
 from loguru import logger
@@ -386,7 +386,7 @@ def query(
 
     # Query every collection and merge by distance; the same model embeds
     # them all, so cosine distances are comparable across collections.
-    results = []
+    results: list[tuple[float, str, dict, str]] = []
     for name, store in stores.items():
         if counts[name] == 0:
             continue
@@ -447,7 +447,7 @@ def status() -> None:
     ).exists()
 
     roots = read_roots(DEFAULT_DB_DIR)
-    collections = []
+    collections: list[dict[str, Any]] = []
     if DEFAULT_DB_DIR.exists():
         for name in Store.collection_names(DEFAULT_DB_DIR):
             collections.append(
@@ -458,7 +458,7 @@ def status() -> None:
                 }
             )
 
-    info = {
+    info: dict[str, Any] = {
         "model_dir": str(MODEL_DIR.resolve()),
         "model_present": model_present,
         "db_dir": str(DEFAULT_DB_DIR.resolve()),

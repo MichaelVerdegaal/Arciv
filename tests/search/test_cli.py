@@ -1,15 +1,31 @@
-"""UX-invariant tests for the CLI: stdout/stderr split, exit codes, next-step errors."""
+"""UX-invariant tests for `arciv search`: stdout/stderr split, exit codes, next steps.
+
+Driven through the real ``arciv`` CLI with CliRunner, so these also cover that
+the search sub-app inherits Arciv's global flags (the parent callback sets
+--json/-v, which the commands read) regardless of flag position.
+"""
 
 import json
+import sys
 from pathlib import Path
 
 import httpx
 import numpy as np
 import pytest
+from loguru import logger
+from typer.testing import CliRunner
 
-from microrag.cli import EX_NOINPUT, EX_OK, EX_UNAVAILABLE, EX_USAGE, main
-from microrag.constants import EX_DATAERR
-from microrag.indexer import index_directory
+import arciv.cli.cli as cli_module
+import arciv.cli.search as search_module
+from arciv.cli import output
+from arciv.search.constants import (
+    EX_DATAERR,
+    EX_NOINPUT,
+    EX_OK,
+    EX_UNAVAILABLE,
+    EX_USAGE,
+)
+from arciv.search.indexer import index_directory
 
 
 class _FakeEmbedder:
@@ -34,237 +50,209 @@ class _FakeStore:
 
 
 @pytest.fixture
-def empty_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Run with an isolated MICRORAG_HOME: no model, no index."""
+def runner() -> CliRunner:
+    return CliRunner()
+
+
+@pytest.fixture
+def search_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Isolated search home (no model, no index) with a deterministic logger.
+
+    Points the search command module at a temp home and reconfigures loguru to
+    a synchronous message-only stderr sink, so stdout/stderr assertions are
+    stable. The global --json/-v state is reset around each test.
+    """
     monkeypatch.chdir(tmp_path)
-    home = tmp_path / "microrag-home"
-    monkeypatch.setattr("microrag.cli.MODEL_DIR", home / "model")
-    monkeypatch.setattr("microrag.cli.DEFAULT_DB_DIR", home / "db")
-    return tmp_path
+    home = tmp_path / "search-home"
+    monkeypatch.setattr(search_module, "MODEL_DIR", home / "model")
+    monkeypatch.setattr(search_module, "DEFAULT_DB_DIR", home / "db")
 
+    def fake_configure(
+        level: str = "INFO", color: str = "auto", log_file: bool = False
+    ) -> None:
+        logger.remove()
+        logger.add(sys.stderr, level=level, format="{message}", enqueue=False)
 
-def test_no_args_shows_help(empty_cwd: Path, capsys: pytest.CaptureFixture) -> None:
-    assert main([]) == EX_OK
-    out = capsys.readouterr().out
-    assert "Usage: microrag" in out
-    assert "query" in out  # help lists the commands
-
-
-def test_version_flag(capsys: pytest.CaptureFixture) -> None:
-    assert main(["--version"]) == EX_OK
-    assert "microrag" in capsys.readouterr().out
-
-
-def test_index_missing_path(empty_cwd: Path, capsys: pytest.CaptureFixture) -> None:
-    code = main(["index", str(empty_cwd / "nope")])
-    captured = capsys.readouterr()
-    assert code == EX_NOINPUT
-    assert captured.out == ""
-    assert "Path does not exist" in captured.err
-
-
-def test_index_without_model_names_next_step(
-    empty_cwd: Path, capsys: pytest.CaptureFixture
-) -> None:
-    notes = empty_cwd / "notes"
-    notes.mkdir()
-    code = main(["index", str(notes)])
-    captured = capsys.readouterr()
-    assert code == EX_NOINPUT
-    assert captured.out == ""
-    assert "microrag download" in captured.err
-
-
-def test_query_without_index_names_next_step(
-    empty_cwd: Path, capsys: pytest.CaptureFixture
-) -> None:
-    code = main(["query", "anything"])
-    captured = capsys.readouterr()
-    assert code == EX_NOINPUT
-    assert captured.out == ""
-    assert "microrag index" in captured.err
-
-
-def test_query_dash_with_tty_stdin_is_usage_error(
-    empty_cwd: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
-) -> None:
-    import io
-
-    class _TtyIn(io.StringIO):
-        def isatty(self) -> bool:
-            return True
-
-    monkeypatch.setattr("sys.stdin", _TtyIn())
-    code = main(["query", "-"])
-    captured = capsys.readouterr()
-    assert code == EX_USAGE
-    assert captured.out == ""
-    assert "microrag query -" in captured.err  # error shows an example pipe
-
-
-def test_query_dash_reads_stdin(
-    empty_cwd: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
-) -> None:
-    import io
-
-    monkeypatch.setattr("sys.stdin", io.StringIO("some piped query"))
-    # No index exists, so it proceeds past stdin handling to the missing-index error.
-    code = main(["query", "-"])
-    captured = capsys.readouterr()
-    assert code == EX_NOINPUT
-    assert "microrag index" in captured.err
-
-
-def test_status_plain_output_is_tab_separated(
-    empty_cwd: Path, capsys: pytest.CaptureFixture
-) -> None:
-    assert main(["status"]) == EX_OK
-    out = capsys.readouterr().out
-    assert "model_present\tfalse" in out
-    assert "collections_count\t0" in out
-    assert "chunks\t0" in out
-
-
-def test_main_forces_lf_stdout(
-    empty_cwd: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Windows text-mode stdout would rewrite every "\n" into "\r\n" and break
-    # LF-expecting pipe consumers; main() must disable that translation at the
-    # stream. Assert it here since capsys can't observe on-the-wire bytes.
-    import io
-
-    class _RecordingStdout(io.StringIO):
-        def __init__(self) -> None:
-            super().__init__()
-            self.newline_arg = "unset"
-
-        def reconfigure(self, *, newline: str | None = None, **_kwargs) -> None:
-            self.newline_arg = newline
-
-    recording = _RecordingStdout()
-    monkeypatch.setattr("sys.stdout", recording)
-    assert main(["status"]) == EX_OK
-    assert recording.newline_arg == "\n"
-
-
-def test_status_json_output(empty_cwd: Path, capsys: pytest.CaptureFixture) -> None:
-    assert main(["status", "--json"]) == EX_OK
-    obj = json.loads(capsys.readouterr().out)
-    assert obj["model_present"] is False
-    assert obj["chunks"] == 0
-    assert obj["collections_count"] == 0
-
-
-def test_global_flags_work_before_and_after_subcommand(
-    empty_cwd: Path, capsys: pytest.CaptureFixture
-) -> None:
-    assert main(["--json", "status"]) == EX_OK
-    json.loads(capsys.readouterr().out)
-    assert main(["status", "-q"]) == EX_OK
-    capsys.readouterr()
-
-
-def test_verbose_logs_never_reach_stdout(
-    empty_cwd: Path, capsys: pytest.CaptureFixture
-) -> None:
-    # stdout is data only: even at -v, diagnostics stay on stderr.
-    assert main(["status", "-v"]) == EX_OK
-    captured = capsys.readouterr()
-    assert "DEBUG" not in captured.out
-    assert "WARNING" not in captured.out  # "model not downloaded" hint is stderr
-    assert captured.out.startswith("model_dir\t")
-
-
-def test_download_network_failure_is_clean(
-    empty_cwd: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
-) -> None:
-    def _fail(**_kwargs) -> str:
-        raise httpx.ConnectError("connection refused")
-
-    monkeypatch.setattr("microrag.cli.hf_hub_download", _fail)
-    code = main(["download"])
-    captured = capsys.readouterr()
-    assert code == EX_UNAVAILABLE
-    assert captured.out == ""
-    assert "Traceback" not in captured.err
-    assert "microrag download" in captured.err
-
-
-def test_microrag_home_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    import importlib
-
-    import microrag.constants as constants
-
-    try:
-        monkeypatch.setenv("MICRORAG_HOME", "/custom/home")
-        importlib.reload(constants)
-        assert constants.MODEL_DIR == Path("/custom/home/model")
-        assert constants.DEFAULT_DB_DIR == Path("/custom/home/db")
-    finally:
-        monkeypatch.delenv("MICRORAG_HOME")
-        importlib.reload(constants)
+    monkeypatch.setattr(cli_module, "configure_logger", fake_configure)
+    output.set_json_output(False)
+    output.set_verbosity(0)
+    yield tmp_path
+    logger.remove()
+    output.set_json_output(False)
+    output.set_verbosity(0)
 
 
 @pytest.fixture
 def fake_embedder(monkeypatch: pytest.MonkeyPatch) -> _FakeEmbedder:
     """Bypass the model download by loading a fake embedder in the CLI."""
     embedder = _FakeEmbedder()
-    monkeypatch.setattr("microrag.cli._load_embedder", lambda: embedder)
+    monkeypatch.setattr(search_module, "_load_embedder", lambda: embedder)
     return embedder
 
 
-def test_index_refuses_a_second_root(
-    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+def _search(runner: CliRunner, *args: str, **kwargs):
+    """Invoke ``arciv search <args...>`` and return the result."""
+    return runner.invoke(cli_module.cli, ["search", *args], **kwargs)
+
+
+def test_help_lists_commands(runner: CliRunner, search_env: Path) -> None:
+    result = _search(runner, "--help")
+    assert result.exit_code == EX_OK
+    assert "query" in result.output  # help lists the commands
+    assert "index" in result.output
+
+
+def test_index_missing_path(runner: CliRunner, search_env: Path) -> None:
+    result = _search(runner, "index", str(search_env / "nope"))
+    assert result.exit_code == EX_NOINPUT
+    assert result.stdout == ""
+    assert "Path does not exist" in result.stderr
+
+
+def test_index_without_model_names_next_step(
+    runner: CliRunner, search_env: Path
 ) -> None:
-    first = empty_cwd / "first"
+    notes = search_env / "notes"
+    notes.mkdir()
+    result = _search(runner, "index", str(notes))
+    assert result.exit_code == EX_NOINPUT
+    assert result.stdout == ""
+    assert "arciv search download" in result.stderr
+
+
+def test_query_without_index_names_next_step(
+    runner: CliRunner, search_env: Path
+) -> None:
+    result = _search(runner, "query", "anything")
+    assert result.exit_code == EX_NOINPUT
+    assert result.stdout == ""
+    assert "arciv search index" in result.stderr
+
+
+def test_query_dash_empty_stdin_is_usage_error(
+    runner: CliRunner, search_env: Path
+) -> None:
+    # "-" reads stdin; empty input is a clean usage error, not a crash.
+    result = _search(runner, "query", "-", input="")
+    assert result.exit_code == EX_USAGE
+    assert result.stdout == ""
+    assert "Empty query text on stdin" in result.stderr
+
+
+def test_query_dash_reads_stdin(runner: CliRunner, search_env: Path) -> None:
+    # No index exists, so it proceeds past stdin handling to the missing-index error.
+    result = _search(runner, "query", "-", input="some piped query")
+    assert result.exit_code == EX_NOINPUT
+    assert "arciv search index" in result.stderr
+
+
+def test_status_plain_output_is_tab_separated(
+    runner: CliRunner, search_env: Path
+) -> None:
+    result = _search(runner, "status")
+    assert result.exit_code == EX_OK
+    assert "model_present\tfalse" in result.stdout
+    assert "collections_count\t0" in result.stdout
+    assert "chunks\t0" in result.stdout
+
+
+def test_status_json_output(runner: CliRunner, search_env: Path) -> None:
+    result = _search(runner, "status", "--json")
+    assert result.exit_code == EX_OK
+    obj = json.loads(result.stdout)
+    assert obj["model_present"] is False
+    assert obj["chunks"] == 0
+    assert obj["collections_count"] == 0
+
+
+def test_global_flags_work_before_and_after_subcommand(
+    runner: CliRunner, search_env: Path
+) -> None:
+    # --json is a parent-callback flag; it must reach the search command
+    # whether written before or after "search status".
+    before = runner.invoke(cli_module.cli, ["--json", "search", "status"])
+    assert before.exit_code == EX_OK
+    json.loads(before.stdout)
+    after = _search(runner, "status", "--json")
+    assert after.exit_code == EX_OK
+    json.loads(after.stdout)
+
+
+def test_verbose_logs_never_reach_stdout(runner: CliRunner, search_env: Path) -> None:
+    # stdout is data only: even at -v, diagnostics stay on stderr.
+    result = _search(runner, "status", "-v")
+    assert result.exit_code == EX_OK
+    assert "DEBUG" not in result.stdout
+    assert "WARNING" not in result.stdout  # "model not downloaded" hint is stderr
+    assert result.stdout.startswith("model_dir\t")
+
+
+def test_download_network_failure_is_clean(
+    runner: CliRunner, search_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _fail(**_kwargs) -> str:
+        raise httpx.ConnectError("connection refused")
+
+    # download() imports hf_hub_download from huggingface_hub at call time, so
+    # patch it on the source module.
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", _fail)
+    result = _search(runner, "download")
+    assert result.exit_code == EX_UNAVAILABLE
+    assert result.stdout == ""
+    assert "Traceback" not in result.stderr
+    assert "arciv search download" in result.stderr
+
+
+def test_index_refuses_a_second_root(
+    runner: CliRunner, search_env: Path, fake_embedder: _FakeEmbedder
+) -> None:
+    first = search_env / "first"
     first.mkdir()
     (first / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
-    second = empty_cwd / "second"
+    second = search_env / "second"
     second.mkdir()
     (second / "a.md").write_text("# A\n\ncollides\n", encoding="utf-8")
 
-    assert main(["index", str(first)]) == EX_OK
-    capsys.readouterr()
+    assert _search(runner, "index", str(first)).exit_code == EX_OK
 
-    code = main(["index", str(second)])
-    captured = capsys.readouterr()
-    assert code == EX_USAGE
-    assert captured.out == ""
-    assert str(first.resolve()) in captured.err
-    assert "--collection" in captured.err
+    result = _search(runner, "index", str(second))
+    assert result.exit_code == EX_USAGE
+    assert result.stdout == ""
+    assert str(first.resolve()) in result.stderr
+    assert "--collection" in result.stderr
 
     # Re-indexing the recorded root still works.
-    assert main(["index", str(first)]) == EX_OK
+    assert _search(runner, "index", str(first)).exit_code == EX_OK
 
 
 def test_index_does_not_pin_root_on_empty_walk(
-    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+    runner: CliRunner, search_env: Path, fake_embedder: _FakeEmbedder
 ) -> None:
-    empty = empty_cwd / "empty"
+    empty = search_env / "empty"
     empty.mkdir()
-    notes = empty_cwd / "notes"
+    notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
 
-    assert main(["index", str(empty)]) == EX_OK  # a mistyped path must not pin
-    assert main(["index", str(notes)]) == EX_OK
-    capsys.readouterr()
+    assert _search(runner, "index", str(empty)).exit_code == EX_OK  # must not pin
+    assert _search(runner, "index", str(notes)).exit_code == EX_OK
 
 
 def test_status_reports_collections_and_roots(
-    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+    runner: CliRunner, search_env: Path, fake_embedder: _FakeEmbedder
 ) -> None:
-    assert main(["status", "--json"]) == EX_OK
-    assert json.loads(capsys.readouterr().out)["collections"] == []
+    empty = _search(runner, "status", "--json")
+    assert empty.exit_code == EX_OK
+    assert json.loads(empty.stdout)["collections"] == []
 
-    notes = empty_cwd / "notes"
+    notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
-    assert main(["index", str(notes)]) == EX_OK
-    capsys.readouterr()
+    assert _search(runner, "index", str(notes)).exit_code == EX_OK
 
-    assert main(["status", "--json"]) == EX_OK
-    obj = json.loads(capsys.readouterr().out)
+    result = _search(runner, "status", "--json")
+    assert result.exit_code == EX_OK
+    obj = json.loads(result.stdout)
     assert [c["name"] for c in obj["collections"]] == ["microrag"]
     assert obj["collections"][0]["root"] == str(notes.resolve())
     assert obj["collections"][0]["chunks"] == obj["chunks"] > 0
@@ -272,88 +260,92 @@ def test_status_reports_collections_and_roots(
 
 
 def test_collections_command_lists_name_path_files_chunks(
-    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+    runner: CliRunner, search_env: Path, fake_embedder: _FakeEmbedder
 ) -> None:
     # No index yet: an empty listing, and a next-step hint on stderr.
-    assert main(["collections", "--json"]) == EX_OK
-    assert capsys.readouterr().out == ""
+    empty = _search(runner, "collections", "--json")
+    assert empty.exit_code == EX_OK
+    assert empty.stdout == ""
 
-    notes = empty_cwd / "notes"
+    notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
     (notes / "b.md").write_text("# B\n\nbeta\n", encoding="utf-8")
-    assert main(["index", str(notes)]) == EX_OK
-    capsys.readouterr()
+    assert _search(runner, "index", str(notes)).exit_code == EX_OK
 
     # JSON: one record per collection with name, path, files, chunks.
-    assert main(["collections", "--json"]) == EX_OK
-    record = json.loads(capsys.readouterr().out.splitlines()[0])
+    result = _search(runner, "collections", "--json")
+    assert result.exit_code == EX_OK
+    record = json.loads(result.stdout.splitlines()[0])
     assert record["name"] == "microrag"
     assert record["path"] == str(notes.resolve())
     assert record["files"] == 2
     assert record["chunks"] > 0
 
     # Plain: tab-separated name, path, files, chunks.
-    assert main(["collections"]) == EX_OK
-    line = capsys.readouterr().out.splitlines()[0]
-    fields = line.split("\t")
+    plain = _search(runner, "collections")
+    assert plain.exit_code == EX_OK
+    fields = plain.stdout.splitlines()[0].split("\t")
     assert fields[0] == "microrag"
     assert fields[1] == str(notes.resolve())
     assert fields[2] == "2"
 
 
 def test_two_roots_index_into_separate_collections(
-    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+    runner: CliRunner, search_env: Path, fake_embedder: _FakeEmbedder
 ) -> None:
-    notes = empty_cwd / "notes"
+    notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha notes\n", encoding="utf-8")
-    blog = empty_cwd / "blog"
+    blog = search_env / "blog"
     blog.mkdir()
     (blog / "a.md").write_text("# A\n\nblog post\n", encoding="utf-8")
 
-    assert main(["index", str(notes)]) == EX_OK
-    assert main(["index", str(blog), "--collection", "blog"]) == EX_OK
-    capsys.readouterr()
+    assert _search(runner, "index", str(notes)).exit_code == EX_OK
+    assert (
+        _search(runner, "index", str(blog), "--collection", "blog").exit_code == EX_OK
+    )
 
     # Default query searches all collections and emits absolute paths.
-    assert main(["query", "anything"]) == EX_OK
-    lines = capsys.readouterr().out.splitlines()
-    assert set(lines) == {str(notes.resolve() / "a.md"), str(blog.resolve() / "a.md")}
+    everything = _search(runner, "query", "anything")
+    assert everything.exit_code == EX_OK
+    assert set(everything.stdout.splitlines()) == {
+        str(notes.resolve() / "a.md"),
+        str(blog.resolve() / "a.md"),
+    }
 
     # --collection narrows the search.
-    assert main(["query", "anything", "--collection", "blog"]) == EX_OK
-    assert capsys.readouterr().out.splitlines() == [str(blog.resolve() / "a.md")]
+    narrowed = _search(runner, "query", "anything", "--collection", "blog")
+    assert narrowed.stdout.splitlines() == [str(blog.resolve() / "a.md")]
 
     # -0/--null emits NUL-separated paths (find -print0 style) for xargs -0.
-    assert main(["query", "anything", "-0"]) == EX_OK
-    out = capsys.readouterr().out
-    assert "\n" not in out
-    assert set(out.split("\0")) == {
+    nulled = _search(runner, "query", "anything", "-0")
+    assert "\n" not in nulled.stdout
+    assert set(nulled.stdout.split("\0")) == {
         str(notes.resolve() / "a.md"),
         str(blog.resolve() / "a.md"),
         "",  # trailing NUL after the last record
     }
 
     # JSON results carry the collection and the absolute path.
-    assert main(["query", "anything", "--collection", "blog", "--json"]) == EX_OK
-    result = json.loads(capsys.readouterr().out.splitlines()[0])
+    as_json = _search(runner, "query", "anything", "--collection", "blog", "--json")
+    result = json.loads(as_json.stdout.splitlines()[0])
     assert result["collection"] == "blog"
     assert result["path"] == str(blog.resolve() / "a.md")
 
 
 def test_query_verbose_shows_heading_once_above_body(
-    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+    runner: CliRunner, search_env: Path, fake_embedder: _FakeEmbedder
 ) -> None:
-    notes = empty_cwd / "notes"
+    notes = search_env / "notes"
     notes.mkdir()
     (notes / "doc.md").write_text("# Heading\n\nbodytext\n", encoding="utf-8")
-    assert main(["index", str(notes)]) == EX_OK
-    capsys.readouterr()
+    assert _search(runner, "index", str(notes)).exit_code == EX_OK
 
-    assert main(["query", "anything", "-v"]) == EX_OK
-    out = capsys.readouterr().out
-    # The breadcrumb shows once, in the heading= line above the body — the
+    result = _search(runner, "query", "anything", "-v")
+    assert result.exit_code == EX_OK
+    out = result.stdout
+    # The breadcrumb shows once, in the heading= line above the body - the
     # chunker prepends it to the chunk text, so the body must not repeat it.
     assert "heading=doc > Heading" in out
     assert "  | doc > Heading" not in out
@@ -361,209 +353,191 @@ def test_query_verbose_shows_heading_once_above_body(
 
 
 def test_query_rejects_non_positive_limit(
-    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+    runner: CliRunner, search_env: Path, fake_embedder: _FakeEmbedder
 ) -> None:
-    notes = empty_cwd / "notes"
+    notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
-    assert main(["index", str(notes)]) == EX_OK
-    capsys.readouterr()
+    assert _search(runner, "index", str(notes)).exit_code == EX_OK
 
     for limit in ("0", "-3"):
-        code = main(["query", "anything", "-k", limit])
-        captured = capsys.readouterr()
-        assert code == EX_USAGE
-        assert captured.out == ""
-        assert "--limit" in captured.err
+        result = _search(runner, "query", "anything", "-k", limit)
+        assert result.exit_code == EX_USAGE
+        assert result.stdout == ""
+        assert "--limit" in result.stderr
 
 
 def test_corrupted_roots_marker_fails_cleanly(
-    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+    runner: CliRunner, search_env: Path, fake_embedder: _FakeEmbedder
 ) -> None:
-    notes = empty_cwd / "notes"
+    notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
-    assert main(["index", str(notes)]) == EX_OK
-    capsys.readouterr()
+    assert _search(runner, "index", str(notes)).exit_code == EX_OK
 
-    db = empty_cwd / "microrag-home" / "db"
+    db = search_env / "search-home" / "db"
     (db / "roots.json").write_text('{"microrag": "truncated', encoding="utf-8")
 
-    assert main(["status"]) == EX_DATAERR
-    captured = capsys.readouterr()
-    assert "roots.json" in captured.err  # names the file to fix or delete
+    result = _search(runner, "status")
+    assert result.exit_code == EX_DATAERR
+    assert "roots.json" in result.stderr  # names the file to fix or delete
 
 
 def test_query_unknown_collection_is_usage_error(
-    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+    runner: CliRunner, search_env: Path, fake_embedder: _FakeEmbedder
 ) -> None:
-    notes = empty_cwd / "notes"
+    notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
-    assert main(["index", str(notes)]) == EX_OK
-    capsys.readouterr()
+    assert _search(runner, "index", str(notes)).exit_code == EX_OK
 
-    code = main(["query", "anything", "--collection", "nope"])
-    captured = capsys.readouterr()
-    assert code == EX_USAGE
-    assert captured.out == ""
-    assert "microrag" in captured.err  # lists the known collections
+    result = _search(runner, "query", "anything", "--collection", "nope")
+    assert result.exit_code == EX_USAGE
+    assert result.stdout == ""
+    assert "microrag" in result.stderr  # lists the known collections
 
 
 def test_index_rejects_invalid_collection_name(
-    empty_cwd: Path, capsys: pytest.CaptureFixture
+    runner: CliRunner, search_env: Path
 ) -> None:
-    notes = empty_cwd / "notes"
+    notes = search_env / "notes"
     notes.mkdir()
-    code = main(["index", str(notes), "--collection", "a"])
-    captured = capsys.readouterr()
-    assert code == EX_USAGE
-    assert captured.out == ""
+    result = _search(runner, "index", str(notes), "--collection", "a")
+    assert result.exit_code == EX_USAGE
+    assert result.stdout == ""
 
 
 def test_legacy_root_marker_still_pins_the_default_collection(
-    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+    runner: CliRunner, search_env: Path, fake_embedder: _FakeEmbedder
 ) -> None:
-    notes = empty_cwd / "notes"
+    notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
-    other = empty_cwd / "other"
+    other = search_env / "other"
     other.mkdir()
     (other / "a.md").write_text("# A\n\nbeta\n", encoding="utf-8")
 
-    assert main(["index", str(notes)]) == EX_OK
-    capsys.readouterr()
+    assert _search(runner, "index", str(notes)).exit_code == EX_OK
 
     # Rewind the marker to the pre-collections format.
-    db = empty_cwd / "microrag-home" / "db"
+    db = search_env / "search-home" / "db"
     (db / "roots.json").unlink()
     (db / "root.txt").write_text(f"{notes.resolve()}\n", encoding="utf-8")
 
-    assert main(["index", str(other)]) == EX_USAGE  # legacy root still pins
-    assert main(["index", str(notes)]) == EX_OK
-    capsys.readouterr()
+    assert _search(runner, "index", str(other)).exit_code == EX_USAGE  # legacy pins
+    assert _search(runner, "index", str(notes)).exit_code == EX_OK
 
 
 def test_refresh_ingests_new_files_from_recorded_root(
-    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+    runner: CliRunner, search_env: Path, fake_embedder: _FakeEmbedder
 ) -> None:
     # Refresh re-walks the recorded root, so a file added after indexing gets
     # picked up without retyping the path.
-    notes = empty_cwd / "notes"
+    notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
-    assert main(["index", str(notes)]) == EX_OK
-    capsys.readouterr()
+    assert _search(runner, "index", str(notes)).exit_code == EX_OK
 
     (notes / "b.md").write_text("# B\n\nbeta\n", encoding="utf-8")
-    assert main(["refresh"]) == EX_OK
-    assert capsys.readouterr().out == ""  # plain mode keeps stdout clean
+    refreshed = _search(runner, "refresh")
+    assert refreshed.exit_code == EX_OK
+    assert refreshed.stdout == ""  # plain mode keeps stdout clean
 
-    assert main(["collections", "--json"]) == EX_OK
-    record = json.loads(capsys.readouterr().out.splitlines()[0])
+    result = _search(runner, "collections", "--json")
+    record = json.loads(result.stdout.splitlines()[0])
     assert record["files"] == 2
 
 
 def test_refresh_specific_collection_leaves_others_untouched(
-    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+    runner: CliRunner, search_env: Path, fake_embedder: _FakeEmbedder
 ) -> None:
-    notes = empty_cwd / "notes"
+    notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
-    blog = empty_cwd / "blog"
+    blog = search_env / "blog"
     blog.mkdir()
     (blog / "a.md").write_text("# A\n\nblog\n", encoding="utf-8")
-    assert main(["index", str(notes)]) == EX_OK
-    assert main(["index", str(blog), "--collection", "blog"]) == EX_OK
-    capsys.readouterr()
+    assert _search(runner, "index", str(notes)).exit_code == EX_OK
+    assert (
+        _search(runner, "index", str(blog), "--collection", "blog").exit_code == EX_OK
+    )
 
     # Add a file to each root, then refresh only blog.
     (notes / "b.md").write_text("# B\n\nbeta\n", encoding="utf-8")
     (blog / "b.md").write_text("# B\n\nblog two\n", encoding="utf-8")
-    assert main(["refresh", "--collection", "blog"]) == EX_OK
-    capsys.readouterr()
+    assert _search(runner, "refresh", "--collection", "blog").exit_code == EX_OK
 
-    assert main(["collections", "--json"]) == EX_OK
-    by_name = {
-        r["name"]: r for r in map(json.loads, capsys.readouterr().out.splitlines())
-    }
+    result = _search(runner, "collections", "--json")
+    by_name = {r["name"]: r for r in map(json.loads, result.stdout.splitlines())}
     assert by_name["blog"]["files"] == 2  # refreshed
     assert by_name["microrag"]["files"] == 1  # untouched
 
 
 def test_refresh_without_index_names_next_step(
-    empty_cwd: Path, capsys: pytest.CaptureFixture
+    runner: CliRunner, search_env: Path
 ) -> None:
-    code = main(["refresh"])
-    captured = capsys.readouterr()
-    assert code == EX_NOINPUT
-    assert captured.out == ""
-    assert "microrag index" in captured.err
+    result = _search(runner, "refresh")
+    assert result.exit_code == EX_NOINPUT
+    assert result.stdout == ""
+    assert "arciv search index" in result.stderr
 
 
 def test_refresh_unknown_collection_is_usage_error(
-    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+    runner: CliRunner, search_env: Path, fake_embedder: _FakeEmbedder
 ) -> None:
-    notes = empty_cwd / "notes"
+    notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
-    assert main(["index", str(notes)]) == EX_OK
-    capsys.readouterr()
+    assert _search(runner, "index", str(notes)).exit_code == EX_OK
 
-    code = main(["refresh", "--collection", "nope"])
-    captured = capsys.readouterr()
-    assert code == EX_USAGE
-    assert captured.out == ""
-    assert "microrag" in captured.err  # lists the known collections
+    result = _search(runner, "refresh", "--collection", "nope")
+    assert result.exit_code == EX_USAGE
+    assert result.stdout == ""
+    assert "microrag" in result.stderr  # lists the known collections
 
 
 def test_refresh_skips_collection_whose_root_is_gone(
-    empty_cwd: Path,
-    fake_embedder: _FakeEmbedder,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture,
+    runner: CliRunner, search_env: Path, fake_embedder: _FakeEmbedder
 ) -> None:
-    notes = empty_cwd / "notes"
+    notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
-    assert main(["index", str(notes)]) == EX_OK
-    capsys.readouterr()
+    assert _search(runner, "index", str(notes)).exit_code == EX_OK
 
     # The recorded root disappears (moved/deleted); refresh must not crash or
     # wipe the collection, just skip it with a clear warning.
     for md in notes.iterdir():
         md.unlink()
     notes.rmdir()
-    assert main(["refresh"]) == EX_OK
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "no longer exists" in captured.err
+    result = _search(runner, "refresh")
+    assert result.exit_code == EX_OK
+    assert result.stdout == ""
+    assert "no longer exists" in result.stderr
 
     # The data survived the skip.
-    assert main(["collections", "--json"]) == EX_OK
-    assert json.loads(capsys.readouterr().out.splitlines()[0])["chunks"] > 0
+    survived = _search(runner, "collections", "--json")
+    assert json.loads(survived.stdout.splitlines()[0])["chunks"] > 0
 
 
 def test_refresh_prunes_deleted_files(
-    empty_cwd: Path, fake_embedder: _FakeEmbedder, capsys: pytest.CaptureFixture
+    runner: CliRunner, search_env: Path, fake_embedder: _FakeEmbedder
 ) -> None:
-    notes = empty_cwd / "notes"
+    notes = search_env / "notes"
     notes.mkdir()
     (notes / "a.md").write_text("# A\n\nalpha\n", encoding="utf-8")
     (notes / "b.md").write_text("# B\n\nbeta\n", encoding="utf-8")
-    assert main(["index", str(notes)]) == EX_OK
-    capsys.readouterr()
+    assert _search(runner, "index", str(notes)).exit_code == EX_OK
 
     (notes / "b.md").unlink()
     # --no-prune keeps the orphaned file's chunks.
-    assert main(["refresh", "--no-prune", "--json"]) == EX_OK
-    record = json.loads(capsys.readouterr().out.splitlines()[0])
+    kept = _search(runner, "refresh", "--no-prune", "--json")
+    record = json.loads(kept.stdout.splitlines()[0])
     assert record["pruned"] == 0
     assert record["files"] == 1
 
     # A plain refresh prunes them.
-    assert main(["refresh", "--json"]) == EX_OK
-    record = json.loads(capsys.readouterr().out.splitlines()[0])
+    pruned = _search(runner, "refresh", "--json")
+    record = json.loads(pruned.stdout.splitlines()[0])
     assert record["pruned"] > 0
 
 

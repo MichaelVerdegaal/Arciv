@@ -63,7 +63,9 @@ class Store:
                 ids=ids[start:end],
                 embeddings=embeddings[start:end],
                 documents=documents[start:end],
-                metadatas=metadatas[start:end],
+                # Chroma's metadata value type is narrower than our plain dict;
+                # the values we store (str/int) are within it.
+                metadatas=metadatas[start:end],  # type: ignore[arg-type]
             )
 
     def count(self) -> int:
@@ -85,7 +87,7 @@ class Store:
         for chunk_id, meta in zip(
             result["ids"], result["metadatas"] or [], strict=True
         ):
-            grouped.setdefault(meta["source"], []).append(chunk_id)
+            grouped.setdefault(str(meta["source"]), []).append(chunk_id)
         return grouped
 
     def delete(self, ids: list[str]) -> None:
@@ -112,4 +114,9 @@ class Store:
             n_results=n_results,
             include=["documents", "metadatas", "distances"],
         )
-        return result["documents"], result["metadatas"], result["distances"]
+        # include= guarantees these keys at runtime; Chroma types them Optional.
+        return (  # type: ignore[return-value]
+            result["documents"],
+            result["metadatas"],
+            result["distances"],
+        )

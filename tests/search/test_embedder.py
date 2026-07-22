@@ -6,13 +6,13 @@ import numpy as np
 import pytest
 from chonkie.embeddings import BaseEmbeddings
 
-from microrag.constants import (
+from arciv.search.constants import (
     EMBEDDING_DIM,
     MODEL_DIR,
     ONNX_FILENAME,
     TOKENIZER_FILENAME,
 )
-from microrag.embedder import OnnxEmbedder
+from arciv.search.embedder import OnnxEmbedder
 
 MODEL_PATH = MODEL_DIR / ONNX_FILENAME
 TOKENIZER_PATH = MODEL_DIR / TOKENIZER_FILENAME
@@ -24,7 +24,7 @@ def _model_available() -> bool:
 
 pytestmark = pytest.mark.skipif(
     not _model_available(),
-    reason=f"Model files not found at {MODEL_DIR}; run 'microrag download' first.",
+    reason=f"Model files not found at {MODEL_DIR}; run 'arciv search download' first.",
 )
 
 
