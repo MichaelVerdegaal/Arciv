@@ -46,7 +46,7 @@ the paths from stdin, so `extract` chains after any command that lists notes:
 
 ```bash
 arciv extract -f notes.txt                  # extract from every note listed in notes.txt
-microrag query ... | arciv extract -f -     # extract from note paths piped in
+arciv search query ... | arciv extract -f - # extract from note paths piped in
 arciv extract a.md -f -                     # a.md plus every note path from stdin
 ```
 
@@ -164,6 +164,34 @@ arciv list -n 0 --null | xargs -0 -n1 echo
 ```
 
 `arciv get -` reads newline-separated URLs from stdin.
+
+## Search
+
+Semantic search over your markdown is an optional extra, so a plain `arciv` install stays light.
+Install it with the `search` extra:
+
+```bash
+uv tool install "arciv[search]"
+arciv search download                 # one-time embedding-model fetch (the only networked step)
+arciv search index ~/vault/notes      # chunk + embed every *.md under a directory
+arciv search query "onnx throughput"  # top matches across everything indexed
+```
+
+`arciv search query` prints one absolute file path per line, best match first, so it pipes straight
+into the archiver: search your notes, then archive the links in the notes that matched.
+
+```bash
+arciv search query "vector databases" | arciv extract -f - | arciv get -
+```
+
+`arciv search refresh` re-indexes each collection from the root it was built from, `arciv search
+status` shows where the model and index live plus per-collection counts, and `arciv search
+collections` lists them. `arciv search <command> --help` is the per-command reference. Without the
+extra installed, `arciv search` just prints an install hint.
+
+The vector index (a local Chroma store) and the model live under the Arciv data dir by default
+(`arciv search status` prints the paths); an existing `~/.microrag` from the standalone MicroRag
+tool is reused as-is. The index is derived data: delete it and rebuild from your notes any time.
 
 See [SETUP.md](SETUP.md) for installation and configuration.
 
