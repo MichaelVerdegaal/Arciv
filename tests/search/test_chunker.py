@@ -106,3 +106,43 @@ def test_metadata_fields() -> None:
     assert metadata["source"] == str(SOURCE)
     assert metadata["heading"] == "example > H"
     assert metadata["index"] == 0
+    assert metadata["line"] == 3
+
+
+def test_line_points_at_each_section_body() -> None:
+    """Every chunk records the 1-based line its body starts on."""
+    text = "# A\n\nalpha\n\n## B\n\nbeta\n\n# C\n\ngamma"
+    chunks = chunk_markdown(text, SOURCE)
+    lines = text.splitlines()
+    assert [chunk["metadata"]["line"] for chunk in chunks] == [3, 7, 11]
+    for chunk in chunks:
+        assert lines[chunk["metadata"]["line"] - 1] in chunk["text"]
+
+
+def test_line_survives_code_tables_and_images() -> None:
+    """Verbatim segments anchor on their own content, not the prose around it."""
+    text = (
+        "# Doc\n\nprose\n\n"
+        "```python\nx = 1\n```\n\n"
+        "| a | b |\n| - | - |\n| 1 | 2 |\n\n"
+        "![a labelled diagram](img/arch.png)\n"
+    )
+    by_line = {c["metadata"]["line"]: c["text"] for c in chunk_markdown(text, SOURCE)}
+    assert by_line[3].endswith("prose")  # the paragraph
+    assert "x = 1" in by_line[6]  # the fenced code, not its fence line
+    assert "| a | b |" in by_line[9]  # the table's first row
+    assert "a labelled diagram" in by_line[13]  # the image's own line
+
+
+def test_line_is_unaffected_by_the_overlap_prefix() -> None:
+    """A chunk's line is where its own content starts, not where its overlap does."""
+    text = "# Long\n\n" + "".join(
+        f"filler sentence {i}. " * 8 + "\n\n" for i in range(12)
+    )
+    chunks = chunk_markdown(text, SOURCE)
+    assert len(chunks) > 1  # the section packed into several chunks
+    lines = text.splitlines()
+    for chunk in chunks:
+        line = lines[chunk["metadata"]["line"] - 1]
+        assert line and line in chunk["text"]
+    assert chunks[0]["metadata"]["line"] < chunks[1]["metadata"]["line"]

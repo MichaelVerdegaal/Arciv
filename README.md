@@ -196,6 +196,9 @@ into the archiver: search your notes, then archive the links in the notes that m
 arciv search query "vector databases" | arciv extract -f - | arciv get -
 ```
 
+`-v` prints the matching passages themselves, each headed by the `path:line` where it starts, and
+`--json` emits the same records as JSONL.
+
 `arciv search refresh` re-indexes each collection from the root it was built from, `arciv search
 status` shows where the model and index live plus per-collection counts, and `arciv search
 collections` lists them. `arciv search <command> --help` is the per-command reference. Without the

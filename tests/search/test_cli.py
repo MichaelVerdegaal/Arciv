@@ -334,7 +334,7 @@ def test_two_roots_index_into_separate_collections(
     assert result["path"] == str(blog.resolve() / "a.md")
 
 
-def test_query_verbose_shows_heading_once_above_body(
+def test_query_verbose_locates_the_hit_and_drops_the_breadcrumb(
     runner: CliRunner, search_env: Path, fake_embedder: _FakeEmbedder
 ) -> None:
     notes = search_env / "notes"
@@ -345,11 +345,55 @@ def test_query_verbose_shows_heading_once_above_body(
     result = _search(runner, "query", "anything", "-v")
     assert result.exit_code == EXIT_OK
     out = result.stdout
-    # The breadcrumb shows once, in the heading= line above the body - the
-    # chunker prepends it to the chunk text, so the body must not repeat it.
-    assert "heading=doc > Heading" in out
+    # The hit is located as path:line, so it can be opened where it starts.
+    assert f"path={notes.resolve() / 'doc.md'}:3" in out
+    # The breadcrumb is context for the embedder, not output: the chunker
+    # prepends it to the chunk text, so the body must not repeat it.
     assert "  | doc > Heading" not in out
     assert "  | bodytext" in out
+
+
+def test_query_json_carries_the_line(
+    runner: CliRunner, search_env: Path, fake_embedder: _FakeEmbedder
+) -> None:
+    notes = search_env / "notes"
+    notes.mkdir()
+    (notes / "doc.md").write_text(
+        "# Heading\n\nintro\n\n## Later\n\nbodytext\n", encoding="utf-8"
+    )
+    assert _search(runner, "index", str(notes)).exit_code == EXIT_OK
+
+    result = _search(runner, "query", "anything", "--json", "-k", "2")
+    assert result.exit_code == EXIT_OK
+    records = [json.loads(line) for line in result.stdout.splitlines()]
+    assert {record["line"] for record in records} == {3, 7}
+
+
+def test_query_verbose_tolerates_an_index_without_lines(
+    runner: CliRunner, search_env: Path, fake_embedder: _FakeEmbedder
+) -> None:
+    """Indexes written before line metadata existed still print their path."""
+    notes = search_env / "notes"
+    notes.mkdir()
+    (notes / "doc.md").write_text("# Heading\n\nbodytext\n", encoding="utf-8")
+    assert _search(runner, "index", str(notes)).exit_code == EXIT_OK
+
+    # Replace the indexed chunks with a row that carries no line metadata.
+    from arciv.search.store import Store
+
+    store = Store(search_env / "search-home" / "db", "microrag")
+    store.delete([cid for cids in store.ids_by_source().values() for cid in cids])
+    document = "doc > Heading\n\nbodytext"
+    store.upsert(
+        ids=["legacy"],
+        embeddings=fake_embedder.embed_documents([document]),
+        documents=[document],
+        metadatas=[{"source": "doc.md", "heading": "doc > Heading", "index": 0}],
+    )
+
+    result = _search(runner, "query", "anything", "-v")
+    assert result.exit_code == EXIT_OK
+    assert f"path={notes.resolve() / 'doc.md'}\n" in result.stdout
 
 
 def test_query_rejects_non_positive_limit(

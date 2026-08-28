@@ -6,10 +6,13 @@ to size by a chonkie Pipeline (RecursiveChunker with the default paragraph/
 sentence rules, then verbatim prefix overlap between adjacent chunks).
 
 Every chunk gets a bounded breadcrumb (filename, top heading, and the
-section's own heading) so context survives the vector store.
+section's own heading) so context survives the vector store, plus the 1-based
+line in the source file where its body starts, so a search hit can be opened
+at the right place.
 """
 
 import re
+from bisect import bisect_right
 from pathlib import Path
 from typing import cast
 
@@ -72,26 +75,43 @@ def chunk_markdown(text: str, source: Path) -> list[dict]:
         key=lambda segment: segment[1],
     )
 
-    sections: list[tuple[str, str]] = []
+    # Sections are (breadcrumb, body, offset): offset is where the body sits
+    # in the original text, the anchor each chunk's line is measured from.
+    sections: list[tuple[str, str, int]] = []
     heading_stack: list[tuple[int, str]] = []
-    for kind, _, segment_text in segments:
+    for kind, start, segment_text in segments:
         if kind == "prose":
-            sections.extend(_split_on_headings(segment_text, heading_stack, title))
+            sections.extend(
+                _split_on_headings(segment_text, start, heading_stack, title)
+            )
         else:
-            sections.append((_breadcrumb(title, heading_stack), segment_text))
+            sections.append(
+                (
+                    _breadcrumb(title, heading_stack),
+                    segment_text,
+                    _anchor(text, segment_text, start),
+                )
+            )
 
     # One pipeline run for the whole file: run() pays a fixed introspection
     # cost per call, so packing all sections at once beats a call per section.
-    bodies = [body.strip() for _, body in sections]
+    # Stripping shifts a body's start, so each offset moves with it.
+    bodies: list[str] = []
+    offsets: list[int] = []
+    for _, body, offset in sections:
+        lead = len(body) - len(body.lstrip())
+        bodies.append(body.strip())
+        offsets.append(offset + lead)
     # Pipeline.run returns list[Document] when given a list of texts; its type
     # is the broader Document | list[Document] union.
     docs: list[Document] = (
         cast("list[Document]", _PIPELINE.run(texts=bodies)) if bodies else []
     )
 
+    line_starts = _line_starts(text)
     chunks: list[dict] = []
-    for (breadcrumb, _), packed in zip(sections, docs, strict=True):
-        chunks.extend(_pack_section(packed, breadcrumb, source))
+    for (breadcrumb, _, _), packed, offset in zip(sections, docs, offsets, strict=True):
+        chunks.extend(_pack_section(packed, breadcrumb, source, offset, line_starts))
 
     for index, chunk in enumerate(chunks):
         chunk["metadata"]["index"] = index
@@ -130,18 +150,50 @@ def _has_alt(image: MarkdownImage) -> bool:
     return bool(alias) and alias != "base64_image" and alias != Path(image.content).name
 
 
+def _anchor(text: str, content: str, start: int) -> int:
+    """Return where a verbatim segment's content actually starts in the source.
+
+    MarkdownChef reports the position of the whole construct but hands back
+    only its payload: ``start`` points at the opening fence of a code block or
+    at the ``![`` of an image, while ``content`` is the code inside the fence
+    or the alt text. Locating the payload just past ``start`` recovers the
+    exact offset; when it is not found verbatim (a chef that normalized it),
+    the construct's own start is the honest fallback.
+    """
+    found = text.find(content, start)
+    return found if found != -1 else start
+
+
+def _line_starts(text: str) -> list[int]:
+    """Return the offset of every line start, for offset -> line lookups."""
+    starts = [0]
+    for match in re.finditer("\n", text):
+        starts.append(match.end())
+    return starts
+
+
+def _line_of(offset: int, line_starts: list[int]) -> int:
+    """Return the 1-based line number containing a character offset."""
+    return bisect_right(line_starts, offset)
+
+
 def _split_on_headings(
     segment_text: str,
+    segment_start: int,
     heading_stack: list[tuple[int, str]],
     title: str,
-) -> list[tuple[str, str]]:
-    """Split a prose segment into (breadcrumb, body) sections, updating the stack."""
+) -> list[tuple[str, str, int]]:
+    """Split a prose segment into (breadcrumb, body, offset) sections.
+
+    Offsets are absolute positions in the original text (``segment_start`` is
+    where this segment begins); the heading stack is updated in place.
+    """
     matches = list(HEADING_RE.finditer(segment_text))
-    sections: list[tuple[str, str]] = []
+    sections: list[tuple[str, str, int]] = []
 
     lead = segment_text[: matches[0].start()] if matches else segment_text
     if lead.strip():
-        sections.append((_breadcrumb(title, heading_stack), lead))
+        sections.append((_breadcrumb(title, heading_stack), lead, segment_start))
 
     for i, match in enumerate(matches):
         _update_heading_stack(
@@ -150,7 +202,13 @@ def _split_on_headings(
         end = matches[i + 1].start() if i + 1 < len(matches) else len(segment_text)
         body = segment_text[match.end() : end]
         if body.strip():
-            sections.append((_breadcrumb(title, heading_stack), body))
+            sections.append(
+                (
+                    _breadcrumb(title, heading_stack),
+                    body,
+                    segment_start + match.end(),
+                )
+            )
     return sections
 
 
@@ -169,6 +227,8 @@ def _pack_section(
     packed: Document,
     breadcrumb: str,
     source: Path,
+    offset: int,
+    line_starts: list[int],
 ) -> list[dict]:
     """Turn one packed section into chunk dicts with breadcrumb and metadata."""
     section_chunks = []
@@ -177,12 +237,17 @@ def _pack_section(
         if not piece_text:
             continue
         chunk_text = f"{breadcrumb}\n\n{piece_text}" if breadcrumb else piece_text
+        # start_index is the piece's own start within the section body, before
+        # the overlap refinery prefixed it with the tail of the previous chunk,
+        # so the line points at where this chunk's content begins.
+        lead = len(piece.text) - len(piece.text.lstrip())
         section_chunks.append(
             {
                 "text": chunk_text,
                 "metadata": {
                     "source": str(source),
                     "heading": breadcrumb,
+                    "line": _line_of(offset + piece.start_index + lead, line_starts),
                     "index": -1,
                 },
             }
