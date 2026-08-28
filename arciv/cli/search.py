@@ -340,8 +340,8 @@ def query(
 
     Plain output is one absolute path per line (deduplicated, best match
     first) so it pipes straight into ``arciv extract -f -``, ``cat``, or an
-    editor. ``-v`` prints ranked results with their text; ``--json`` emits
-    JSONL with every field.
+    editor. ``-v`` prints ranked results with their text, each located as
+    ``path:line``; ``--json`` emits JSONL with every field.
     """
     from arciv.search.collections import read_roots, source_path
     from arciv.search.store import Store
@@ -414,6 +414,7 @@ def query(
                     "collection": name,
                     "source": meta["source"],
                     "path": str(source_path(meta["source"], roots.get(name))),
+                    "line": meta.get("line"),
                     "heading": meta["heading"],
                     "text": doc,
                 }
@@ -424,8 +425,8 @@ def query(
                 emit()
             emit(f"[{rank}] confidence={_confidence(dist):.1f}%")
             emit(f"    collection={name}")
-            emit(f"    source={meta['source']}")
-            emit(f"    heading={meta['heading']}")
+            path = source_path(meta["source"], roots.get(name))
+            emit(f"    path={_located(path, meta.get('line'))}")
             emit()
             # Chunks are stored with their heading breadcrumb prepended to the
             # text; drop it from the body so the heading shows once, above.
@@ -524,6 +525,17 @@ def collections() -> None:
 def _confidence(distance: float) -> float:
     """Convert a cosine distance into a 0-100 confidence percentage, clamped at 0."""
     return max(0.0, (1.0 - distance) * 100.0)
+
+
+def _located(path: Path, line: int | None) -> str:
+    """Return a result's path, suffixed with ``:LINE`` when the index has one.
+
+    The chunker records the line each chunk starts on, so the verbose view
+    points at the passage instead of the file. Indexes written before that
+    metadata existed carry no line; they show the plain path until the next
+    ``arciv search refresh``.
+    """
+    return f"{path}:{line}" if line else str(path)
 
 
 def _strip_breadcrumb(doc: str, heading: str) -> str:

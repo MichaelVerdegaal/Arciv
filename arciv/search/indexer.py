@@ -1,11 +1,11 @@
 """Walk markdown files, chunk, embed, and upsert into the store.
 
-Chunk IDs are content-addressed (sha256 of path, index, and text), so a chunk
-that already exists in the store needs no work at all: re-indexing embeds only
-chunks whose IDs are new and deletes the ones that disappeared. Embedding runs
-over windows of FLUSH_CHUNKS new chunks pooled across files, so small files no
-longer produce under-filled inference batches and memory stays bounded no
-matter how large the corpus is.
+Chunk IDs are content-addressed (sha256 of path, index, start line, and
+text), so a chunk that already exists in the store needs no work at all:
+re-indexing embeds only chunks whose IDs are new and deletes the ones that
+disappeared. Embedding runs over windows of FLUSH_CHUNKS new chunks pooled
+across files, so small files no longer produce under-filled inference
+batches and memory stays bounded no matter how large the corpus is.
 """
 
 import hashlib
@@ -146,7 +146,10 @@ def _plan_file(
     relative = file_path.relative_to(root_path)
     existing_ids = set(existing_by_source.get(str(relative), ()))
     chunks = chunk_markdown(text, relative)
-    ids = [_chunk_id(relative, i, chunk["text"]) for i, chunk in enumerate(chunks)]
+    ids = [
+        _chunk_id(relative, i, chunk["metadata"]["line"], chunk["text"])
+        for i, chunk in enumerate(chunks)
+    ]
 
     new = [
         (chunk_id, chunk)
@@ -178,7 +181,12 @@ def _log_plan(plan: _FilePlan) -> None:
         )
 
 
-def _chunk_id(relative: Path, index: int, text: str) -> str:
-    """Return a stable SHA-256 ID for a chunk."""
-    key = f"{relative}:{index}:{text}"
+def _chunk_id(relative: Path, index: int, line: int, text: str) -> str:
+    """Return a stable SHA-256 ID for a chunk.
+
+    The start line is part of the key so that text which only moved (an
+    insertion higher up the file) is re-embedded rather than kept with a
+    stale line in its metadata.
+    """
+    key = f"{relative}:{index}:{line}:{text}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
