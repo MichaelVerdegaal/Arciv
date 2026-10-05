@@ -36,8 +36,8 @@ class Store:
             metadata=VECTOR_SPACE,
         )
 
-    @classmethod
-    def collection_names(cls, db_dir: Path) -> list[str]:
+    @staticmethod
+    def collection_names(db_dir: Path) -> list[str]:
         """Return the names of all collections in the store, sorted."""
         return sorted(c.name for c in _client(db_dir).list_collections())
 

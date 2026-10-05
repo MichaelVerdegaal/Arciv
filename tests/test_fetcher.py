@@ -11,7 +11,7 @@ import asyncio
 import pytest
 
 from arciv.core.db import Page, PageDatabase
-from arciv.core.fetch.fetcher import Fetcher
+from arciv.core.fetch.fetcher import Fetcher, format_fetch_error
 from arciv.core.urls import Action, Rule, slug_for_url
 
 
@@ -33,21 +33,21 @@ def _page(url: str, **overrides) -> Page:
 
 
 class TestFormatFetchError:
-    def test_dns_failure(self, fetcher):
+    def test_dns_failure(self):
         err = Exception("net::ERR_NAME_NOT_RESOLVED at https://nope.example")
-        assert fetcher._format_fetch_error(err) == "DNS resolution failed"
+        assert format_fetch_error(err) == "DNS resolution failed"
 
-    def test_connection_refused(self, fetcher):
+    def test_connection_refused(self):
         err = Exception("net::ERR_CONNECTION_REFUSED")
-        assert fetcher._format_fetch_error(err) == "connection refused"
+        assert format_fetch_error(err) == "connection refused"
 
-    def test_timeout(self, fetcher):
+    def test_timeout(self):
         err = Exception("Timeout 30000ms exceeded")
-        assert fetcher._format_fetch_error(err) == "timeout"
+        assert format_fetch_error(err) == "timeout"
 
-    def test_unknown_error_keeps_first_line_only(self, fetcher):
+    def test_unknown_error_keeps_first_line_only(self):
         err = Exception("something broke\nframe 1\nframe 2")
-        assert fetcher._format_fetch_error(err) == "something broke"
+        assert format_fetch_error(err) == "something broke"
 
 
 class TestIsTransient:

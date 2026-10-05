@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from .rules import Rule, apply_rules
-from .url_helpers import canonicalize, registered_domain, split_url
+from .url_helpers import canonicalize, domain_for_url
 
 # Non-content file extensions never worth fetching (the bytes aren't readable
 # material: media files, or data formats like .json/.xml). Matched
@@ -111,8 +111,7 @@ def evaluate_url(url: str, rules: Sequence[Rule] = ()) -> UrlVerdict:
     if guard_reason is not None:
         return UrlVerdict(None, "skipped", guard_reason, None)
 
-    domain = registered_domain(url) or split_url(url)[0]
-    result = apply_rules(url, host, domain, rules)
+    result = apply_rules(url, host, domain_for_url(url), rules)
     if result.url is None:
         return UrlVerdict(None, "skipped", result.reason, result.rule)
 

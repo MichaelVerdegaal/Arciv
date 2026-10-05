@@ -9,9 +9,10 @@ import re
 MAX_HTML_BYTES = 10 * 1024 * 1024  # 10 MB
 MIN_HTML_BYTES = 512
 
-# Titles that indicate a block/challenge page rather than real content
+# Titles that indicate a block/challenge page rather than real content. Group 1
+# is the whole title text (trailing dots included), for the rejection reason.
 _BLOCK_TITLE_RE = re.compile(
-    r"<title[^>]*>\s*("
+    r"<title[^>]*>\s*((?:"
     r"just a moment"
     r"|attention required"
     r"|access denied"
@@ -22,7 +23,7 @@ _BLOCK_TITLE_RE = re.compile(
     r"|security check"
     r"|bot verification"
     r"|error \d{3}"
-    r")\s*\.{0,3}\s*</title>",
+    r")(?:\s*\.{1,3})?)\s*</title>",
     re.IGNORECASE,
 )
 
@@ -61,12 +62,9 @@ def check_html(html: str, size: int | None = None) -> str | None:
     # The marker scans only need the document head: 3000/5000 chars is
     # comfortably past any real <title> and the inline challenge scripts,
     # without scanning megabytes of body.
-    if _BLOCK_TITLE_RE.search(html[:3000]):
-        title_match = re.search(
-            r"<title[^>]*>(.*?)</title>", html[:3000], re.IGNORECASE | re.DOTALL
-        )
-        title_text = title_match.group(1).strip() if title_match else "unknown"
-        return f"block page (title: '{title_text}')"
+    block_title = _BLOCK_TITLE_RE.search(html[:3000])
+    if block_title:
+        return f"block page (title: '{block_title.group(1)}')"
 
     # Check for Cloudflare / bot-detection markers
     head = html[:5000]

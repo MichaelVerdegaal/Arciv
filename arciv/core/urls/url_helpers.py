@@ -65,6 +65,13 @@ def registered_domain(url: str) -> str:
     return tldextract.extract(url).top_domain_under_public_suffix
 
 
+def domain_for_url(url: str) -> str:
+    """The domain a URL is filed under: its registered domain, or when
+    tldextract finds none (an IP address, ``localhost``), the host without
+    ``www.``."""
+    return registered_domain(url) or split_url(url)[0]
+
+
 def is_raw_text_url(url: str) -> bool:
     """Check if a URL points to a raw text file that should skip HTML conversion.
 

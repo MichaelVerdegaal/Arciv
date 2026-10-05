@@ -1,6 +1,7 @@
 from .rules import Action, Rule, load_rules
 from .url_helpers import (
     canonicalize,
+    domain_for_url,
     is_pdf_url,
     is_raw_text_url,
     registered_domain,
@@ -13,6 +14,7 @@ __all__ = [
     "Action",
     "Rule",
     "canonicalize",
+    "domain_for_url",
     "evaluate_url",
     "is_pdf_url",
     "is_raw_text_url",

@@ -26,14 +26,7 @@ from scrapling.fetchers import Fetcher as StaticFetcher
 
 from arciv.core.clock import utc_now_iso
 from arciv.core.db import Page, PageDatabase
-from arciv.core.urls import (
-    Rule,
-    is_pdf_url,
-    process_url,
-    registered_domain,
-    slug_for_url,
-    split_url,
-)
+from arciv.core.urls import Rule, domain_for_url, is_pdf_url, process_url, slug_for_url
 
 # Neutral mechanism defaults so a Fetcher is usable without settings (e.g.
 # in tests). The env-tunable values the CLI actually runs with live in
@@ -51,13 +44,25 @@ _TRANSIENT_ERRORS = (
 )
 
 
+def format_fetch_error(error: Exception) -> str:
+    """Format a fetch error into a concise reason string."""
+    error_msg = str(error).split("\n")[0]
+
+    if "net::ERR_NAME_NOT_RESOLVED" in error_msg:
+        return "DNS resolution failed"
+    if "net::ERR_CONNECTION_REFUSED" in error_msg:
+        return "connection refused"
+    if "Timeout" in error_msg:
+        return "timeout"
+    return error_msg
+
+
 class Fetcher:
     """Downloads web pages and archives the raw content on disk.
 
     HTML pages are written to ``saved/<slug>/page.html``, PDFs to
-    ``saved/<slug>/page.pdf``. Successful downloads are marked
-    ``fetched=1`` in the database; converting them to markdown is the
-    parse stage's job.
+    ``saved/<slug>/page.pdf``. Successful downloads get ``fetched_at`` set
+    in the database; converting them to markdown is the parse stage's job.
 
     Args:
         db: Database to store page records.
@@ -113,7 +118,7 @@ class Fetcher:
         the processed URL.
         """
         original_url = existing.original_url if existing else input_url
-        domain = registered_domain(processed_url) or split_url(processed_url)[0]
+        domain = domain_for_url(processed_url)
         slug = slug_for_url(processed_url, domain)
         return original_url, domain, slug
 
@@ -158,20 +163,6 @@ class Fetcher:
             fail_reason=fail_reason,
         )
         self.db.upsert(page)
-
-    @staticmethod
-    def _format_fetch_error(error: Exception) -> str:
-        """Format a fetch error into a concise reason string."""
-        error_msg = str(error).split("\n")[0]
-
-        if "net::ERR_NAME_NOT_RESOLVED" in error_msg:
-            return "DNS resolution failed"
-        elif "net::ERR_CONNECTION_REFUSED" in error_msg:
-            return "connection refused"
-        elif "Timeout" in error_msg:
-            return "timeout"
-        else:
-            return error_msg
 
     @staticmethod
     def _is_transient(reason: str) -> bool:
@@ -416,7 +407,7 @@ class Fetcher:
                     # must not be stored with an empty reason.
                     last_reason = "browser returned no content"
             except Exception as e:
-                last_reason = self._format_fetch_error(e)
+                last_reason = format_fetch_error(e)
 
                 # Browser triggered a file download, so try the PDF path
                 if "Download is starting" in last_reason:
