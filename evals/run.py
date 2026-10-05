@@ -1,4 +1,4 @@
-"""Retrieval-quality evaluation for MicroRag.
+"""Retrieval-quality evaluation for `arciv search`.
 
 Indexes the fixture corpus in evals/corpus through the real pipeline
 (chunk -> embed -> store) into a throwaway database, runs the gold queries

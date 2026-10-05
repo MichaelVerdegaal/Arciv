@@ -157,13 +157,13 @@ class TestParseHtml:
     def test_returns_none_on_failure(self):
         assert parse_html("") is None
 
-    def test_clean_flag_is_applied(self):
-        # Inline code markers should be stripped when clean=True.
+    def test_markdown_is_cleaned(self):
+        # Inline code markers should be stripped from the converted markdown.
         html = (
             "<html><body><article>"
             "<p>Use the `config` flag " + ("padding " * 60) + "</p>"
             "</article></body></html>"
         )
-        cleaned = parse_html(html, clean=True)
+        cleaned = parse_html(html)
         assert cleaned is not None
         assert "`config`" not in cleaned.md_content

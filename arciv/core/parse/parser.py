@@ -44,22 +44,14 @@ def count_words(text: str) -> int:
     return len(words)
 
 
-def html_to_markdown(
-    html_content: str,
-    include_tables: bool = True,
-    include_links: bool = False,
-    deduplicate: bool = True,
-    favor_precision: bool = True,
-    strip_code: bool = True,
-) -> str | None:
+def html_to_markdown(html_content: str, strip_code: bool = True) -> str | None:
     """Convert HTML content to Markdown using trafilatura.
+
+    Tables are kept, links are dropped, and duplicate content is removed, with
+    extraction tuned for precision over recall.
 
     Args:
         html_content: Raw HTML string to convert.
-        include_tables: Whether to preserve tables in output.
-        include_links: Whether to preserve hyperlinks in output.
-        deduplicate: Whether to remove duplicate content.
-        favor_precision: Whether to favor precision over recall in extraction.
         strip_code: If true, removes <pre> and <code> elements before extraction.
 
     Returns:
@@ -77,10 +69,10 @@ def html_to_markdown(
     return extract(
         html_content,
         output_format="markdown",
-        include_tables=include_tables,
-        include_links=include_links,
-        deduplicate=deduplicate,
-        favor_precision=favor_precision,
+        include_tables=True,
+        include_links=False,
+        deduplicate=True,
+        favor_precision=True,
         prune_xpath=prune_xpath,
     )
 
@@ -120,15 +112,14 @@ def _title_from_tag(html_content: str) -> str | None:
     return None
 
 
-def parse_html(html_content: str, clean: bool = True) -> ConversionResult | None:
-    """Convert HTML to markdown and extract metadata.
+def parse_html(html_content: str) -> ConversionResult | None:
+    """Convert HTML to cleaned markdown and extract metadata.
 
     This is the main entry point for parsing scraped HTML into structured
     markdown content with metadata.
 
     Args:
         html_content: Raw HTML string.
-        clean: Whether to apply markdown cleaning.
 
     Returns:
         Conversion result with markdown content, word count, and metadata.
@@ -138,8 +129,7 @@ def parse_html(html_content: str, clean: bool = True) -> ConversionResult | None
     if md_content is None:
         return None
 
-    if clean:
-        md_content = clean_markdown(md_content)
+    md_content = clean_markdown(md_content)
     title, author = extract_metadata(html_content)
     return ConversionResult(
         md_content=md_content,

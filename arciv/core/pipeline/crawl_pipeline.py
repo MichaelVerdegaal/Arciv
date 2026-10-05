@@ -18,15 +18,10 @@ from scrapling.parser import Selector
 
 from arciv.core.db import Page, PageDatabase
 from arciv.core.index import extract_links, register_urls
-from arciv.core.urls import load_rules, process_url, registered_domain, split_url
+from arciv.core.urls import domain_for_url, load_rules, process_url
 from arciv.settings import SAVED_DIR, USER_RULES_PATH
 
 from .archive_pipeline import ArchiveResult, archive_urls
-
-
-def _crawl_domain(url: str) -> str:
-    """The domain a URL counts as for the same-domain restriction."""
-    return registered_domain(url) or split_url(url)[0]
 
 
 def _saved_page_links(page: Page) -> list[str]:
@@ -60,7 +55,7 @@ def crawl_urls(
     Returns one ArchiveResult aggregated across all levels.
     """
     rules = load_rules(USER_RULES_PATH)
-    allowed_domains = {_crawl_domain(url) for url in urls}
+    allowed_domains = {domain_for_url(url) for url in urls}
     seen: set[str] = set(urls)
     frontier = list(urls)
     all_urls: list[str] = []
@@ -87,7 +82,7 @@ def crawl_urls(
                 processed, _ = process_url(link, rules)
                 if processed is None or processed in seen:
                     continue
-                if _crawl_domain(processed) not in allowed_domains:
+                if domain_for_url(processed) not in allowed_domains:
                     continue
                 seen.add(processed)
                 next_frontier.append(processed)

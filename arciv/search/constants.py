@@ -33,5 +33,3 @@ EMBEDDING_DIM: int = 768
 # no --collection is given, so single-source setups never see the concept.
 DEFAULT_COLLECTION: str = "microrag"
 VECTOR_SPACE: dict[str, str] = {"hnsw:space": "cosine"}
-
-# Exit codes live with the rest of the CLI's in arciv.cli.output.

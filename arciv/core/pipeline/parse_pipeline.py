@@ -160,7 +160,7 @@ def _parse_html(
         _reject(db, page, block_reason)
         return None
 
-    conversion = parse_html(html, clean=True)
+    conversion = parse_html(html)
     if conversion is None:
         _reject(db, page, "extraction failed")
         return None

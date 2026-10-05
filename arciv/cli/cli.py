@@ -41,7 +41,7 @@ from arciv.core.pipeline import (
     parse_pending,
     report,
 )
-from arciv.core.urls import evaluate_url, is_pdf_url, load_rules, process_url
+from arciv.core.urls import Rule, evaluate_url, is_pdf_url, load_rules, process_url
 from arciv.settings import (
     DATA_DIR,
     DB_PATH,
@@ -171,6 +171,9 @@ _PRUNE_DESCRIPTIONS: dict[PruneMode, str] = {
 }
 
 
+_NO_SOURCES_HINT = "No sources registered. Add one with: arciv source add <dir> <name>"
+
+
 def _fail(message: str, code: int = 1) -> NoReturn:
     """Print an error to stderr and exit, no traceback.
 
@@ -181,6 +184,30 @@ def _fail(message: str, code: int = 1) -> NoReturn:
     """
     typer.echo(f"Error: {message}", err=True)
     raise typer.Exit(code)
+
+
+def _require_name_xor_all(name: str | None, all_sources: bool) -> str | None:
+    """Check the NAME / --all pair: exactly one must be given.
+
+    Returns the source name, or None when --all was requested.
+    """
+    if (name is None) == (not all_sources):
+        _fail("Provide a source name or --all, not both.", code=EXIT_USAGE)
+    return name
+
+
+def _delete_saved_folders(slugs: list[str]) -> int:
+    """Delete the ``saved/<slug>/`` folder of each slug; returns how many existed."""
+    removed = 0
+    for slug in slugs:
+        # A blank slug would resolve to SAVED_DIR itself; never recurse into it
+        if not slug:
+            continue
+        folder = SAVED_DIR / slug
+        if folder.is_dir():
+            shutil.rmtree(folder)
+            removed += 1
+    return removed
 
 
 def _arciv_version() -> str:
@@ -362,12 +389,7 @@ def get(
             # A refetch resets parsed_at, so refetched pages re-parse here too
             result = ArchiveResult(urls=urls, fetched=fetched, parsed=parse_pending(db))
         if json_output():
-            emit_pipeline_summary(
-                indexed=len(result.urls),
-                fetched=len(result.fetched),
-                parsed=result.parsed,
-                failed=_count_failed(db, result.urls),
-            )
+            _emit_archive_summary(db, result)
         else:
             report(db, len(result.fetched), result.urls)
 
@@ -495,15 +517,15 @@ def extract(
     all_urls: list[str] = []
     any_failed = False
     for source in sources:
-        if source == "-":
-            text = sys.stdin.read()
-        else:
+        if isinstance(source, Path):
             try:
-                text = read_note(source)  # type: ignore[arg-type]
+                text = read_note(source)
             except (OSError, UnicodeDecodeError) as e:
                 logger.warning(f"Cannot read {source}: {e}")
                 any_failed = True
                 continue
+        else:
+            text = sys.stdin.read()
         all_urls.extend(extract_urls(text))
 
     # Dedupe preserving first-occurrence order, like the index stage does.
@@ -558,9 +580,7 @@ def _list_sources() -> None:
         return
     if not registered:
         # A hint, not data: keep it off stdout so pipes stay clean
-        logger.info(
-            "No sources registered. Add one with: arciv source add <dir> <name>"
-        )
+        logger.info(_NO_SOURCES_HINT)
         return
     for source in registered:
         emit(f"{source.name}\t{source.path}")
@@ -643,16 +663,13 @@ def source_update(
     then downloads and parses whatever is not fetched/parsed yet, in one batch.
     Provide a source name or --all, not both.
     """
-    if (name is None) == (not all_sources):
-        _fail("Provide a source name or --all, not both.", code=EXIT_USAGE)
+    selected = _require_name_xor_all(name, all_sources)
 
     with PageDatabase(DB_PATH) as db:
-        if all_sources:
+        if selected is None:
             sources_list = db.list_sources()
             if not sources_list:
-                logger.info(
-                    "No sources registered. Add one with: arciv source add <dir> <name>"
-                )
+                logger.info(_NO_SOURCES_HINT)
                 return
             # One batch across every source beats a browser launch per source.
             result = archive_urls(db, index_all(db))
@@ -664,16 +681,14 @@ def source_update(
                     f"indexed, {len(result.fetched)} fetched, {result.parsed} parsed"
                 )
             return
-        if name is None:  # unreachable after the XOR check; narrows the type
-            _fail("Provide a source name.", code=EXIT_USAGE)
         try:
-            result = archive_source(db, name)
+            result = archive_source(db, selected)
         except KeyError as e:
             _fail(str(e.args[0]), code=EXIT_NOINPUT)
         if json_output():
             _emit_archive_summary(db, result)
         else:
-            _report_archive(name, result)
+            _report_archive(selected, result)
 
 
 @source_app.command(name="remove")
@@ -716,21 +731,11 @@ def source_remove(
         slugs = db.prune_source_pages(name) if remove_files else []
         db.remove_source(name)
 
-    removed_folders = 0
-    for slug in slugs:
-        # A blank slug would resolve to SAVED_DIR itself; never recurse into it
-        if not slug:
-            continue
-        folder = SAVED_DIR / slug
-        if folder.is_dir():
-            shutil.rmtree(folder)
-            removed_folders += 1
-
     logger.info(f"Removed source '{name}'")
     if remove_files:
         emit(
             f"Removed {len(slugs)} page(s) linked only by '{name}'; "
-            f"deleted {removed_folders} saved folder(s)."
+            f"deleted {_delete_saved_folders(slugs)} saved folder(s)."
         )
 
 
@@ -745,17 +750,14 @@ def index(
     ] = False,
 ) -> None:
     """Index stage: extract links from a registered SOURCE (or --all)."""
-    if (source is None) == (not all_sources):
-        _fail("Provide a source name or --all, not both.", code=EXIT_USAGE)
+    selected = _require_name_xor_all(source, all_sources)
 
     with PageDatabase(DB_PATH) as db:
-        if all_sources:
+        if selected is None:
             urls = index_all(db)
         else:
-            if source is None:  # unreachable after the XOR check; narrows type
-                _fail("Provide a source name.", code=EXIT_USAGE)
             try:
-                urls = index_source(db, source)
+                urls = index_source(db, selected)
             except KeyError as e:
                 _fail(str(e.args[0]), code=EXIT_NOINPUT)
     logger.info(f"Indexed {len(urls)} unique URLs")
@@ -856,16 +858,7 @@ def prune(
         # (not the row list) is what the user confirms.
         deleted = db.prune_pages(mode.value)
 
-    removed_folders = 0
-    for slug in deleted:
-        # A blank slug would resolve to SAVED_DIR itself; never recurse into it
-        if not slug:
-            continue
-        folder = SAVED_DIR / slug
-        if folder.is_dir():
-            shutil.rmtree(folder)
-            removed_folders += 1
-
+    removed_folders = _delete_saved_folders(deleted)
     emit(f"Pruned {len(deleted)} page(s); removed {removed_folders} saved folder(s).")
 
 
@@ -1047,7 +1040,7 @@ def db_remove(
         emit(f"Removed archived files under {SAVED_DIR}")
 
 
-def _describe_actions(rule) -> str:
+def _describe_actions(rule: Rule) -> str:
     """One-line summary of a rule's actions for ``rules list``."""
     parts: list[str] = []
     for action in rule.actions:

@@ -14,13 +14,7 @@ from loguru import logger
 from arciv.core.clock import utc_now_iso
 from arciv.core.db import PageDatabase
 from arciv.core.notes import find_notes, read_note
-from arciv.core.urls import (
-    load_rules,
-    process_url,
-    registered_domain,
-    slug_for_url,
-    split_url,
-)
+from arciv.core.urls import domain_for_url, load_rules, process_url, slug_for_url
 from arciv.settings import USER_RULES_PATH
 
 from .links import extract_urls
@@ -28,7 +22,7 @@ from .links import extract_urls
 
 def _page_entry(processed_url: str, original_url: str) -> tuple[str, str, str, str]:
     """Build the (url, original_url, domain, slug) tuple for ensure_pages."""
-    domain = registered_domain(processed_url) or split_url(processed_url)[0]
+    domain = domain_for_url(processed_url)
     return (processed_url, original_url, domain, slug_for_url(processed_url, domain))
 
 

@@ -11,7 +11,7 @@ from scrapling.fetchers import AsyncStealthySession
 
 from arciv.core.index import extract_links
 
-from .fetcher import TIMEOUT_MS, Fetcher
+from .fetcher import TIMEOUT_MS, format_fetch_error
 
 
 class LinkFetchError(Exception):
@@ -39,7 +39,7 @@ async def _fetch_links_async(url: str, page_timeout: int) -> list[str]:
         ) as session:
             response = await session.fetch(url)
     except Exception as e:
-        raise LinkFetchError(Fetcher._format_fetch_error(e)) from e
+        raise LinkFetchError(format_fetch_error(e)) from e
     if response.html_content is None:
         raise LinkFetchError("browser returned no content")
     return extract_links(response)

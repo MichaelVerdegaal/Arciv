@@ -162,7 +162,7 @@ def index(
     ] = False,
 ) -> None:
     """Index a directory of markdown files into a collection."""
-    from arciv.search.collections import COLLECTION_NAME_RE, read_roots, write_root
+    from arciv.search.collections import read_roots, write_root
     from arciv.search.indexer import index_directory
     from arciv.search.store import Store
 
@@ -170,12 +170,7 @@ def index(
         logger.error(f"Path does not exist: {path}")
         raise typer.Exit(EXIT_NOINPUT)
 
-    if not COLLECTION_NAME_RE.fullmatch(collection):
-        logger.error(
-            f"Invalid collection name {collection!r}: use 3-512 characters "
-            "[a-zA-Z0-9._-], starting and ending with a letter or digit."
-        )
-        raise typer.Exit(EXIT_USAGE)
+    _require_valid_collection_name(collection)
 
     # Sources are stored root-relative, so mixing roots in one collection can
     # silently collide (and confuses pruning). Pin each collection to the
@@ -191,9 +186,7 @@ def index(
         )
         raise typer.Exit(EXIT_USAGE)
 
-    embedder = _load_embedder()
-    if embedder is None:
-        raise typer.Exit(EXIT_NOINPUT)
+    embedder = _require_embedder()
 
     store = Store(DEFAULT_DB_DIR, collection)
     files, chunks, pruned = index_directory(path, embedder, store, prune=not no_prune)
@@ -239,29 +232,16 @@ def refresh(
     Only whole collections are refreshed; the incremental chunk diff means
     unchanged files cost nothing.
     """
-    from arciv.search.collections import COLLECTION_NAME_RE, read_roots
+    from arciv.search.collections import read_roots
     from arciv.search.indexer import index_directory
     from arciv.search.store import Store
 
-    if not DEFAULT_DB_DIR.exists():
-        logger.error(
-            f"No index found at {DEFAULT_DB_DIR.resolve()}. "
-            "Run: arciv search index <path>"
-        )
-        raise typer.Exit(EXIT_NOINPUT)
+    _require_index_dir()
 
     names = Store.collection_names(DEFAULT_DB_DIR)
     if collection is not None:
-        if not COLLECTION_NAME_RE.fullmatch(collection):
-            logger.error(
-                f"Invalid collection name {collection!r}: use 3-512 characters "
-                "[a-zA-Z0-9._-], starting and ending with a letter or digit."
-            )
-            raise typer.Exit(EXIT_USAGE)
-        if collection not in names:
-            known = ", ".join(names) or "none"
-            logger.error(f"Unknown collection {collection!r} (known: {known}).")
-            raise typer.Exit(EXIT_USAGE)
+        _require_valid_collection_name(collection)
+        _require_known_collection(collection, names)
         names = [collection]
 
     if not names:
@@ -291,9 +271,7 @@ def refresh(
         logger.warning("Nothing to refresh.")
         raise typer.Exit()
 
-    embedder = _load_embedder()
-    if embedder is None:
-        raise typer.Exit(EXIT_NOINPUT)
+    embedder = _require_embedder()
 
     for name, root_path in targets:
         store = Store(DEFAULT_DB_DIR, name)
@@ -362,24 +340,14 @@ def query(
         logger.error(f"-k/--limit must be at least 1, got {limit}.")
         raise typer.Exit(EXIT_USAGE)
 
-    if not DEFAULT_DB_DIR.exists():
-        logger.error(
-            f"No index found at {DEFAULT_DB_DIR.resolve()}. "
-            "Run: arciv search index <path>"
-        )
-        raise typer.Exit(EXIT_NOINPUT)
+    _require_index_dir()
 
     names = Store.collection_names(DEFAULT_DB_DIR)
     if collection is not None:
-        if collection not in names:
-            known = ", ".join(names) or "none"
-            logger.error(f"Unknown collection {collection!r} (known: {known}).")
-            raise typer.Exit(EXIT_USAGE)
+        _require_known_collection(collection, names)
         names = [collection]
 
-    embedder = _load_embedder()
-    if embedder is None:
-        raise typer.Exit(EXIT_NOINPUT)
+    embedder = _require_embedder()
 
     stores = {name: Store(DEFAULT_DB_DIR, name) for name in names}
     counts = {name: store.count() for name, store in stores.items()}
@@ -550,6 +518,44 @@ def _strip_breadcrumb(doc: str, heading: str) -> str:
     if heading and doc.startswith(prefix):
         return doc[len(prefix) :]
     return doc
+
+
+def _require_index_dir() -> None:
+    """Exit with a hint when nothing has been indexed yet."""
+    if not DEFAULT_DB_DIR.exists():
+        logger.error(
+            f"No index found at {DEFAULT_DB_DIR.resolve()}. "
+            "Run: arciv search index <path>"
+        )
+        raise typer.Exit(EXIT_NOINPUT)
+
+
+def _require_valid_collection_name(collection: str) -> None:
+    """Exit with a usage error when ``collection`` breaks Chroma's naming rule."""
+    from arciv.search.collections import COLLECTION_NAME_RE
+
+    if not COLLECTION_NAME_RE.fullmatch(collection):
+        logger.error(
+            f"Invalid collection name {collection!r}: use 3-512 characters "
+            "[a-zA-Z0-9._-], starting and ending with a letter or digit."
+        )
+        raise typer.Exit(EXIT_USAGE)
+
+
+def _require_known_collection(collection: str, known_names: list[str]) -> None:
+    """Exit with a usage error, listing the known names, for an unknown collection."""
+    if collection not in known_names:
+        known = ", ".join(known_names) or "none"
+        logger.error(f"Unknown collection {collection!r} (known: {known}).")
+        raise typer.Exit(EXIT_USAGE)
+
+
+def _require_embedder() -> "OnnxEmbedder":
+    """Load the embedder, or exit with the hint ``_load_embedder`` logged."""
+    embedder = _load_embedder()
+    if embedder is None:
+        raise typer.Exit(EXIT_NOINPUT)
+    return embedder
 
 
 def _load_embedder() -> "OnnxEmbedder | None":

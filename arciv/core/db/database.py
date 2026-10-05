@@ -72,7 +72,7 @@ ON CONFLICT(url) DO UPDATE SET
 # link); "all" is the wipe. Fixed strings, never built from user input, so they
 # are safe to interpolate into the prune statements.
 _PRUNE_PREDICATES: dict[str, str] = {
-    "missing": ("fail_reason IS NOT NULL AND url NOT IN (SELECT url FROM links)"),
+    "missing": "fail_reason IS NOT NULL AND url NOT IN (SELECT url FROM links)",
     "failed": "fail_reason IS NOT NULL",
     "all": "1 = 1",
 }
@@ -128,13 +128,13 @@ class PageDatabase:
     def _ensure_unique_slug_index(self) -> None:
         """Enforce one page per slug, with an actionable error on collision.
 
-        The slug names the ``saved/<slug>/`` folder, so it must be unique; a
-        unique index also backfills
-        the guarantee onto databases created before it, since this runs on every
-        open. Created here rather than in ``_SCHEMA`` so that if existing rows
-        already share a slug (a hash collision, or a legacy blank slug) the
-        operator gets a clear message naming the duplicates instead of a bare
-        ``IntegrityError`` that would leave the database un-openable.
+        The slug names the ``saved/<slug>/`` folder, so it must be unique. The
+        unique index also backfills that guarantee onto databases created
+        before it, since this runs on every open. Created here rather than in
+        ``_SCHEMA`` so that if existing rows already share a slug (a hash
+        collision, or a legacy blank slug) the operator gets a clear message
+        naming the duplicates instead of a bare ``IntegrityError`` that would
+        leave the database un-openable.
         """
         try:
             self._conn.execute(
@@ -212,6 +212,11 @@ class PageDatabase:
             fetched_at=row["fetched_at"],
             parsed_at=row["parsed_at"],
         )
+
+    @staticmethod
+    def _row_to_source(row: sqlite3.Row) -> Source:
+        """Convert a database row to a Source object."""
+        return Source(name=row["name"], path=row["path"], added_at=row["added_at"])
 
     # -- page CRUD --
 
@@ -310,17 +315,17 @@ class PageDatabase:
         return [row["url"] for row in rows]
 
     def get_unfetched_urls(self) -> list[str]:
-        """URLs of all pending pages (see get_unfetched), URLs only."""
+        """URLs of all pending pages (no fetched_at, no fail_reason)."""
         return self._urls("fetched_at IS NULL AND fail_reason IS NULL")
 
     def get_unparsed_urls(self) -> list[str]:
-        """URLs of pages awaiting parse (see get_unparsed), URLs only."""
+        """URLs of pages awaiting parse; the URL-only form of get_unparsed."""
         return self._urls(
             "fetched_at IS NOT NULL AND parsed_at IS NULL AND fail_reason IS NULL"
         )
 
     def get_fetched_urls(self) -> list[str]:
-        """URLs of all fetched pages (see get_fetched), URLs only."""
+        """URLs of all fetched pages; the URL-only form of get_fetched."""
         return self._urls("fetched_at IS NOT NULL")
 
     def get_all_urls(self) -> list[str]:
@@ -569,14 +574,9 @@ class PageDatabase:
         row = self._conn.execute(
             "SELECT * FROM sources WHERE name = ?", (name,)
         ).fetchone()
-        if row is None:
-            return None
-        return Source(name=row["name"], path=row["path"], added_at=row["added_at"])
+        return self._row_to_source(row) if row else None
 
     def list_sources(self) -> list[Source]:
         """List all registered sources, ordered by name."""
         rows = self._conn.execute("SELECT * FROM sources ORDER BY name").fetchall()
-        return [
-            Source(name=row["name"], path=row["path"], added_at=row["added_at"])
-            for row in rows
-        ]
+        return [self._row_to_source(row) for row in rows]
